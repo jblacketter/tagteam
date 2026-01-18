@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-handoff"
+version = "0.1.0"
+description = "A collaboration framework for Claude (Lead) and Codex (Reviewer) workflows"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+[project.scripts]
+ai-handoff-setup = "ai_handoff.setup:main"
+
+[project.urls]
+Homepage = "https://github.com/yourusername/ai-handoff"
+Documentation = "https://github.com/yourusername/ai-handoff#readme"
+Repository = "https://github.com/yourusername/ai-handoff"
+
+[tool.setuptools]
+packages = ["ai_handoff"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+ai_handoff = [
+    ".claude/skills/*.md",
+    "templates/*.md",
+    "checklists/*.md",
+    "docs/*.md",
+]
