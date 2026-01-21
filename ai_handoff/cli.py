@@ -39,9 +39,9 @@ Tell your AI agent:
 Replace {agent_name} with the actual agent name (e.g., "{lead_name}" or "{reviewer_name}").
 
 Workflow:
-  1. Lead creates phase plans (/plan create [phase])
-  2. Lead creates handoffs for review (/handoff plan [phase])
-  3. Reviewer reviews and provides feedback (/review plan [phase])
+  1. Lead creates phase plans (/handoff-plan create [phase])
+  2. Lead creates handoffs for review (/handoff-handoff plan [phase])
+  3. Reviewer reviews and provides feedback (/handoff-review plan [phase])
   4. Lead addresses feedback or proceeds to implementation
   5. Repeat for implementation review
 """
