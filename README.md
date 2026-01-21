@@ -14,20 +14,15 @@ Configure your agents via `ai-handoff.yaml` - use any AI combination (Claude + C
 
 ## Installation
 
-### Using pip (recommended)
+Install from GitHub:
 
 ```bash
-pip install ai-handoff
-
-# In your project directory:
-python -m ai_handoff setup .
-python -m ai_handoff init
+pip install git+https://github.com/jblacketter/ai-handoff.git
 ```
 
-### As a Git Submodule
+Then in your project directory:
 
 ```bash
-git submodule add <repo-url> .ai-handoff
 python -m ai_handoff setup .
 python -m ai_handoff init
 ```
