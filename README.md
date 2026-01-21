@@ -85,6 +85,7 @@ Replace `[agent name]` with the actual agent name (e.g., "claude" or "codex").
 | `/handoff-decide` | Log decisions with rationale | Both |
 | `/handoff-escalate` | Escalate disagreements to arbiter | Both |
 | `/handoff-sync` | Generate sync summaries for sessions | Both |
+| `/handoff-cycle` | Automated review cycles (reduces copy-paste) | Both |
 
 ## Workflow
 
@@ -107,6 +108,22 @@ Completion:
   /handoff-phase complete [phase]
   Start next phase...
 ```
+
+### Automated Review Cycle (Alternative)
+
+Use `/handoff-cycle` to reduce manual copy-paste during multi-round reviews:
+
+```
+Lead: /handoff-cycle start [phase] plan
+  ↓
+Reviewer: /handoff-cycle [phase]  → APPROVE or REQUEST_CHANGES
+  ↓
+Lead: /handoff-cycle [phase]      → address feedback
+  ↓
+(repeat until approved or round 5 escalation)
+```
+
+Both agents work from one file. Auto-escalates to human after 5 rounds.
 
 ## Configuration
 

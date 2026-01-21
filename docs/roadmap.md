@@ -18,14 +18,23 @@ AI Handoff Framework - A collaboration framework enabling structured, multi-phas
   - Skills updated to read config at runtime
   - Getting started documentation
 
-### Phase 2: Template Variable Substitution
+### Phase 2: Review Cycle Automation
+- **Status:** Complete
+- **Description:** Automate the back-and-forth review process with a single cycle document
+- **Key Deliverables:**
+  - `/handoff-cycle` skill for automated review cycles
+  - Single cycle document format with status tracking
+  - Auto-escalation after 5 rounds
+  - Human input pause/resume capability
+
+### Phase 3: Template Variable Substitution
 - **Status:** Not Started
 - **Description:** Templates automatically use configured agent names
 - **Key Deliverables:**
   - Variable substitution in templates ({{lead}}, {{reviewer}})
   - Generated docs reflect config
 
-### Phase 3: Migration & Advanced Features
+### Phase 4: Migration & Advanced Features
 - **Status:** Not Started
 - **Description:** Migration path for existing users, multi-agent support
 - **Key Deliverables:**
@@ -37,6 +46,6 @@ AI Handoff Framework - A collaboration framework enabling structured, multi-phas
 See `docs/decision_log.md`
 
 ## Getting Started
-1. Use `/phase` to check current phase
-2. Use `/plan create [phase]` to start planning
-3. Use `/status` for project overview
+1. Use `/handoff-phase` to check current phase
+2. Use `/handoff-plan create [phase]` to start planning
+3. Use `/handoff-status` for project overview

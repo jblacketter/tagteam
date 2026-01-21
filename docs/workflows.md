@@ -86,6 +86,7 @@ Each phase follows this pattern:
 | `/handoff-decide` | Log decisions | Both |
 | `/handoff-escalate` | Escalate to human | Both |
 | `/handoff-sync` | Generate sync summary for sessions | Both |
+| `/handoff-cycle` | Automated review cycles (reduces copy-paste) | Both |
 
 ## Handoff Process
 
@@ -152,3 +153,67 @@ When switching between lead and reviewer:
 /handoff-implement complete [phase]
 /handoff-handoff impl [phase]
 ```
+
+## Automated Review Cycle (Alternative)
+
+Use `/handoff-cycle` to reduce manual copy-paste during multi-round reviews. Instead of creating separate handoff/feedback files each round, both agents work from a single cycle document.
+
+### Cycle Workflow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    AUTOMATED REVIEW CYCLE                       │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│   Lead: /handoff-cycle start [phase] plan                       │
+│      │                                                          │
+│      ▼                                                          │
+│   (Human switches to reviewer terminal)                         │
+│      │                                                          │
+│      ▼                                                          │
+│   Reviewer: /handoff-cycle [phase]                              │
+│      │                                                          │
+│      ├── APPROVE ────────────────────────────────────────►      │
+│      │                                                          │
+│      └── REQUEST_CHANGES                                        │
+│              │                                                  │
+│              ▼                                                  │
+│      (Human switches to lead terminal)                          │
+│              │                                                  │
+│              ▼                                                  │
+│      Lead: /handoff-cycle [phase]  ─► address feedback          │
+│              │                                                  │
+│              └──► (repeat until approved or round 5)            │
+│                                                                 │
+│   Round 5 + REQUEST_CHANGES ─► Auto-escalate to human           │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Cycle Commands
+
+| Command | Description |
+|---------|-------------|
+| `/handoff-cycle start [phase] plan` | Start a plan review cycle |
+| `/handoff-cycle start [phase] impl` | Start an implementation review cycle |
+| `/handoff-cycle [phase]` | Continue (auto-detects your role and turn) |
+| `/handoff-cycle status [phase]` | View current status |
+| `/handoff-cycle abort [phase]` | Cancel with a reason |
+
+### Reviewer Actions
+
+- **APPROVE**: Accept the submission, end the cycle
+- **REQUEST_CHANGES**: Provide feedback, continue to next round
+- **NEED_HUMAN**: Pause the cycle for human input
+- **ABORT**: Cancel the cycle
+
+### When to Use Cycle vs Manual
+
+**Use `/handoff-cycle` when:**
+- Expecting multiple review rounds
+- Want to reduce file creation overhead
+- Prefer one command per turn
+
+**Use manual handoff/review when:**
+- Simple one-round reviews
+- Need detailed structured feedback
+- Prefer separate files for each interaction
