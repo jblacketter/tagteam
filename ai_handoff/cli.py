@@ -33,10 +33,7 @@ Getting Started
 ===============
 Tell your AI agent:
 
-  "I am {agent_name}. Read ai-handoff.yaml to confirm my role,
-   then read .claude/skills/ to understand the workflow."
-
-Replace {agent_name} with the actual agent name (e.g., "{lead_name}" or "{reviewer_name}").
+  "Read ai-handoff.yaml to see your role, then read .claude/skills/ for the workflow."
 
 Workflow:
   1. Lead creates phase plans (/handoff-plan create [phase])
@@ -174,11 +171,7 @@ def init_command() -> int:
     print(f"  Lead: {lead_name}")
     print(f"  Reviewer: {reviewer_name}")
     print()
-    print(GETTING_STARTED.format(
-        agent_name="{agent_name}",
-        lead_name=lead_name,
-        reviewer_name=reviewer_name
-    ))
+    print(GETTING_STARTED)
 
     return 0
 

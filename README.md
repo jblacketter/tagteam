@@ -59,11 +59,8 @@ Agent 2 role (lead/reviewer): reviewer
 Tell your AI agent:
 
 ```
-I am [agent name]. Read ai-handoff.yaml to confirm my role,
-then read .claude/skills/ to understand the workflow.
+Read ai-handoff.yaml to see your role, then read .claude/skills/ for the workflow.
 ```
-
-Replace `[agent name]` with the actual agent name (e.g., "claude" or "codex").
 
 ### 3. Begin Working
 
