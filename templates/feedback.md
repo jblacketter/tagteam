@@ -1,6 +1,6 @@
 # Feedback: [Phase Name] - [Plan/Implementation] Review
 
-**Reviewer:** Codex
+**Reviewer:** [Reviewer agent name]
 **Date:** [YYYY-MM-DD]
 **Handoff:** `docs/handoffs/[handoff_file].md`
 
@@ -35,8 +35,8 @@
 - [Question 1]
 
 ## Discussion Points (if NEEDS DISCUSSION)
-[Topics that need Claude/Codex/Human discussion]
+[Topics that need lead/reviewer/human discussion]
 - [Topic 1]
 
 ---
-*Feedback from Codex. Claude: use `/handoff read [phase_name]` to review.*
+*Feedback from reviewer. Lead: use `/handoff read [phase_name]` to review.*

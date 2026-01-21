@@ -1,6 +1,11 @@
 # Skill: /plan
 
-Create or update phase plans for the project. Claude is always the lead for planning.
+> **Before using this skill**:
+> 1. Read `ai-handoff.yaml` in the project root to see your configured role
+> 2. Identify whether you are the **lead** or **reviewer** agent
+> 3. Follow the instructions for your role below
+
+Create or update phase plans for the project. The lead agent is responsible for planning.
 
 ## When to Use
 - Starting a new phase of development
@@ -9,16 +14,18 @@ Create or update phase plans for the project. Claude is always the lead for plan
 
 ## Workflow Context
 
-This project uses a Claude (Lead) / Codex (Reviewer) workflow:
-1. **Claude plans** the phase and creates a handoff document
-2. **Codex reviews** and provides feedback
-3. **Claude revises** if needed (Claude has final decision)
+This project uses a Lead / Reviewer workflow:
+1. **Lead plans** the phase and creates a handoff document
+2. **Reviewer reviews** and provides feedback
+3. **Lead revises** if needed (lead has final decision)
 4. **Implementation** begins once plan is approved
 5. Repeat for each phase
 
 ## Instructions
 
-### Create Mode (`/plan create [phase_name]`)
+### If You Are the Lead
+
+#### Create Mode (`/plan create [phase_name]`)
 
 1. Gather context:
    - Read project requirements/brief
@@ -33,15 +40,15 @@ This project uses a Claude (Lead) / Codex (Reviewer) workflow:
 
 ## Status
 - [ ] Planning
-- [ ] In Review (Codex)
+- [ ] In Review
 - [ ] Approved
 - [ ] Implementation
 - [ ] Implementation Review
 - [ ] Complete
 
 ## Roles
-- Lead: Claude
-- Reviewer: Codex
+- Lead: [from ai-handoff.yaml]
+- Reviewer: [from ai-handoff.yaml]
 - Arbiter: Human
 
 ## Summary
@@ -69,22 +76,28 @@ This project uses a Claude (Lead) / Codex (Reviewer) workflow:
 - [ ] [Testable criterion 2]
 
 ## Open Questions
-- [Question for Codex or Human to address]
+- [Question for reviewer or human to address]
 
 ## Risks
 - [Risk 1]: [Mitigation]
 ```
 
 3. After creating the plan:
-   - Prompt: "Phase plan created. Ready to create handoff for Codex review? Use `/handoff plan [phase_name]`"
+   - Prompt: "Phase plan created. Ready to create handoff for review? Use `/handoff plan [phase_name]`"
 
-### Update Mode (`/plan update [phase_name]`)
+#### Update Mode (`/plan update [phase_name]`)
 
 1. Read the existing phase plan
 2. Read any feedback from `docs/handoffs/[phase_name]_plan_feedback.md`
 3. Ask what needs to change or apply feedback
 4. Update the plan
 5. Note what changed in a "Revision History" section
+
+### If You Are the Reviewer
+
+You should not create plans directly. Your role is to review plans created by the lead.
+
+Redirect to: `/review plan [phase_name]`
 
 ### List Mode (`/plan list`)
 
@@ -103,7 +116,7 @@ User: `/plan create foundation`
 
 Response: "Creating phase plan for 'foundation'. Let me gather project context first..."
 [Creates docs/phases/foundation.md with filled template]
-"Phase plan created. Ready to create handoff for Codex review? Use `/handoff plan foundation`"
+"Phase plan created. Ready to create handoff for review? Use `/handoff plan foundation`"
 
 User: `/plan list`
 
@@ -117,4 +130,4 @@ Phases:
 
 User: `/plan update foundation`
 
-Response: "Reading Codex feedback... [Lists feedback items]. Which items should I incorporate?"
+Response: "Reading reviewer feedback... [Lists feedback items]. Which items should I incorporate?"

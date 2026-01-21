@@ -1,5 +1,10 @@
 # Skill: /phase
 
+> **Before using this skill**:
+> 1. Read `ai-handoff.yaml` in the project root to see your configured role
+> 2. Identify whether you are the **lead** or **reviewer** agent
+> 3. Follow the instructions for your role below
+
 Manage phase lifecycle and track overall project progress.
 
 ## When to Use
@@ -23,16 +28,17 @@ Planning -> In Review -> Approved -> Implementation -> Impl Review -> Complete
 
 1. Read `docs/roadmap.md` for phase list
 2. Check status of each phase in `docs/phases/`
-3. Identify and display current active phase
-4. Show phase status and next steps
+3. Read `ai-handoff.yaml` to get agent names
+4. Identify and display current active phase
+5. Show phase status and next steps
 
 Output:
 ```markdown
 ## Current Phase: [Phase Name]
 
 **Status:** [Planning/In Review/Approved/Implementation/Impl Review]
-**Lead:** Claude
-**Reviewer:** Codex
+**Lead:** [Lead agent name from config]
+**Reviewer:** [Reviewer agent name from config]
 
 ### Next Action
 [What should happen next based on status]
@@ -52,8 +58,8 @@ Output:
 
 | Phase | Status | Lead | Reviewer |
 |-------|--------|------|----------|
-| foundation | Complete | Claude | Codex |
-| core-features | Implementation | Claude | Codex |
+| foundation | Complete | [lead name] | [reviewer name] |
+| core-features | Implementation | [lead name] | [reviewer name] |
 | ui-polish | Not Started | - | - |
 ```
 
@@ -125,7 +131,7 @@ Response:
 ```
 Current Phase: foundation
 Status: Implementation
-Lead: Claude
+Lead: [lead agent name]
 
 Next Action: Complete remaining implementation tasks.
 Use `/implement status foundation` for details.
@@ -140,4 +146,4 @@ Response: Shows table of all phases with status.
 User: `/phase advance foundation`
 
 Response: "Foundation phase advanced from 'Implementation' to 'Impl Review'.
-Handoff created for Codex at `docs/handoffs/foundation_impl_handoff.md`"
+Handoff created for reviewer at `docs/handoffs/foundation_impl_handoff.md`"

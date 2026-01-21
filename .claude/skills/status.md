@@ -1,5 +1,10 @@
 # Skill: /status
 
+> **Before using this skill**:
+> 1. Read `ai-handoff.yaml` in the project root to see your configured role
+> 2. Identify whether you are the **lead** or **reviewer** agent
+> 3. This skill works the same for both roles
+
 Get a quick overview of project status, current work, and next steps.
 
 ## When to Use
@@ -15,10 +20,11 @@ Get a quick overview of project status, current work, and next steps.
 Gather and display comprehensive project status:
 
 1. **Current Phase**: Read from `docs/roadmap.md` and `docs/phases/`
-2. **Pending Reviews**: Check `docs/handoffs/` for items awaiting review
-3. **Recent Decisions**: Last 3 entries from `docs/decision_log.md`
-4. **Open Questions**: From current phase plan
-5. **Next Steps**: Based on current state
+2. **Agent Config**: Read from `ai-handoff.yaml`
+3. **Pending Reviews**: Check `docs/handoffs/` for items awaiting review
+4. **Recent Decisions**: Last 3 entries from `docs/decision_log.md`
+5. **Open Questions**: From current phase plan
+6. **Next Steps**: Based on current state
 
 Output format:
 ```markdown
@@ -27,7 +33,8 @@ Output format:
 ### Current Phase
 **[Phase Name]** - [Status]
 - Progress: [X/Y] criteria complete
-- Lead: [Claude/Codex]
+- Lead: [lead agent name from config]
+- Reviewer: [reviewer agent name from config]
 - Awaiting: [What's needed to proceed]
 
 ### Pending Actions
@@ -79,13 +86,14 @@ Response:
 ### Current Phase
 **foundation** - Implementation
 - Progress: 2/4 criteria complete
-- Lead: Claude
+- Lead: [lead agent name]
+- Reviewer: [reviewer agent name]
 - Awaiting: Complete implementation tasks
 
 ### Pending Actions
-1. Finish core model implementation (Claude)
-2. Run tests (Claude)
-3. Create implementation handoff (Claude)
+1. Finish core model implementation (Lead)
+2. Run tests (Lead)
+3. Create implementation handoff (Lead)
 
 ### Recent Handoffs
 - foundation_plan_handoff.md - reviewed (approved)
@@ -107,7 +115,7 @@ Response:
 | File | Type | Status | Action |
 |------|------|--------|--------|
 | foundation_plan_handoff.md | Plan | Reviewed | Resolved |
-| foundation_plan_feedback.md | Feedback | Complete | Read by Claude |
+| foundation_plan_feedback.md | Feedback | Complete | Read by lead |
 
 No pending handoffs awaiting review.
 ```

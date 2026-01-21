@@ -1,8 +1,8 @@
 # Handoff: [Phase Name] - Plan Review
 
 **Date:** [YYYY-MM-DD]
-**From:** Claude (Lead)
-**To:** Codex (Reviewer)
+**From:** [Lead agent name] (Lead)
+**To:** [Reviewer agent name] (Reviewer)
 **Type:** Planning Review
 
 ## Summary
@@ -15,14 +15,14 @@
 - Risk assessment
 - File/structure decisions
 
-## Specific Questions for Codex
+## Specific Questions for Reviewer
 1. [Specific question about the plan]
 2. [Another question]
 
 ## Phase Plan Location
 `docs/phases/[phase_name].md`
 
-## Review Checklist for Codex
+## Review Checklist
 - [ ] Technical approach is sound
 - [ ] Scope is appropriate (not too big/small)
 - [ ] Success criteria are testable
@@ -34,4 +34,4 @@
 Please provide feedback in `docs/handoffs/[phase_name]_plan_feedback.md` using the feedback template.
 
 ---
-*Handoff created by Claude. Codex: use `/review plan [phase_name]` to begin review.*
+*Handoff created by lead. Reviewer: use `/review plan [phase_name]` to begin review.*

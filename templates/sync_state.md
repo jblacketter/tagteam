@@ -2,17 +2,17 @@
 
 ## Current State
 - **Phase:** [name] - [status]
-- **Lead:** [Claude/Codex]
-- **Reviewer:** [Codex/Claude]
+- **Lead:** [Lead agent name from ai-handoff.yaml]
+- **Reviewer:** [Reviewer agent name from ai-handoff.yaml]
 
 ## Active Context
 [Summary of what is being worked on]
 
 ## Pending Actions
-For Claude:
+For Lead:
 - [Action 1]
 
-For Codex:
+For Reviewer:
 - [Action 1]
 
 For Human:
@@ -26,6 +26,7 @@ For Human:
 - Phase plan: `docs/phases/[phase].md`
 - Latest handoff: `docs/handoffs/[file].md`
 - Decision log: `docs/decision_log.md`
+- Agent config: `ai-handoff.yaml`
 
 ## Session Continuity
 Last activity: [what was done]

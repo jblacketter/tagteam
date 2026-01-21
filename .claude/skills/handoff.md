@@ -1,30 +1,38 @@
 # Skill: /handoff
 
-Create handoff documents for the Claude/Codex review cycle. This is the bridge between planning and review.
+> **Before using this skill**:
+> 1. Read `ai-handoff.yaml` in the project root to see your configured role
+> 2. Identify whether you are the **lead** or **reviewer** agent
+> 3. Follow the instructions for your role below
+
+Create handoff documents for the Lead/Reviewer cycle. This is the bridge between planning and review.
 
 ## When to Use
-- After Claude completes a phase plan (planning handoff)
-- After Claude completes phase implementation (implementation handoff)
-- When transitioning between Claude and Codex
+- After the lead completes a phase plan (planning handoff)
+- After the lead completes phase implementation (implementation handoff)
+- When transitioning between lead and reviewer
 
 ## Handoff Types
 
-1. **Planning Handoff**: Claude -> Codex for plan review
-2. **Implementation Handoff**: Claude -> Codex for code review
+1. **Planning Handoff**: Lead -> Reviewer for plan review
+2. **Implementation Handoff**: Lead -> Reviewer for code review
 
 ## Instructions
 
-### Create Planning Handoff (`/handoff plan [phase_name]`)
+### If You Are the Lead
+
+#### Create Planning Handoff (`/handoff plan [phase_name]`)
 
 1. Read the phase plan from `docs/phases/[phase_name].md`
-2. Create `docs/handoffs/[phase_name]_plan_handoff.md`:
+2. Read `ai-handoff.yaml` to get agent names
+3. Create `docs/handoffs/[phase_name]_plan_handoff.md`:
 
 ```markdown
 # Handoff: [Phase Name] - Plan Review
 
 **Date:** [YYYY-MM-DD]
-**From:** Claude (Lead)
-**To:** Codex (Reviewer)
+**From:** [Lead agent name] (Lead)
+**To:** [Reviewer agent name] (Reviewer)
 **Type:** Planning Review
 
 ## Summary
@@ -37,14 +45,14 @@ Create handoff documents for the Claude/Codex review cycle. This is the bridge b
 - Risk assessment
 - File/structure decisions
 
-## Specific Questions for Codex
+## Specific Questions for Reviewer
 1. [Specific question about the plan]
 2. [Another question]
 
 ## Phase Plan Location
 `docs/phases/[phase_name].md`
 
-## Review Checklist for Codex
+## Review Checklist
 - [ ] Technical approach is sound
 - [ ] Scope is appropriate (not too big/small)
 - [ ] Success criteria are testable
@@ -56,13 +64,13 @@ Create handoff documents for the Claude/Codex review cycle. This is the bridge b
 Please provide feedback in `docs/handoffs/[phase_name]_plan_feedback.md` using the feedback template.
 
 ---
-*Handoff created by Claude. Codex: use `/review plan [phase_name]` to begin review.*
+*Handoff created by lead. Reviewer: use `/review plan [phase_name]` to begin review.*
 ```
 
-3. Update phase status to "In Review (Codex)"
-4. Prompt: "Planning handoff created. Codex can now run `/review plan [phase_name]`"
+4. Update phase status to "In Review"
+5. Prompt: "Planning handoff created. Reviewer can now run `/review plan [phase_name]`"
 
-### Create Implementation Handoff (`/handoff impl [phase_name]`)
+#### Create Implementation Handoff (`/handoff impl [phase_name]`)
 
 1. Read the phase plan
 2. Gather list of files created/modified
@@ -72,8 +80,8 @@ Please provide feedback in `docs/handoffs/[phase_name]_plan_feedback.md` using t
 # Handoff: [Phase Name] - Implementation Review
 
 **Date:** [YYYY-MM-DD]
-**From:** Claude (Lead)
-**To:** Codex (Reviewer)
+**From:** [Lead agent name] (Lead)
+**To:** [Reviewer agent name] (Reviewer)
 **Type:** Implementation Review
 
 ## Summary
@@ -104,8 +112,16 @@ Please provide feedback in `docs/handoffs/[phase_name]_plan_feedback.md` using t
 2. [Another area]
 
 ---
-*Handoff created by Claude. Codex: use `/review impl [phase_name]` to begin review.*
+*Handoff created by lead. Reviewer: use `/review impl [phase_name]` to begin review.*
 ```
+
+### If You Are the Reviewer
+
+You receive handoffs, not create them. To read a handoff:
+
+1. Check `docs/handoffs/` for pending handoffs
+2. Read the handoff document
+3. Use `/review plan [phase]` or `/review impl [phase]` to perform your review
 
 ### Read Feedback (`/handoff read [phase_name]`)
 
@@ -125,11 +141,11 @@ Please provide feedback in `docs/handoffs/[phase_name]_plan_feedback.md` using t
 User: `/handoff plan foundation`
 
 Response: Creates planning handoff document and updates phase status.
-"Handoff created at `docs/handoffs/foundation_plan_handoff.md`. Codex can now review."
+"Handoff created at `docs/handoffs/foundation_plan_handoff.md`. Reviewer can now review."
 
 User: `/handoff read foundation`
 
-Response: "Codex provided feedback on the foundation plan:
+Response: "Reviewer provided feedback on the foundation plan:
 1. **AGREE**: Good technical choice
 2. **SUGGEST**: Add an index for performance
 3. **QUESTION**: Should we support feature X?

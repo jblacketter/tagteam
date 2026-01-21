@@ -1,12 +1,17 @@
 # Skill: /sync
 
-Synchronize state between Claude and Codex sessions. Ensures both AIs have the same context.
+> **Before using this skill**:
+> 1. Read `ai-handoff.yaml` in the project root to see your configured role
+> 2. Identify whether you are the **lead** or **reviewer** agent
+> 3. This skill works the same for both roles
+
+Synchronize state between lead and reviewer sessions. Ensures both AI agents have the same context.
 
 ## When to Use
-- Starting a new Claude or Codex session
+- Starting a new session with either agent
 - After a handoff
-- When switching between Claude and Codex
-- To verify both AIs understand current state
+- When switching between lead and reviewer
+- To verify both agents understand current state
 
 ## Instructions
 
@@ -19,24 +24,26 @@ Synchronize state between Claude and Codex sessions. Ensures both AIs have the s
    - Recent decisions from `docs/decision_log.md`
    - Open escalations from `docs/escalations/`
 
-2. Generate sync document:
+2. Read `ai-handoff.yaml` to get agent names
+
+3. Generate sync document:
 
 ```markdown
 # Project Sync: [Date/Time]
 
 ## Current State
 - **Phase:** [name] - [status]
-- **Lead:** [Claude/Codex]
-- **Reviewer:** [Codex/Claude]
+- **Lead:** [Lead agent name from config]
+- **Reviewer:** [Reviewer agent name from config]
 
 ## Active Context
 [Summary of what's being worked on]
 
 ## Pending Actions
-For Claude:
+For Lead ([lead name]):
 - [Action 1]
 
-For Codex:
+For Reviewer ([reviewer name]):
 - [Action 1]
 
 For Human:
@@ -56,23 +63,23 @@ Last activity: [what was done]
 Next expected: [what should happen next]
 ```
 
-3. Save to `docs/sync_state.md` (overwrite)
+4. Save to `docs/sync_state.md` (overwrite)
 
-### For Codex (`/sync codex`)
+### For Reviewer (`/sync reviewer`)
 
-Generate a summary specifically for Codex to read when starting a session:
+Generate a summary specifically for the reviewer agent to read when starting a session:
 
 ```markdown
-# Codex Session Sync
+# Reviewer Session Sync
 
 ## Your Role
 You are the **Reviewer** for this project.
-- Lead (Planning/Implementation): Claude
-- Reviewer: You (Codex)
+- Lead (Planning/Implementation): [Lead agent name]
+- Reviewer: You ([Reviewer agent name])
 - Arbiter: Human
 
 ## What Needs Your Review
-[Specific items awaiting Codex review]
+[Specific items awaiting reviewer attention]
 
 ## Context
 [Summary of recent decisions and current state]
@@ -82,24 +89,24 @@ Use `/review plan [phase]` or `/review impl [phase]` to begin.
 Save feedback to `docs/handoffs/[phase]_[type]_feedback.md`
 ```
 
-### For Claude (`/sync claude`)
+### For Lead (`/sync lead`)
 
-Generate a summary specifically for Claude to read when starting a session:
+Generate a summary specifically for the lead agent to read when starting a session:
 
 ```markdown
-# Claude Session Sync
+# Lead Session Sync
 
 ## Your Role
 You are the **Lead** for this project.
-- Lead (Planning/Implementation): You (Claude)
-- Reviewer: Codex
+- Lead (Planning/Implementation): You ([Lead agent name])
+- Reviewer: [Reviewer agent name]
 - Arbiter: Human
 
 ## Current Work
-[What Claude should be working on]
+[What the lead should be working on]
 
 ## Pending Feedback
-[Any feedback from Codex to address]
+[Any feedback from reviewer to address]
 
 ## Next Steps
 [Recommended next actions]
@@ -111,6 +118,6 @@ User: `/sync`
 
 Response: Generates full sync summary and saves to `docs/sync_state.md`.
 
-User: `/sync codex`
+User: `/sync reviewer`
 
-Response: Generates Codex-specific summary for copying to a Codex session.
+Response: Generates reviewer-specific summary for copying to a reviewer session.

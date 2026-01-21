@@ -2,15 +2,15 @@
 
 ## Status
 - [ ] Planning
-- [ ] In Review (Codex)
+- [ ] In Review
 - [ ] Approved
 - [ ] Implementation
 - [ ] Implementation Review
 - [ ] Complete
 
 ## Roles
-- Lead: Claude
-- Reviewer: Codex
+- Lead: [from ai-handoff.yaml]
+- Reviewer: [from ai-handoff.yaml]
 - Arbiter: Human
 
 ## Summary
@@ -38,7 +38,7 @@
 - [ ] [Testable criterion 2]
 
 ## Open Questions
-- [Question for Codex or Human to address]
+- [Question for reviewer or human to address]
 
 ## Risks
 - [Risk 1]: [Mitigation]

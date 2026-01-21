@@ -1,9 +1,14 @@
 # Skill: /escalate
 
+> **Before using this skill**:
+> 1. Read `ai-handoff.yaml` in the project root to see your configured role
+> 2. Identify whether you are the **lead** or **reviewer** agent
+> 3. This skill works the same for both roles
+
 Escalate a disagreement or decision to the human arbiter.
 
 ## When to Use
-- Claude and Codex disagree on approach and can't resolve
+- Lead and reviewer disagree on approach and can't resolve
 - A decision is outside the scope of AI authority
 - Technical uncertainty requires human input
 - After 2 review cycles without resolution
@@ -12,13 +17,15 @@ Escalate a disagreement or decision to the human arbiter.
 
 ### Create Escalation (`/escalate [topic]`)
 
-1. Gather context:
+1. Read `ai-handoff.yaml` to get agent names
+
+2. Gather context:
    - What is the disagreement or decision needed?
-   - What does Claude think?
-   - What does Codex think?
+   - What does the lead think?
+   - What does the reviewer think?
    - What are the tradeoffs?
 
-2. Create escalation document at `docs/escalations/[date]_[topic].md`:
+3. Create escalation document at `docs/escalations/[date]_[topic].md`:
 
 ```markdown
 # Escalation: [Topic]
@@ -30,11 +37,13 @@ Escalate a disagreement or decision to the human arbiter.
 ## Summary
 [Brief description of what needs to be decided]
 
-## Claude's Position
-[What Claude recommends and why]
+## Lead's Position
+**Agent:** [Lead agent name from config]
+[What the lead recommends and why]
 
-## Codex's Position
-[What Codex recommends and why]
+## Reviewer's Position
+**Agent:** [Reviewer agent name from config]
+[What the reviewer recommends and why]
 
 ## Key Tradeoffs
 | Factor | Option A | Option B |
@@ -47,7 +56,7 @@ Escalate a disagreement or decision to the human arbiter.
 - If Option B: [consequences]
 
 ## Recommendation
-[If Claude/Codex have a joint recommendation despite disagreement]
+[If lead/reviewer have a joint recommendation despite disagreement]
 
 ## Human Decision
 _To be filled in by human arbiter_
@@ -61,7 +70,7 @@ _To be filled in by human arbiter_
 **Decided on:** _________________
 ```
 
-3. Prompt: "Escalation created. Human needs to review `docs/escalations/[file].md` and mark their decision."
+4. Prompt: "Escalation created. Human needs to review `docs/escalations/[file].md` and mark their decision."
 
 ### List Escalations (`/escalate list`)
 
@@ -82,7 +91,7 @@ User: `/escalate database choice`
 
 Response: "Creating escalation for 'database choice'...
 
-What is Claude's position?"
+What is the lead's position?"
 [Gathers info and creates document]
 
 "Escalation created. Please review `docs/escalations/2026-01-17_database_choice.md` and mark your decision."

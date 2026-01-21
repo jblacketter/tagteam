@@ -1,9 +1,14 @@
 # Skill: /implement
 
-Begin implementation of an approved phase plan. Claude is the lead implementer (unless otherwise specified).
+> **Before using this skill**:
+> 1. Read `ai-handoff.yaml` in the project root to see your configured role
+> 2. Identify whether you are the **lead** or **reviewer** agent
+> 3. Follow the instructions for your role below
+
+Begin implementation of an approved phase plan. The lead agent is responsible for implementation.
 
 ## When to Use
-- After a phase plan has been approved by Codex
+- After a phase plan has been approved by the reviewer
 - When ready to start writing code
 - To resume implementation of a phase in progress
 
@@ -13,7 +18,9 @@ Begin implementation of an approved phase plan. Claude is the lead implementer (
 
 ## Instructions
 
-### Start Implementation (`/implement start [phase_name]`)
+### If You Are the Lead
+
+#### Start Implementation (`/implement start [phase_name]`)
 
 1. Verify prerequisites:
    - Check phase plan exists
@@ -22,13 +29,13 @@ Begin implementation of an approved phase plan. Claude is the lead implementer (
 
 2. Read the phase plan thoroughly
 3. Update phase status to "Implementation"
-4. Create implementation tracking:
+4. Create implementation tracking in `docs/phases/[phase_name]_impl.md`:
 
 ```markdown
 # Implementation Log: [Phase Name]
 
 **Started:** [YYYY-MM-DD]
-**Lead:** Claude
+**Lead:** [Your agent name from config]
 **Plan:** docs/phases/[phase_name].md
 
 ## Progress
@@ -52,14 +59,14 @@ Begin implementation of an approved phase plan. Claude is the lead implementer (
 
 5. Begin implementation following the plan
 
-### Resume Implementation (`/implement resume [phase_name]`)
+#### Resume Implementation (`/implement resume [phase_name]`)
 
 1. Read the implementation log
 2. Read the phase plan
 3. Check which tasks are complete
 4. Continue from where left off
 
-### Status Check (`/implement status [phase_name]`)
+#### Status Check (`/implement status [phase_name]`)
 
 1. Read implementation log
 2. Compare against phase plan success criteria
@@ -69,13 +76,20 @@ Begin implementation of an approved phase plan. Claude is the lead implementer (
    - Any blockers
    - Estimated remaining work items
 
-### Complete Implementation (`/implement complete [phase_name]`)
+#### Complete Implementation (`/implement complete [phase_name]`)
 
 1. Verify all success criteria are met
 2. Update implementation log with final status
 3. Update phase status to "Implementation Review"
 4. Create implementation handoff: `/handoff impl [phase_name]`
-5. Prompt: "Implementation complete. Handoff created for Codex review."
+5. Prompt: "Implementation complete. Handoff created for reviewer."
+
+### If You Are the Reviewer
+
+You do not implement directly. Your role is to review implementations created by the lead.
+
+To check implementation status: `/implement status [phase_name]`
+To review completed implementation: `/review impl [phase_name]`
 
 ## Implementation Guidelines
 
@@ -127,4 +141,4 @@ User: `/implement complete foundation`
 
 Response: Verifies criteria, updates log, creates handoff.
 "Implementation complete. All success criteria met.
-Handoff created for Codex review at `docs/handoffs/foundation_impl_handoff.md`"
+Handoff created for reviewer at `docs/handoffs/foundation_impl_handoff.md`"

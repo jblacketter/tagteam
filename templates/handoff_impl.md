@@ -1,8 +1,8 @@
 # Handoff: [Phase Name] - Implementation Review
 
 **Date:** [YYYY-MM-DD]
-**From:** Claude (Lead)
-**To:** Codex (Reviewer)
+**From:** [Lead agent name] (Lead)
+**To:** [Reviewer agent name] (Reviewer)
 **Type:** Implementation Review
 
 ## Summary
@@ -33,4 +33,4 @@
 2. [Another area]
 
 ---
-*Handoff created by Claude. Codex: use `/review impl [phase_name]` to begin review.*
+*Handoff created by lead. Reviewer: use `/review impl [phase_name]` to begin review.*

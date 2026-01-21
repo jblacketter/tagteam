@@ -5,7 +5,7 @@
 
 **Tech Stack:** [Technologies used]
 
-**Workflow:** Claude (Lead) / Codex (Reviewer) with Human Arbiter
+**Workflow:** Lead / Reviewer with Human Arbiter (see ai-handoff.yaml for agent configuration)
 
 ## Phases
 

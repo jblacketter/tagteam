@@ -1,34 +1,37 @@
 # Project Roadmap
 
 ## Overview
-[Brief project description]
+AI Handoff Framework - A collaboration framework enabling structured, multi-phase AI-to-AI collaboration with human oversight.
 
-**Tech Stack:** [Technologies used]
+**Tech Stack:** Python 3.8+, YAML configuration, Markdown templates
 
-**Workflow:** Claude (Lead) / Codex (Reviewer) with Human Arbiter
+**Workflow:** Lead / Reviewer with Human Arbiter
 
 ## Phases
 
-### Phase 1: [Name]
-- **Status:** Not Started
-- **Description:** [Brief description]
+### Phase 1: Configurable Agents Init
+- **Status:** Complete
+- **Description:** Create interactive init command for configuring AI agents and their roles
 - **Key Deliverables:**
-  - [Deliverable 1]
-  - [Deliverable 2]
+  - Interactive `python -m ai_handoff init` command
+  - `ai-handoff.yaml` config file generation
+  - Skills updated to read config at runtime
+  - Getting started documentation
 
-### Phase 2: [Name]
+### Phase 2: Template Variable Substitution
 - **Status:** Not Started
-- **Description:** [Brief description]
+- **Description:** Templates automatically use configured agent names
 - **Key Deliverables:**
-  - [Deliverable 1]
-  - [Deliverable 2]
+  - Variable substitution in templates ({{lead}}, {{reviewer}})
+  - Generated docs reflect config
 
-### Phase 3: [Name]
+### Phase 3: Migration & Advanced Features
 - **Status:** Not Started
-- **Description:** [Brief description]
+- **Description:** Migration path for existing users, multi-agent support
 - **Key Deliverables:**
-  - [Deliverable 1]
-  - [Deliverable 2]
+  - `ai-handoff migrate` command
+  - Support for 3+ agents
+  - Model pattern matching
 
 ## Decision Log
 See `docs/decision_log.md`

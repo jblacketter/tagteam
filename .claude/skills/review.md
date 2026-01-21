@@ -1,9 +1,14 @@
 # Skill: /review
 
-Run structured reviews on plans or implementations. Used by Codex (or Claude when self-reviewing).
+> **Before using this skill**:
+> 1. Read `ai-handoff.yaml` in the project root to see your configured role
+> 2. Identify whether you are the **lead** or **reviewer** agent
+> 3. Follow the instructions for your role below
+
+Run structured reviews on plans or implementations. The reviewer agent is primarily responsible for reviews.
 
 ## When to Use
-- After receiving a handoff from Claude
+- After receiving a handoff from the lead
 - When reviewing a phase plan
 - When reviewing implemented code
 - For quality checks before phase completion
@@ -16,17 +21,20 @@ Run structured reviews on plans or implementations. Used by Codex (or Claude whe
 
 ## Instructions
 
-### Plan Review (`/review plan [phase_name]`)
+### If You Are the Reviewer
+
+#### Plan Review (`/review plan [phase_name]`)
 
 1. Read the handoff document: `docs/handoffs/[phase_name]_plan_handoff.md`
 2. Read the phase plan: `docs/phases/[phase_name].md`
 3. Read project requirements for context
-4. Apply the planning checklist:
+4. Read `ai-handoff.yaml` to get agent names
+5. Apply the planning checklist:
 
 ```markdown
 # Plan Review: [Phase Name]
 
-**Reviewer:** Codex
+**Reviewer:** [Your agent name from config]
 **Date:** [YYYY-MM-DD]
 
 ## Checklist
@@ -72,9 +80,9 @@ Run structured reviews on plans or implementations. Used by Codex (or Claude whe
 ```
 
 5. Save to `docs/handoffs/[phase_name]_plan_feedback.md`
-6. Prompt: "Review complete. Claude can read feedback with `/handoff read [phase_name]`"
+6. Prompt: "Review complete. Lead can read feedback with `/handoff read [phase_name]`"
 
-### Implementation Review (`/review impl [phase_name]`)
+#### Implementation Review (`/review impl [phase_name]`)
 
 1. Read the implementation handoff
 2. Read the phase plan for expected behavior
@@ -84,7 +92,7 @@ Run structured reviews on plans or implementations. Used by Codex (or Claude whe
 ```markdown
 # Implementation Review: [Phase Name]
 
-**Reviewer:** Codex
+**Reviewer:** [Your agent name from config]
 **Date:** [YYYY-MM-DD]
 
 ## Files Reviewed
@@ -133,7 +141,11 @@ Run structured reviews on plans or implementations. Used by Codex (or Claude whe
 
 5. Save to `docs/handoffs/[phase_name]_impl_feedback.md`
 
-### Quick Review (`/review`)
+### If You Are the Lead
+
+You can self-review using the same checklists, but typically the reviewer agent handles formal reviews.
+
+#### Quick Review (`/review`)
 
 1. Check for pending handoffs in `docs/handoffs/`
 2. Check recent file changes

@@ -1,10 +1,15 @@
 # Skill: /decide
 
+> **Before using this skill**:
+> 1. Read `ai-handoff.yaml` in the project root to see your configured role
+> 2. Identify whether you are the **lead** or **reviewer** agent
+> 3. This skill works the same for both roles
+
 Log decisions to maintain project history and rationale.
 
 ## When to Use
 - After making an architectural or implementation choice
-- When resolving disagreements between Claude and Codex
+- When resolving disagreements between lead and reviewer
 - When the human arbiter makes a decision
 - When choosing between alternatives
 
@@ -21,13 +26,15 @@ Log decisions to maintain project history and rationale.
    - What was the context?
    - What alternatives were considered?
 
-2. Determine who decided:
-   - **Claude**: Claude made the call (within their authority as lead)
-   - **Codex**: Codex's suggestion was accepted
-   - **Human**: User/arbiter made the decision
-   - **Consensus**: Claude and Codex agreed
+2. Read `ai-handoff.yaml` to get agent names
 
-3. Append to `docs/decision_log.md`:
+3. Determine who decided:
+   - **Lead**: The lead agent made the call (within their authority)
+   - **Reviewer**: The reviewer's suggestion was accepted
+   - **Human**: User/arbiter made the decision
+   - **Consensus**: Lead and reviewer agreed
+
+4. Append to `docs/decision_log.md`:
 
 ```markdown
 ---
@@ -43,7 +50,7 @@ Log decisions to maintain project history and rationale.
 
 **Rationale:** [Why this option was chosen]
 
-**Decided By:** [Claude/Codex/Human/Consensus]
+**Decided By:** [Lead name/Reviewer name/Human/Consensus]
 
 **Phase:** [Which phase this relates to]
 
@@ -51,7 +58,7 @@ Log decisions to maintain project history and rationale.
 - [Any actions triggered by this decision]
 ```
 
-4. Confirm: "Decision logged: [title]. See `docs/decision_log.md`"
+5. Confirm: "Decision logged: [title]. See `docs/decision_log.md`"
 
 ### View Decisions (`/decide list`)
 
@@ -63,7 +70,7 @@ Log decisions to maintain project history and rationale.
 
 | Date | Decision | By | Phase |
 |------|----------|-----|-------|
-| 2026-01-17 | Use framework X | Claude | foundation |
+| 2026-01-17 | Use framework X | Lead | foundation |
 | 2026-01-16 | Database choice | Consensus | foundation |
 ```
 
@@ -74,7 +81,7 @@ Log decisions to maintain project history and rationale.
 
 ### Dispute Resolution
 
-When Claude and Codex disagree:
+When lead and reviewer disagree:
 
 1. Log both positions in the decision entry
 2. Set "Decided By: Pending - Human Arbiter"
@@ -101,7 +108,7 @@ Response:
 "Decision logged:
 - **Use framework X over Y**
 - Rationale: Simpler for our use case
-- Decided by: Claude
+- Decided by: [your role]
 - Phase: foundation
 
 See `docs/decision_log.md`"

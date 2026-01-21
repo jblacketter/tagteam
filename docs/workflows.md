@@ -1,14 +1,16 @@
-# Workflows: Claude/Codex Collaboration
+# Workflows: Lead/Reviewer Collaboration
 
-This document describes how Claude and Codex collaborate on projects using this framework.
+This document describes how lead and reviewer agents collaborate on projects using this framework.
+
+> **Note**: Agent names are configured in `ai-handoff.yaml`. Read that file to see which agent is the lead and which is the reviewer for your project.
 
 ## Roles
 
-| Role | Assigned To | Responsibilities |
-|------|-------------|------------------|
-| **Lead** | Claude | Planning phases, implementing code, creating handoffs |
-| **Reviewer** | Codex | Reviewing plans and implementations, providing feedback |
-| **Arbiter** | Human | Breaking ties, making final decisions, approving phases |
+| Role | Responsibilities |
+|------|------------------|
+| **Lead** | Planning phases, implementing code, creating handoffs |
+| **Reviewer** | Reviewing plans and implementations, providing feedback |
+| **Arbiter** | Breaking ties, making final decisions, approving phases (typically Human) |
 
 ## Phase Workflow
 
@@ -19,19 +21,19 @@ Each phase follows this pattern:
 │                        PLANNING CYCLE                           │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│   Claude: /plan create [phase]                                  │
+│   Lead: /plan create [phase]                                    │
 │      │                                                          │
 │      ▼                                                          │
-│   Claude: /handoff plan [phase]  ──────► Codex: /review plan    │
+│   Lead: /handoff plan [phase]  ──────► Reviewer: /review plan   │
 │      │                                          │               │
 │      │◄─────────────────────────────────────────┘               │
 │      │  (feedback in docs/handoffs/[phase]_plan_feedback.md)    │
 │      ▼                                                          │
-│   Claude: /handoff read [phase]                                 │
+│   Lead: /handoff read [phase]                                   │
 │      │                                                          │
 │      ├── If APPROVED ──────────────────────────────────►        │
 │      │                                                          │
-│      └── If CHANGES REQUESTED ─► Claude: /plan update [phase]   │
+│      └── If CHANGES REQUESTED ─► Lead: /plan update [phase]     │
 │                                          │                      │
 │                                          └──► (repeat cycle)    │
 └─────────────────────────────────────────────────────────────────┘
@@ -41,25 +43,25 @@ Each phase follows this pattern:
 │                     IMPLEMENTATION CYCLE                        │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│   Claude: /implement start [phase]                              │
+│   Lead: /implement start [phase]                                │
 │      │                                                          │
 │      ▼                                                          │
-│   [Claude implements the phase]                                 │
+│   [Lead implements the phase]                                   │
 │      │                                                          │
 │      ▼                                                          │
-│   Claude: /implement complete [phase]                           │
+│   Lead: /implement complete [phase]                             │
 │      │                                                          │
 │      ▼                                                          │
-│   Claude: /handoff impl [phase]  ──────► Codex: /review impl    │
+│   Lead: /handoff impl [phase]  ──────► Reviewer: /review impl   │
 │      │                                          │               │
 │      │◄─────────────────────────────────────────┘               │
 │      │  (feedback in docs/handoffs/[phase]_impl_feedback.md)    │
 │      ▼                                                          │
-│   Claude: /handoff read [phase]                                 │
+│   Lead: /handoff read [phase]                                   │
 │      │                                                          │
 │      ├── If APPROVED ──────────────────────────────────►        │
 │      │                                                          │
-│      └── If CHANGES REQUESTED ─► Claude fixes issues            │
+│      └── If CHANGES REQUESTED ─► Lead fixes issues              │
 │                                          │                      │
 │                                          └──► (repeat cycle)    │
 └─────────────────────────────────────────────────────────────────┘
@@ -75,10 +77,10 @@ Each phase follows this pattern:
 
 | Skill | Purpose | Who Uses |
 |-------|---------|----------|
-| `/plan` | Create/update phase plans | Claude |
-| `/handoff` | Create handoff documents | Claude |
-| `/review` | Review plans or implementations | Codex |
-| `/implement` | Start/track/complete implementation | Claude |
+| `/plan` | Create/update phase plans | Lead |
+| `/handoff` | Create handoff documents | Lead |
+| `/review` | Review plans or implementations | Reviewer |
+| `/implement` | Start/track/complete implementation | Lead |
 | `/phase` | Manage phase lifecycle | Both |
 | `/status` | Check project status | Both |
 | `/decide` | Log decisions | Both |
@@ -87,37 +89,37 @@ Each phase follows this pattern:
 
 ## Handoff Process
 
-### From Claude to Codex
-1. Claude completes work (plan or implementation)
-2. Claude creates handoff document with `/handoff`
-3. Human switches to Codex session
-4. Codex reads sync with `/sync codex`
-5. Codex reviews with `/review`
-6. Codex saves feedback
+### From Lead to Reviewer
+1. Lead completes work (plan or implementation)
+2. Lead creates handoff document with `/handoff`
+3. Human switches to reviewer session
+4. Reviewer reads sync with `/sync reviewer`
+5. Reviewer reviews with `/review`
+6. Reviewer saves feedback
 
-### From Codex to Claude
-1. Codex saves feedback to `docs/handoffs/[phase]_[type]_feedback.md`
-2. Human switches to Claude session
-3. Claude reads sync with `/sync claude`
-4. Claude reads feedback with `/handoff read [phase]`
-5. Claude incorporates feedback or explains why not
+### From Reviewer to Lead
+1. Reviewer saves feedback to `docs/handoffs/[phase]_[type]_feedback.md`
+2. Human switches to lead session
+3. Lead reads sync with `/sync lead`
+4. Lead reads feedback with `/handoff read [phase]`
+5. Lead incorporates feedback or explains why not
 
 ## Decision Authority
 
 | Decision Type | Who Decides |
 |---------------|-------------|
-| Technical approach within a phase | Claude (Lead) |
-| Accepting/rejecting review feedback | Claude (Lead) |
-| Blocking implementation issues | Codex can flag, Claude decides |
+| Technical approach within a phase | Lead |
+| Accepting/rejecting review feedback | Lead |
+| Blocking implementation issues | Reviewer can flag, lead decides |
 | Architecture affecting multiple phases | Requires consensus or Human |
 | Disagreements after 2 review cycles | Human (Arbiter) |
 | Scope changes to requirements | Human |
 
 ## Session Transitions
 
-When switching between Claude and Codex:
+When switching between lead and reviewer:
 
-1. Generate sync summary: `/sync` or `/sync [claude|codex]`
+1. Generate sync summary: `/sync` or `/sync [lead|reviewer]`
 2. The sync summary captures current state
 3. In new session, read the sync file: `docs/sync_state.md`
 4. Continue work based on sync state
@@ -128,16 +130,16 @@ When switching between Claude and Codex:
 ```
 /phase list           # See all phases
 /plan create [phase]  # Create the plan
-/handoff plan [phase] # Send to Codex
+/handoff plan [phase] # Send to reviewer
 ```
 
-**Reviewing (Codex):**
+**Reviewing:**
 ```
-/sync codex           # Get context
+/sync reviewer        # Get context
 /review plan [phase]  # Or /review impl [phase]
 ```
 
-**After review (Claude):**
+**After review (Lead):**
 ```
 /handoff read [phase] # See feedback
 /plan update [phase]  # Incorporate changes
