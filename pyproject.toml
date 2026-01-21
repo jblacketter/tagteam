@@ -29,9 +29,9 @@ ai-handoff = "ai_handoff.cli:main"
 ai-handoff-setup = "ai_handoff.setup:cli"
 
 [project.urls]
-Homepage = "https://github.com/yourusername/ai-handoff"
-Documentation = "https://github.com/yourusername/ai-handoff#readme"
-Repository = "https://github.com/yourusername/ai-handoff"
+Homepage = "https://github.com/jblacketter/ai-handoff"
+Documentation = "https://github.com/jblacketter/ai-handoff#readme"
+Repository = "https://github.com/jblacketter/ai-handoff"
 
 [tool.setuptools]
 packages = ["ai_handoff"]
@@ -39,8 +39,8 @@ include-package-data = true
 
 [tool.setuptools.package-data]
 ai_handoff = [
-    ".claude/skills/*.md",
-    "templates/*.md",
-    "checklists/*.md",
-    "docs/*.md",
+    "data/.claude/skills/*.md",
+    "data/templates/*.md",
+    "data/checklists/*.md",
+    "data/*.md",
 ]

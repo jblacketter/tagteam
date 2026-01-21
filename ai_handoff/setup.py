@@ -6,15 +6,14 @@ Usage:
     python -m ai_handoff.setup [target_directory]
 """
 
-import os
 import shutil
 import sys
 from pathlib import Path
 
 
-def get_package_dir() -> Path:
-    """Get the directory where package files are installed."""
-    return Path(__file__).parent.parent
+def get_data_dir() -> Path:
+    """Get the directory where package data files are stored."""
+    return Path(__file__).parent / "data"
 
 
 def main(target_dir: str = ".") -> None:
@@ -24,7 +23,7 @@ def main(target_dir: str = ".") -> None:
     Args:
         target_dir: Target directory (defaults to current directory)
     """
-    source = get_package_dir()
+    source = get_data_dir()
     target = Path(target_dir).resolve()
 
     print("AI Handoff Framework Setup")
@@ -32,6 +31,12 @@ def main(target_dir: str = ".") -> None:
     print(f"Source: {source}")
     print(f"Target: {target}")
     print()
+
+    # Verify source exists
+    if not source.exists():
+        print(f"Error: Data directory not found at {source}")
+        print("The package may not be installed correctly.")
+        return
 
     # Create directory structure
     dirs_to_create = [
@@ -54,6 +59,9 @@ def main(target_dir: str = ".") -> None:
     if skills_src.exists():
         for f in skills_src.glob("*.md"):
             shutil.copy2(f, skills_dst / f.name)
+            print(f"  - {f.name}")
+    else:
+        print(f"  Warning: Skills not found at {skills_src}")
 
     # Copy templates
     print("Copying templates...")
@@ -62,6 +70,9 @@ def main(target_dir: str = ".") -> None:
     if templates_src.exists():
         for f in templates_src.glob("*.md"):
             shutil.copy2(f, templates_dst / f.name)
+            print(f"  - {f.name}")
+    else:
+        print(f"  Warning: Templates not found at {templates_src}")
 
     # Copy checklists
     print("Copying checklists...")
@@ -70,12 +81,18 @@ def main(target_dir: str = ".") -> None:
     if checklists_src.exists():
         for f in checklists_src.glob("*.md"):
             shutil.copy2(f, checklists_dst / f.name)
+            print(f"  - {f.name}")
+    else:
+        print(f"  Warning: Checklists not found at {checklists_src}")
 
     # Copy workflow docs
     print("Copying workflow documentation...")
-    workflows_src = source / "docs" / "workflows.md"
+    workflows_src = source / "workflows.md"
     if workflows_src.exists():
         shutil.copy2(workflows_src, target / "docs" / "workflows.md")
+        print("  - workflows.md")
+    else:
+        print(f"  Warning: workflows.md not found at {workflows_src}")
 
     # Initialize files if they don't exist
     roadmap_dst = target / "docs" / "roadmap.md"
@@ -96,7 +113,7 @@ def main(target_dir: str = ".") -> None:
     print("Setup complete!")
     print()
     print("Next steps:")
-    print("  1. Edit docs/roadmap.md with your project phases")
+    print("  1. Run 'python -m ai_handoff init' to configure your agents")
     print("  2. Run /status to verify setup")
     print("  3. Run /plan create [first-phase] to begin")
 
