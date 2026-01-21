@@ -68,43 +68,43 @@ Replace `[agent name]` with the actual agent name (e.g., "claude" or "codex").
 ### 3. Begin Working
 
 ```
-/status           # Check project status
-/plan create [phase]  # Create first phase plan
+/handoff-status           # Check project status
+/handoff-plan create [phase]  # Create first phase plan
 ```
 
 ## Skills
 
 | Skill | Purpose | Primary User |
 |-------|---------|--------------|
-| `/plan` | Create and update phase plans | Lead |
-| `/handoff` | Create handoff documents | Lead |
-| `/review` | Review plans or implementations | Reviewer |
-| `/implement` | Track implementation progress | Lead |
-| `/phase` | Manage phase lifecycle | Both |
-| `/status` | Quick project status overview | Both |
-| `/decide` | Log decisions with rationale | Both |
-| `/escalate` | Escalate disagreements to arbiter | Both |
-| `/sync` | Generate sync summaries for sessions | Both |
+| `/handoff-plan` | Create and update phase plans | Lead |
+| `/handoff-handoff` | Create handoff documents | Lead |
+| `/handoff-review` | Review plans or implementations | Reviewer |
+| `/handoff-implement` | Track implementation progress | Lead |
+| `/handoff-phase` | Manage phase lifecycle | Both |
+| `/handoff-status` | Quick project status overview | Both |
+| `/handoff-decide` | Log decisions with rationale | Both |
+| `/handoff-escalate` | Escalate disagreements to arbiter | Both |
+| `/handoff-sync` | Generate sync summaries for sessions | Both |
 
 ## Workflow
 
 ```
 Planning Cycle:
-  Lead: /plan create [phase]
-  Lead: /handoff plan [phase]
-  Reviewer: /review plan [phase]
-  Lead: /handoff read [phase] → incorporate feedback or proceed
+  Lead: /handoff-plan create [phase]
+  Lead: /handoff-handoff plan [phase]
+  Reviewer: /handoff-review plan [phase]
+  Lead: /handoff-handoff read [phase] → incorporate feedback or proceed
 
 Implementation Cycle:
-  Lead: /implement start [phase]
+  Lead: /handoff-implement start [phase]
   [Lead implements]
-  Lead: /implement complete [phase]
-  Lead: /handoff impl [phase]
-  Reviewer: /review impl [phase]
-  Lead: /handoff read [phase] → fix issues or proceed
+  Lead: /handoff-implement complete [phase]
+  Lead: /handoff-handoff impl [phase]
+  Reviewer: /handoff-review impl [phase]
+  Lead: /handoff-handoff read [phase] → fix issues or proceed
 
 Completion:
-  /phase complete [phase]
+  /handoff-phase complete [phase]
   Start next phase...
 ```
 

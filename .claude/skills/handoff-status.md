@@ -1,4 +1,4 @@
-# Skill: /status
+# Skill: /handoff-status
 
 > **Before using this skill**:
 > 1. Read `ai-handoff.yaml` in the project root to see your configured role
@@ -15,7 +15,7 @@ Get a quick overview of project status, current work, and next steps.
 
 ## Instructions
 
-### Full Status (`/status`)
+### Full Status (`/handoff-status`)
 
 Gather and display comprehensive project status:
 
@@ -51,7 +51,7 @@ Output format:
 - `/[suggested command]` - [what it does]
 ```
 
-### Phase Status (`/status [phase_name]`)
+### Phase Status (`/handoff-status [phase_name]`)
 
 Detailed status for a specific phase:
 
@@ -61,14 +61,14 @@ Detailed status for a specific phase:
 4. Check for feedback
 5. Display detailed phase status
 
-### Handoff Status (`/status handoffs`)
+### Handoff Status (`/handoff-status handoffs`)
 
 1. List all handoff documents
 2. Show which are awaiting review
 3. Show which have feedback
 4. Show which are resolved
 
-### Quick Status (`/status quick`)
+### Quick Status (`/handoff-status quick`)
 
 One-line summary:
 ```
@@ -77,7 +77,7 @@ One-line summary:
 
 ## Examples
 
-User: `/status`
+User: `/handoff-status`
 
 Response:
 ```markdown
@@ -102,11 +102,11 @@ Response:
 - None currently
 
 ### Quick Commands
-- `/implement status foundation` - see implementation progress
-- `/implement complete foundation` - when done implementing
+- `/handoff-implement status foundation` - see implementation progress
+- `/handoff-implement complete foundation` - when done implementing
 ```
 
-User: `/status handoffs`
+User: `/handoff-status handoffs`
 
 Response:
 ```markdown
@@ -120,6 +120,6 @@ Response:
 No pending handoffs awaiting review.
 ```
 
-User: `/status quick`
+User: `/handoff-status quick`
 
 Response: `foundation: Implementation | Next: complete core model | Blockers: none`

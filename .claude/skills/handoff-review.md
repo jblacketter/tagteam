@@ -1,4 +1,4 @@
-# Skill: /review
+# Skill: /handoff-review
 
 > **Before using this skill**:
 > 1. Read `ai-handoff.yaml` in the project root to see your configured role
@@ -23,7 +23,7 @@ Run structured reviews on plans or implementations. The reviewer agent is primar
 
 ### If You Are the Reviewer
 
-#### Plan Review (`/review plan [phase_name]`)
+#### Plan Review (`/handoff-review plan [phase_name]`)
 
 1. Read the handoff document: `docs/handoffs/[phase_name]_plan_handoff.md`
 2. Read the phase plan: `docs/phases/[phase_name].md`
@@ -80,9 +80,9 @@ Run structured reviews on plans or implementations. The reviewer agent is primar
 ```
 
 5. Save to `docs/handoffs/[phase_name]_plan_feedback.md`
-6. Prompt: "Review complete. Lead can read feedback with `/handoff read [phase_name]`"
+6. Prompt: "Review complete. Lead can read feedback with `/handoff-handoff read [phase_name]`"
 
-#### Implementation Review (`/review impl [phase_name]`)
+#### Implementation Review (`/handoff-review impl [phase_name]`)
 
 1. Read the implementation handoff
 2. Read the phase plan for expected behavior
@@ -145,7 +145,7 @@ Run structured reviews on plans or implementations. The reviewer agent is primar
 
 You can self-review using the same checklists, but typically the reviewer agent handles formal reviews.
 
-#### Quick Review (`/review`)
+#### Quick Review (`/handoff-review`)
 
 1. Check for pending handoffs in `docs/handoffs/`
 2. Check recent file changes
@@ -154,16 +154,16 @@ You can self-review using the same checklists, but typically the reviewer agent 
 
 ## Examples
 
-User: `/review plan foundation`
+User: `/handoff-review plan foundation`
 
 Response: Reads handoff and plan, runs checklist, saves feedback.
 "Review complete: APPROVE with minor suggestions. Feedback saved."
 
-User: `/review impl foundation`
+User: `/handoff-review impl foundation`
 
 Response: Reads implementation handoff, reviews code files, runs checklist.
 "Review complete: REQUEST CHANGES - 1 blocking issue found. See feedback."
 
-User: `/review`
+User: `/handoff-review`
 
-Response: "Pending handoffs: foundation_plan_handoff.md (awaiting review). Run `/review plan foundation`?"
+Response: "Pending handoffs: foundation_plan_handoff.md (awaiting review). Run `/handoff-review plan foundation`?"

@@ -1,4 +1,4 @@
-# Skill: /sync
+# Skill: /handoff-sync
 
 > **Before using this skill**:
 > 1. Read `ai-handoff.yaml` in the project root to see your configured role
@@ -15,7 +15,7 @@ Synchronize state between lead and reviewer sessions. Ensures both AI agents hav
 
 ## Instructions
 
-### Generate Sync Summary (`/sync`)
+### Generate Sync Summary (`/handoff-sync`)
 
 1. Read current project state:
    - Current phase from `docs/roadmap.md`
@@ -65,7 +65,7 @@ Next expected: [what should happen next]
 
 4. Save to `docs/sync_state.md` (overwrite)
 
-### For Reviewer (`/sync reviewer`)
+### For Reviewer (`/handoff-sync reviewer`)
 
 Generate a summary specifically for the reviewer agent to read when starting a session:
 
@@ -85,11 +85,11 @@ You are the **Reviewer** for this project.
 [Summary of recent decisions and current state]
 
 ## How to Review
-Use `/review plan [phase]` or `/review impl [phase]` to begin.
+Use `/handoff-review plan [phase]` or `/handoff-review impl [phase]` to begin.
 Save feedback to `docs/handoffs/[phase]_[type]_feedback.md`
 ```
 
-### For Lead (`/sync lead`)
+### For Lead (`/handoff-sync lead`)
 
 Generate a summary specifically for the lead agent to read when starting a session:
 
@@ -114,10 +114,10 @@ You are the **Lead** for this project.
 
 ## Examples
 
-User: `/sync`
+User: `/handoff-sync`
 
 Response: Generates full sync summary and saves to `docs/sync_state.md`.
 
-User: `/sync reviewer`
+User: `/handoff-sync reviewer`
 
 Response: Generates reviewer-specific summary for copying to a reviewer session.

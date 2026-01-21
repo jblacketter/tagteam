@@ -1,4 +1,4 @@
-# Skill: /plan
+# Skill: /handoff-plan
 
 > **Before using this skill**:
 > 1. Read `ai-handoff.yaml` in the project root to see your configured role
@@ -25,7 +25,7 @@ This project uses a Lead / Reviewer workflow:
 
 ### If You Are the Lead
 
-#### Create Mode (`/plan create [phase_name]`)
+#### Create Mode (`/handoff-plan create [phase_name]`)
 
 1. Gather context:
    - Read project requirements/brief
@@ -83,9 +83,9 @@ This project uses a Lead / Reviewer workflow:
 ```
 
 3. After creating the plan:
-   - Prompt: "Phase plan created. Ready to create handoff for review? Use `/handoff plan [phase_name]`"
+   - Prompt: "Phase plan created. Ready to create handoff for review? Use `/handoff-handoff plan [phase_name]`"
 
-#### Update Mode (`/plan update [phase_name]`)
+#### Update Mode (`/handoff-plan update [phase_name]`)
 
 1. Read the existing phase plan
 2. Read any feedback from `docs/handoffs/[phase_name]_plan_feedback.md`
@@ -97,28 +97,28 @@ This project uses a Lead / Reviewer workflow:
 
 You should not create plans directly. Your role is to review plans created by the lead.
 
-Redirect to: `/review plan [phase_name]`
+Redirect to: `/handoff-review plan [phase_name]`
 
-### List Mode (`/plan list`)
+### List Mode (`/handoff-plan list`)
 
 1. List all phases in `docs/phases/`
 2. Show status of each phase
 3. Indicate current active phase
 
-### Show Mode (`/plan [phase_name]`)
+### Show Mode (`/handoff-plan [phase_name]`)
 
 1. Display the phase plan with current status
 2. Show completion percentage of success criteria
 
 ## Examples
 
-User: `/plan create foundation`
+User: `/handoff-plan create foundation`
 
 Response: "Creating phase plan for 'foundation'. Let me gather project context first..."
 [Creates docs/phases/foundation.md with filled template]
-"Phase plan created. Ready to create handoff for review? Use `/handoff plan foundation`"
+"Phase plan created. Ready to create handoff for review? Use `/handoff-handoff plan foundation`"
 
-User: `/plan list`
+User: `/handoff-plan list`
 
 Response:
 ```
@@ -128,6 +128,6 @@ Phases:
 - ui-polish: Not started
 ```
 
-User: `/plan update foundation`
+User: `/handoff-plan update foundation`
 
 Response: "Reading reviewer feedback... [Lists feedback items]. Which items should I incorporate?"

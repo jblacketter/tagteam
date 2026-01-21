@@ -1,4 +1,4 @@
-# Skill: /implement
+# Skill: /handoff-implement
 
 > **Before using this skill**:
 > 1. Read `ai-handoff.yaml` in the project root to see your configured role
@@ -20,12 +20,12 @@ Begin implementation of an approved phase plan. The lead agent is responsible fo
 
 ### If You Are the Lead
 
-#### Start Implementation (`/implement start [phase_name]`)
+#### Start Implementation (`/handoff-implement start [phase_name]`)
 
 1. Verify prerequisites:
    - Check phase plan exists
    - Check phase status is "Approved" or "Planning Complete"
-   - If not approved, prompt: "Phase not yet approved. Run `/review plan [phase_name]` first."
+   - If not approved, prompt: "Phase not yet approved. Run `/handoff-review plan [phase_name]` first."
 
 2. Read the phase plan thoroughly
 3. Update phase status to "Implementation"
@@ -59,14 +59,14 @@ Begin implementation of an approved phase plan. The lead agent is responsible fo
 
 5. Begin implementation following the plan
 
-#### Resume Implementation (`/implement resume [phase_name]`)
+#### Resume Implementation (`/handoff-implement resume [phase_name]`)
 
 1. Read the implementation log
 2. Read the phase plan
 3. Check which tasks are complete
 4. Continue from where left off
 
-#### Status Check (`/implement status [phase_name]`)
+#### Status Check (`/handoff-implement status [phase_name]`)
 
 1. Read implementation log
 2. Compare against phase plan success criteria
@@ -76,20 +76,20 @@ Begin implementation of an approved phase plan. The lead agent is responsible fo
    - Any blockers
    - Estimated remaining work items
 
-#### Complete Implementation (`/implement complete [phase_name]`)
+#### Complete Implementation (`/handoff-implement complete [phase_name]`)
 
 1. Verify all success criteria are met
 2. Update implementation log with final status
 3. Update phase status to "Implementation Review"
-4. Create implementation handoff: `/handoff impl [phase_name]`
+4. Create implementation handoff: `/handoff-handoff impl [phase_name]`
 5. Prompt: "Implementation complete. Handoff created for reviewer."
 
 ### If You Are the Reviewer
 
 You do not implement directly. Your role is to review implementations created by the lead.
 
-To check implementation status: `/implement status [phase_name]`
-To review completed implementation: `/review impl [phase_name]`
+To check implementation status: `/handoff-implement status [phase_name]`
+To review completed implementation: `/handoff-review impl [phase_name]`
 
 ## Implementation Guidelines
 
@@ -112,7 +112,7 @@ To review completed implementation: `/review impl [phase_name]`
 
 ## Examples
 
-User: `/implement start foundation`
+User: `/handoff-implement start foundation`
 
 Response: Checks prerequisites, reads plan, creates implementation log.
 "Starting implementation of 'foundation' phase.
@@ -124,7 +124,7 @@ Plan includes:
 Beginning with project structure..."
 [Proceeds to implement]
 
-User: `/implement status foundation`
+User: `/handoff-implement status foundation`
 
 Response:
 ```
@@ -137,7 +137,7 @@ Foundation Phase Implementation:
 2/4 tasks complete. No blockers.
 ```
 
-User: `/implement complete foundation`
+User: `/handoff-implement complete foundation`
 
 Response: Verifies criteria, updates log, creates handoff.
 "Implementation complete. All success criteria met.

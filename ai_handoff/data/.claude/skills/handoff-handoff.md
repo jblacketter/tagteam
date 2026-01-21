@@ -21,7 +21,7 @@ Create handoff documents for the Lead/Reviewer cycle. This is the bridge between
 
 ### If You Are the Lead
 
-#### Create Planning Handoff (`/handoff plan [phase_name]`)
+#### Create Planning Handoff (`/handoff-handoff plan [phase_name]`)
 
 1. Read the phase plan from `docs/phases/[phase_name].md`
 2. Read `ai-handoff.yaml` to get agent names
@@ -64,13 +64,13 @@ Create handoff documents for the Lead/Reviewer cycle. This is the bridge between
 Please provide feedback in `docs/handoffs/[phase_name]_plan_feedback.md` using the feedback template.
 
 ---
-*Handoff created by lead. Reviewer: use `/review plan [phase_name]` to begin review.*
+*Handoff created by lead. Reviewer: use `/handoff-review plan [phase_name]` to begin review.*
 ```
 
 4. Update phase status to "In Review"
-5. Prompt: "Planning handoff created. Reviewer can now run `/review plan [phase_name]`"
+5. Prompt: "Planning handoff created. Reviewer can now run `/handoff-review plan [phase_name]`"
 
-#### Create Implementation Handoff (`/handoff impl [phase_name]`)
+#### Create Implementation Handoff (`/handoff-handoff impl [phase_name]`)
 
 1. Read the phase plan
 2. Gather list of files created/modified
@@ -112,7 +112,7 @@ Please provide feedback in `docs/handoffs/[phase_name]_plan_feedback.md` using t
 2. [Another area]
 
 ---
-*Handoff created by lead. Reviewer: use `/review impl [phase_name]` to begin review.*
+*Handoff created by lead. Reviewer: use `/handoff-review impl [phase_name]` to begin review.*
 ```
 
 ### If You Are the Reviewer
@@ -121,33 +121,33 @@ You receive handoffs, not create them. To read a handoff:
 
 1. Check `docs/handoffs/` for pending handoffs
 2. Read the handoff document
-3. Use `/review plan [phase]` or `/review impl [phase]` to perform your review
+3. Use `/handoff-review plan [phase]` or `/handoff-review impl [phase]` to perform your review
 
-### Read Feedback (`/handoff read [phase_name]`)
+### Read Feedback (`/handoff-handoff read [phase_name]`)
 
 1. Check for feedback files:
    - `docs/handoffs/[phase_name]_plan_feedback.md`
    - `docs/handoffs/[phase_name]_impl_feedback.md`
 2. Display feedback with action items highlighted
-3. Prompt: "Use `/plan update [phase_name]` to incorporate feedback"
+3. Prompt: "Use `/handoff-plan update [phase_name]` to incorporate feedback"
 
-### List Handoffs (`/handoff list`)
+### List Handoffs (`/handoff-handoff list`)
 
 1. List all handoff documents in `docs/handoffs/`
 2. Show status: pending review, feedback received, resolved
 
 ## Examples
 
-User: `/handoff plan foundation`
+User: `/handoff-handoff plan foundation`
 
 Response: Creates planning handoff document and updates phase status.
 "Handoff created at `docs/handoffs/foundation_plan_handoff.md`. Reviewer can now review."
 
-User: `/handoff read foundation`
+User: `/handoff-handoff read foundation`
 
 Response: "Reviewer provided feedback on the foundation plan:
 1. **AGREE**: Good technical choice
 2. **SUGGEST**: Add an index for performance
 3. **QUESTION**: Should we support feature X?
 
-Use `/plan update foundation` to incorporate this feedback."
+Use `/handoff-plan update foundation` to incorporate this feedback."

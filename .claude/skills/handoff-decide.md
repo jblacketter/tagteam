@@ -1,4 +1,4 @@
-# Skill: /decide
+# Skill: /handoff-decide
 
 > **Before using this skill**:
 > 1. Read `ai-handoff.yaml` in the project root to see your configured role
@@ -19,7 +19,7 @@ Log decisions to maintain project history and rationale.
 
 ## Instructions
 
-### Log Decision (`/decide [summary]`)
+### Log Decision (`/handoff-decide [summary]`)
 
 1. If summary not provided, ask:
    - What was decided?
@@ -60,7 +60,7 @@ Log decisions to maintain project history and rationale.
 
 5. Confirm: "Decision logged: [title]. See `docs/decision_log.md`"
 
-### View Decisions (`/decide list`)
+### View Decisions (`/handoff-decide list`)
 
 1. Read `docs/decision_log.md`
 2. Display summary table:
@@ -74,7 +74,7 @@ Log decisions to maintain project history and rationale.
 | 2026-01-16 | Database choice | Consensus | foundation |
 ```
 
-### View Decision (`/decide show [keyword]`)
+### View Decision (`/handoff-decide show [keyword]`)
 
 1. Search decision log for keyword
 2. Display full decision entry
@@ -95,7 +95,7 @@ After human decides:
 
 ## Examples
 
-User: `/decide use framework X instead of Y`
+User: `/handoff-decide use framework X instead of Y`
 
 Response:
 "Logging decision...
@@ -113,10 +113,10 @@ Response:
 
 See `docs/decision_log.md`"
 
-User: `/decide list`
+User: `/handoff-decide list`
 
 Response: Shows table of all decisions.
 
-User: `/decide show database`
+User: `/handoff-decide show database`
 
 Response: Shows full entry for the database decision.

@@ -1,4 +1,4 @@
-# Skill: /escalate
+# Skill: /handoff-escalate
 
 > **Before using this skill**:
 > 1. Read `ai-handoff.yaml` in the project root to see your configured role
@@ -15,7 +15,7 @@ Escalate a disagreement or decision to the human arbiter.
 
 ## Instructions
 
-### Create Escalation (`/escalate [topic]`)
+### Create Escalation (`/handoff-escalate [topic]`)
 
 1. Read `ai-handoff.yaml` to get agent names
 
@@ -72,22 +72,22 @@ _To be filled in by human arbiter_
 
 4. Prompt: "Escalation created. Human needs to review `docs/escalations/[file].md` and mark their decision."
 
-### List Escalations (`/escalate list`)
+### List Escalations (`/handoff-escalate list`)
 
 1. List all files in `docs/escalations/`
 2. Show status of each (pending/resolved)
 
-### Resolve Escalation (`/escalate resolve [topic]`)
+### Resolve Escalation (`/handoff-escalate resolve [topic]`)
 
 1. Read the escalation document
 2. Check that human has marked a decision
-3. Log the decision using `/decide`
+3. Log the decision using `/handoff-decide`
 4. Update escalation status to "Resolved"
 5. Apply the decision to current work
 
 ## Examples
 
-User: `/escalate database choice`
+User: `/handoff-escalate database choice`
 
 Response: "Creating escalation for 'database choice'...
 

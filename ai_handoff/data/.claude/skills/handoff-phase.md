@@ -24,7 +24,7 @@ Planning -> In Review -> Approved -> Implementation -> Impl Review -> Complete
 
 ## Instructions
 
-### Current Phase (`/phase` or `/phase current`)
+### Current Phase (`/handoff-phase` or `/handoff-phase current`)
 
 1. Read `docs/roadmap.md` for phase list
 2. Check status of each phase in `docs/phases/`
@@ -47,7 +47,7 @@ Output:
 [X/Y] success criteria complete
 ```
 
-### List Phases (`/phase list`)
+### List Phases (`/handoff-phase list`)
 
 1. Read `docs/roadmap.md`
 2. For each phase, check status in `docs/phases/[phase].md`
@@ -63,7 +63,7 @@ Output:
 | ui-polish | Not Started | - | - |
 ```
 
-### Advance Phase (`/phase advance [phase_name]`)
+### Advance Phase (`/handoff-phase advance [phase_name]`)
 
 Based on current status, advance to next state:
 
@@ -78,7 +78,7 @@ Based on current status, advance to next state:
    - Update status
 
 3. **Approved -> Implementation**
-   - Prompt to use `/implement start [phase]`
+   - Prompt to use `/handoff-implement start [phase]`
 
 4. **Implementation -> Impl Review**
    - Verify implementation complete
@@ -91,7 +91,7 @@ Based on current status, advance to next state:
    - Archive phase documents
    - Prompt for next phase
 
-### Complete Phase (`/phase complete [phase_name]`)
+### Complete Phase (`/handoff-phase complete [phase_name]`)
 
 1. Verify all success criteria met
 2. Verify review passed
@@ -99,7 +99,7 @@ Based on current status, advance to next state:
 4. Update `docs/roadmap.md`
 5. Prompt: "Phase complete. Ready to plan next phase?"
 
-### Create Roadmap (`/phase roadmap`)
+### Create Roadmap (`/handoff-phase roadmap`)
 
 1. If `docs/roadmap.md` doesn't exist, create it:
 
@@ -125,7 +125,7 @@ See `docs/decision_log.md`
 
 ## Examples
 
-User: `/phase`
+User: `/handoff-phase`
 
 Response:
 ```
@@ -134,16 +134,16 @@ Status: Implementation
 Lead: [lead agent name]
 
 Next Action: Complete remaining implementation tasks.
-Use `/implement status foundation` for details.
+Use `/handoff-implement status foundation` for details.
 
 Progress: 2/4 success criteria complete
 ```
 
-User: `/phase list`
+User: `/handoff-phase list`
 
 Response: Shows table of all phases with status.
 
-User: `/phase advance foundation`
+User: `/handoff-phase advance foundation`
 
 Response: "Foundation phase advanced from 'Implementation' to 'Impl Review'.
 Handoff created for reviewer at `docs/handoffs/foundation_impl_handoff.md`"
