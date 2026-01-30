@@ -7,6 +7,8 @@
 
 Automate the review cycle between lead and reviewer using a single shared cycle document. Instead of manually creating separate handoff/feedback files each round, both agents work from one file with automatic turn tracking.
 
+**Orchestration integration:** This skill writes `handoff-state.json` at each turn transition. A watcher daemon (`python -m ai_handoff watch`) can monitor this file and automatically notify or trigger the next agent. You MUST run the state update command at the end of every turn.
+
 ## When to Use
 - After creating a plan that needs review (instead of `/handoff-handoff`)
 - After completing implementation that needs review
@@ -87,7 +89,11 @@ STATE: in-progress
 <!-- /CYCLE_STATUS -->
 ```
 
-6. Output: "Cycle started. Reviewer should run `/handoff-cycle [phase]` to begin review."
+6. **Update orchestration state** by running this bash command:
+   ```bash
+   python -m ai_handoff state set --turn reviewer --status ready --command "/handoff-cycle [phase]" --phase [phase] --type [plan|impl] --round 1 --updated-by [your-agent-name]
+   ```
+7. Output: "Cycle started. Reviewer should run `/handoff-cycle [phase]` to begin review."
 
 ### Continue a Cycle (`/handoff-cycle [phase]`)
 
@@ -125,7 +131,11 @@ Continues an existing cycle based on whose turn it is.
    - Fill in `### Lead` with action and response
    - Set `### Reviewer` to `_awaiting response_`
    - Update status block: `READY_FOR: reviewer`, increment `ROUND` if new round
-4. Output: "Response submitted. Reviewer should run `/handoff-cycle [phase]`"
+4. **Update orchestration state** by running:
+   ```bash
+   python -m ai_handoff state set --turn reviewer --status ready --command "/handoff-cycle [phase]" --phase [phase] --round [new-round-number] --updated-by [your-agent-name]
+   ```
+5. Output: "Response submitted. Reviewer should run `/handoff-cycle [phase]`"
 
 #### As Reviewer (READY_FOR: reviewer)
 1. Display the lead's submission
@@ -141,23 +151,42 @@ Continues an existing cycle based on whose turn it is.
    **If APPROVE:**
    - Fill in `### Reviewer` with approval message
    - Update status: `STATE: approved`
+   - **Update orchestration state:**
+     ```bash
+     python -m ai_handoff state set --status done --result approved --updated-by [your-agent-name]
+     ```
    - Output: "Approved! Lead can proceed."
 
    **If REQUEST_CHANGES:**
    - Fill in `### Reviewer` with feedback
    - Check if this is round 5:
-     - If yes: Set `STATE: escalated`, output escalation message
-     - If no: Set `READY_FOR: lead`
+     - If yes: Set `STATE: escalated`, then update orchestration state:
+       ```bash
+       python -m ai_handoff state set --status escalated --updated-by [your-agent-name]
+       ```
+       Output escalation message.
+     - If no: Set `READY_FOR: lead`, then **update orchestration state:**
+       ```bash
+       python -m ai_handoff state set --turn lead --status ready --command "/handoff-cycle [phase]" --phase [phase] --round [current-round] --updated-by [your-agent-name]
+       ```
    - Output: "Feedback submitted. Lead should run `/handoff-cycle [phase]`"
 
    **If NEED_HUMAN:**
    - Add `### Human Input Needed` section with question
    - Set `STATE: needs-human`, `READY_FOR: human`
+   - **Update orchestration state:**
+     ```bash
+     python -m ai_handoff state set --status escalated --updated-by [your-agent-name]
+     ```
    - Output: "Cycle paused. Human should edit the cycle file to respond."
 
    **If ABORT:**
    - Set `STATE: aborted`
    - Add `### Aborted` section with who and reason
+   - **Update orchestration state:**
+     ```bash
+     python -m ai_handoff state set --status aborted --reason "[reason]" --updated-by [your-agent-name]
+     ```
    - Output: "Cycle aborted."
 
 ### View Status (`/handoff-cycle status [phase]`)
@@ -181,7 +210,11 @@ Cancel an in-progress cycle.
 3. Update cycle file:
    - Add `### Aborted` section with who (your role) and reason
    - Set `STATE: aborted`
-4. Output: "Cycle aborted. File preserved for history."
+4. **Update orchestration state:**
+   ```bash
+   python -m ai_handoff state set --status aborted --reason "[reason]" --updated-by [your-agent-name]
+   ```
+5. Output: "Cycle aborted. File preserved for history."
 
 ## Human Input Flow
 

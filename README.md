@@ -122,6 +122,79 @@ Lead: /handoff-cycle [phase]      → address feedback
 
 Both agents work from one file. Auto-escalates to human after 5 rounds.
 
+## Automated Orchestration
+
+Eliminate manual copy-paste between agents entirely. A watcher daemon monitors a shared state file and automatically sends commands to each agent's terminal when it's their turn.
+
+### Quick Start
+
+```bash
+# 1. Create a tmux session with lead, reviewer, and watcher panes
+python -m ai_handoff session start
+
+# 2. Attach to the session
+tmux attach -t ai-handoff
+```
+
+This gives you a 3-pane layout:
+
+```
+┌──────────────────┬──────────────────┐
+│  Pane 0: Lead    │  Pane 2: Reviewer│
+│  (Claude Code)   │  (Codex)         │
+├──────────────────┴──────────────────┤
+│  Pane 1: Watcher                    │
+│  (monitors state, triggers agents)  │
+└─────────────────────────────────────┘
+```
+
+**Navigating tmux panes:** Press `Ctrl-b` (release), then an arrow key to move between panes. If keyboard navigation doesn't work, enable mouse support:
+
+```bash
+tmux set -g mouse on
+```
+
+This lets you click directly on panes to switch focus.
+
+### Starting Agents
+
+1. Click on **Pane 0** (top-left) and start your lead agent (e.g. `claude`)
+2. Click on **Pane 2** (top-right) and start your reviewer agent (e.g. `codex`)
+3. Click on **Pane 1** (bottom) and press Enter to start the watcher
+
+### Running a Cycle
+
+In the lead pane, start a review cycle as normal:
+
+```
+/handoff-cycle start my-phase plan
+```
+
+The skill automatically writes `handoff-state.json`. The watcher detects the turn change and sends `/handoff-cycle my-phase` to the reviewer's pane. The reviewer processes it, updates state, and the watcher sends back to the lead. This repeats until the cycle is approved, escalated, or aborted -- with zero manual intervention.
+
+### Orchestration Commands
+
+```bash
+python -m ai_handoff session start    # Create tmux layout
+python -m ai_handoff session attach   # Attach to existing session
+python -m ai_handoff session kill     # Destroy the session
+python -m ai_handoff watch            # Start watcher (runs in session pane)
+python -m ai_handoff watch --mode notify  # Desktop notifications only (no auto-send)
+python -m ai_handoff watch --confirm  # Pause for human approval before each send
+python -m ai_handoff state            # View current orchestration state
+python -m ai_handoff state reset      # Clear state file
+```
+
+### Without tmux
+
+If you prefer separate terminal windows, run the watcher in notify mode:
+
+```bash
+python -m ai_handoff watch --mode notify
+```
+
+This prints turn changes and sends macOS desktop notifications. You still switch terminals manually, but the watcher tells you exactly when and what command to run.
+
 ## Configuration
 
 The `ai-handoff.yaml` file in your project root defines your agents:
@@ -160,9 +233,12 @@ your-project/
 ## CLI Commands
 
 ```bash
-python -m ai_handoff init       # Configure agents interactively
-python -m ai_handoff setup .    # Copy framework files to project
-python -m ai_handoff --help     # Show help
+python -m ai_handoff init          # Configure agents interactively
+python -m ai_handoff setup .       # Copy framework files to project
+python -m ai_handoff watch         # Start watcher daemon
+python -m ai_handoff state         # View/update orchestration state
+python -m ai_handoff session start # Create tmux session
+python -m ai_handoff --help        # Show help
 ```
 
 ## License

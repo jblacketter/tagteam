@@ -2,8 +2,11 @@
 CLI for AI Handoff Framework.
 
 Usage:
-    python -m ai_handoff init       - Initialize agent configuration
+    python -m ai_handoff init        - Initialize agent configuration
     python -m ai_handoff setup [dir] - Copy framework files to a project
+    python -m ai_handoff watch       - Start the watcher daemon
+    python -m ai_handoff state       - View/update orchestration state
+    python -m ai_handoff session     - Manage tmux session
 """
 
 import os
@@ -183,17 +186,34 @@ def setup_command(target_dir: str = ".") -> int:
     return 0
 
 
+HELP_TEXT = """\
+AI Handoff Framework
+
+Usage: python -m ai_handoff <command>
+
+Commands:
+  init          Create ai-handoff.yaml configuration interactively
+  setup [dir]   Copy framework files to a project directory
+  watch         Start the watcher daemon for automated orchestration
+  state         View or update the orchestration state file
+  session       Manage tmux session (start/attach/kill)
+
+Workflow:
+  1. Run 'python -m ai_handoff setup' to copy framework files
+  2. Run 'python -m ai_handoff init' to configure your agents
+  3. Start your AI with the getting started prompt
+
+Automated orchestration:
+  1. Run 'python -m ai_handoff session start' to create tmux layout
+  2. Start your agents in the lead and reviewer panes
+  3. Press Enter in the watcher pane to begin monitoring
+"""
+
+
 def main() -> int:
     """Main CLI entry point."""
     if len(sys.argv) < 2:
-        print("AI Handoff Framework")
-        print()
-        print("Usage: python -m ai_handoff <command>")
-        print()
-        print("Commands:")
-        print("  init         Create ai-handoff.yaml configuration")
-        print("  setup [dir]  Copy framework files to a project directory")
-        print()
+        print(HELP_TEXT)
         return 1
 
     command = sys.argv[1].lower()
@@ -203,20 +223,17 @@ def main() -> int:
     elif command == "setup":
         target = sys.argv[2] if len(sys.argv) > 2 else "."
         return setup_command(target)
+    elif command == "watch":
+        from ai_handoff.watcher import watch_command
+        return watch_command(sys.argv[2:])
+    elif command == "state":
+        from ai_handoff.state import state_command
+        return state_command(sys.argv[2:])
+    elif command == "session":
+        from ai_handoff.session import session_command
+        return session_command(sys.argv[2:])
     elif command in ["-h", "--help", "help"]:
-        print("AI Handoff Framework")
-        print()
-        print("Usage: python -m ai_handoff <command>")
-        print()
-        print("Commands:")
-        print("  init         Create ai-handoff.yaml configuration interactively")
-        print("  setup [dir]  Copy framework files to a project directory")
-        print()
-        print("Workflow:")
-        print("  1. Run 'python -m ai_handoff setup' to copy framework files")
-        print("  2. Run 'python -m ai_handoff init' to configure your agents")
-        print("  3. Start your AI with the getting started prompt")
-        print()
+        print(HELP_TEXT)
         return 0
     else:
         print(f"Unknown command: {command}")
