@@ -17,14 +17,8 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse
 
+from ai_handoff.config import read_config as _read_config_file, get_agent_names
 from ai_handoff.state import read_state, update_state
-
-# PyYAML is optional
-try:
-    import yaml
-    HAS_YAML = True
-except ImportError:
-    HAS_YAML = False
 
 
 CONFIG_TEMPLATE = """\
@@ -44,29 +38,7 @@ SAFE_AGENT_NAME = re.compile(r'^[\w\s\-\.]+$')
 def _read_config(project_dir: str) -> dict | None:
     """Read ai-handoff.yaml from project directory."""
     config_path = Path(project_dir) / "ai-handoff.yaml"
-    if not config_path.exists():
-        return None
-    try:
-        content = config_path.read_text()
-        if HAS_YAML:
-            return yaml.safe_load(content)
-        # Fallback: simple parsing
-        lead_name = reviewer_name = None
-        lines = content.split("\n")
-        for i, line in enumerate(lines):
-            if "lead:" in line and i + 1 < len(lines):
-                nxt = lines[i + 1]
-                if "name:" in nxt:
-                    lead_name = nxt.split("name:")[1].strip()
-            elif "reviewer:" in line and i + 1 < len(lines):
-                nxt = lines[i + 1]
-                if "name:" in nxt:
-                    reviewer_name = nxt.split("name:")[1].strip()
-        if lead_name and reviewer_name:
-            return {"agents": {"lead": {"name": lead_name}, "reviewer": {"name": reviewer_name}}}
-    except Exception:
-        pass
-    return None
+    return _read_config_file(config_path)
 
 
 def _get_dashboard_html() -> bytes:

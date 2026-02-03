@@ -1,7 +1,7 @@
 # Implementation Log: [Phase Name]
 
 **Started:** [YYYY-MM-DD]
-**Lead:** [Lead agent name from ai-handoff.yaml]
+**Lead:** {{lead}}
 **Plan:** docs/phases/[phase_name].md
 
 ## Progress

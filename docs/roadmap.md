@@ -48,19 +48,22 @@ AI Handoff Framework - A collaboration framework enabling structured, multi-phas
   - Sound effects bundled in package
 
 ### Phase 5: Template Variable Substitution
-- **Status:** Not Started
+- **Status:** Complete
 - **Description:** Templates automatically use configured agent names
 - **Key Deliverables:**
-  - Variable substitution in templates ({{lead}}, {{reviewer}})
-  - Generated docs reflect config
+  - `ai_handoff/templates.py` module with `render_template()` and `get_template_variables()`
+  - Variable substitution in 8 templates (`{{lead}}`, `{{reviewer}}`)
+  - `setup.py` reads config and substitutes variables when copying templates
+  - Generated docs reflect config when `setup` runs after `init`
 
 ### Phase 6: Migration & Advanced Features
-- **Status:** Not Started
-- **Description:** Migration path for existing users, multi-agent support
+- **Status:** Complete
+- **Description:** Migration tooling for legacy projects, centralized config parsing with validation
 - **Key Deliverables:**
-  - `ai-handoff migrate` command
-  - Support for 3+ agents
-  - Model pattern matching
+  - `python -m ai_handoff migrate` command with auto-detection and backups
+  - Centralized `ai_handoff/config.py` module (read, validate, get_agent_names)
+  - Forward-compatible `model_patterns` schema field with overlap validation
+  - Unit tests for config and migration modules
 
 ## Decision Log
 See `docs/decision_log.md`

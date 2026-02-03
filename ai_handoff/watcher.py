@@ -11,42 +11,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ai_handoff.config import read_config, get_agent_names
 from ai_handoff.state import read_state, get_state_path
-
-# Try to import yaml for reading config
-try:
-    import yaml
-    HAS_YAML = True
-except ImportError:
-    HAS_YAML = False
-
-
-def read_config(project_dir: str = ".") -> dict | None:
-    """Read ai-handoff.yaml for agent names."""
-    config_path = Path(project_dir) / "ai-handoff.yaml"
-    if not config_path.exists():
-        return None
-    try:
-        content = config_path.read_text()
-        if HAS_YAML:
-            return yaml.safe_load(content)
-        # Simple fallback parsing
-        lead_name = reviewer_name = None
-        lines = content.split("\n")
-        for i, line in enumerate(lines):
-            if "lead:" in line and i + 1 < len(lines):
-                next_line = lines[i + 1]
-                if "name:" in next_line:
-                    lead_name = next_line.split("name:")[1].strip()
-            elif "reviewer:" in line and i + 1 < len(lines):
-                next_line = lines[i + 1]
-                if "name:" in next_line:
-                    reviewer_name = next_line.split("name:")[1].strip()
-        if lead_name and reviewer_name:
-            return {"agents": {"lead": {"name": lead_name}, "reviewer": {"name": reviewer_name}}}
-    except Exception:
-        pass
-    return None
 
 
 def notify_macos(title: str, message: str) -> None:
@@ -106,11 +72,12 @@ def watch(
 ) -> None:
     """Main watch loop. Blocks until interrupted with Ctrl-C."""
 
-    config = read_config(project_dir)
+    config_path = Path(project_dir) / "ai-handoff.yaml"
+    config = read_config(config_path)
     if config:
-        agents = config.get("agents", {})
-        lead_name = agents.get("lead", {}).get("name", "lead")
-        reviewer_name = agents.get("reviewer", {}).get("name", "reviewer")
+        lead_name, reviewer_name = get_agent_names(config)
+        lead_name = lead_name or "lead"
+        reviewer_name = reviewer_name or "reviewer"
     else:
         lead_name = "lead"
         reviewer_name = "reviewer"

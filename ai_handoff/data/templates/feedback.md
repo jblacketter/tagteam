@@ -1,6 +1,6 @@
 # Feedback: [Phase Name] - [Plan/Implementation] Review
 
-**Reviewer:** [Reviewer agent name]
+**Reviewer:** {{reviewer}}
 **Date:** [YYYY-MM-DD]
 **Handoff:** `docs/handoffs/[handoff_file].md`
 

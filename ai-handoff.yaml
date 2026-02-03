@@ -1,0 +1,8 @@
+# AI Handoff Configuration
+# Defines the two AI agents and their roles in the collaboration workflow.
+
+agents:
+  lead:
+    name: Claude
+  reviewer:
+    name: Codex

@@ -10,6 +10,17 @@ import shutil
 import sys
 from pathlib import Path
 
+from ai_handoff.config import read_config, validate_config
+from ai_handoff.templates import get_template_variables, render_template
+
+
+def copy_md_file(src: Path, dst: Path, variables: dict[str, str]) -> None:
+    """Copy a markdown file, applying variable substitution if variables provided."""
+    content = src.read_text()
+    if variables:
+        content = render_template(content, variables)
+    dst.write_text(content)
+
 
 def get_data_dir() -> Path:
     """Get the directory where package data files are stored."""
@@ -52,6 +63,26 @@ def main(target_dir: str = ".") -> None:
     for d in dirs_to_create:
         (target / d).mkdir(parents=True, exist_ok=True)
 
+    # Read config for template variable substitution
+    config_path = target / "ai-handoff.yaml"
+    config = read_config(config_path)
+
+    # Validate config if present (use 'is not None' so empty {} still gets validated)
+    if config is not None:
+        errors = validate_config(config)
+        if errors:
+            print("Warning: Config validation issues:")
+            for err in errors:
+                print(f"  - {err}")
+            print()
+
+    variables = get_template_variables(config)
+    if variables:
+        print(f"Using agent names from config: lead={variables.get('lead')}, reviewer={variables.get('reviewer')}")
+    else:
+        print("No config found - templates will have {{variable}} placeholders")
+    print()
+
     # Copy skills
     print("Copying skills...")
     skills_src = source / ".claude" / "skills"
@@ -63,51 +94,51 @@ def main(target_dir: str = ".") -> None:
     else:
         print(f"  Warning: Skills not found at {skills_src}")
 
-    # Copy templates
+    # Copy templates (with variable substitution)
     print("Copying templates...")
     templates_src = source / "templates"
     templates_dst = target / "templates"
     if templates_src.exists():
         for f in templates_src.glob("*.md"):
-            shutil.copy2(f, templates_dst / f.name)
+            copy_md_file(f, templates_dst / f.name, variables)
             print(f"  - {f.name}")
     else:
         print(f"  Warning: Templates not found at {templates_src}")
 
-    # Copy checklists
+    # Copy checklists (with variable substitution)
     print("Copying checklists...")
     checklists_src = source / "checklists"
     checklists_dst = target / "docs" / "checklists"
     if checklists_src.exists():
         for f in checklists_src.glob("*.md"):
-            shutil.copy2(f, checklists_dst / f.name)
+            copy_md_file(f, checklists_dst / f.name, variables)
             print(f"  - {f.name}")
     else:
         print(f"  Warning: Checklists not found at {checklists_src}")
 
-    # Copy workflow docs
+    # Copy workflow docs (with variable substitution)
     print("Copying workflow documentation...")
     workflows_src = source / "workflows.md"
     if workflows_src.exists():
-        shutil.copy2(workflows_src, target / "docs" / "workflows.md")
+        copy_md_file(workflows_src, target / "docs" / "workflows.md", variables)
         print("  - workflows.md")
     else:
         print(f"  Warning: workflows.md not found at {workflows_src}")
 
-    # Initialize files if they don't exist
+    # Initialize files if they don't exist (with variable substitution)
     roadmap_dst = target / "docs" / "roadmap.md"
     if not roadmap_dst.exists():
         print("Creating roadmap template...")
         roadmap_src = source / "templates" / "roadmap.md"
         if roadmap_src.exists():
-            shutil.copy2(roadmap_src, roadmap_dst)
+            copy_md_file(roadmap_src, roadmap_dst, variables)
 
     decision_log_dst = target / "docs" / "decision_log.md"
     if not decision_log_dst.exists():
         print("Creating decision log...")
         decision_log_src = source / "templates" / "decision_log.md"
         if decision_log_src.exists():
-            shutil.copy2(decision_log_src, decision_log_dst)
+            copy_md_file(decision_log_src, decision_log_dst, variables)
 
     print()
     print("Setup complete!")

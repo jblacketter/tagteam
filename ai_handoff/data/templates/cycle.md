@@ -4,8 +4,8 @@
 - **Phase:** [phase name]
 - **Type:** [plan|impl]
 - **Started:** [YYYY-MM-DD]
-- **Lead:** [lead agent name from ai-handoff.yaml]
-- **Reviewer:** [reviewer agent name from ai-handoff.yaml]
+- **Lead:** {{lead}}
+- **Reviewer:** {{reviewer}}
 
 ## Reference
 - Plan: `docs/phases/[phase].md`

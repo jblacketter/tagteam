@@ -4,22 +4,17 @@ CLI for AI Handoff Framework.
 Usage:
     python -m ai_handoff init        - Initialize agent configuration
     python -m ai_handoff setup [dir] - Copy framework files to a project
+    python -m ai_handoff migrate     - Migrate legacy projects to use config
     python -m ai_handoff watch       - Start the watcher daemon
     python -m ai_handoff state       - View/update orchestration state
     python -m ai_handoff session     - Manage tmux session
     python -m ai_handoff serve       - Start the web dashboard server
 """
 
-import os
 import sys
 from pathlib import Path
 
-# PyYAML is optional - we'll use simple string formatting if not available
-try:
-    import yaml
-    HAS_YAML = True
-except ImportError:
-    HAS_YAML = False
+from ai_handoff.config import read_config
 
 
 CONFIG_TEMPLATE = """# AI Handoff Configuration
@@ -46,37 +41,6 @@ Workflow:
   4. Lead addresses feedback or proceeds to implementation
   5. Repeat for implementation review
 """
-
-
-def read_existing_config(config_path: Path) -> dict | None:
-    """Read existing config file and return parsed data."""
-    if not config_path.exists():
-        return None
-
-    try:
-        content = config_path.read_text()
-        if HAS_YAML:
-            data = yaml.safe_load(content)
-            return data
-        else:
-            # Simple parsing without PyYAML
-            lead_name = None
-            reviewer_name = None
-            lines = content.split('\n')
-            for i, line in enumerate(lines):
-                if 'lead:' in line and i + 1 < len(lines):
-                    next_line = lines[i + 1]
-                    if 'name:' in next_line:
-                        lead_name = next_line.split('name:')[1].strip()
-                elif 'reviewer:' in line and i + 1 < len(lines):
-                    next_line = lines[i + 1]
-                    if 'name:' in next_line:
-                        reviewer_name = next_line.split('name:')[1].strip()
-            if lead_name and reviewer_name:
-                return {'agents': {'lead': {'name': lead_name}, 'reviewer': {'name': reviewer_name}}}
-    except Exception:
-        pass
-    return None
 
 
 def prompt_input(prompt: str, valid_options: list[str] | None = None, lowercase: bool = True) -> str:
@@ -130,7 +94,7 @@ def init_command() -> int:
 
     # Check for existing config file (separate from parsing)
     if config_path.exists():
-        existing = read_existing_config(config_path)
+        existing = read_config(config_path)
         if existing:
             agents = existing.get('agents', {})
             lead = agents.get('lead', {}).get('name', 'unknown')
@@ -206,6 +170,7 @@ Usage: python -m ai_handoff <command>
 Commands:
   init          Create ai-handoff.yaml configuration interactively
   setup [dir]   Copy framework files to a project directory
+  migrate       Migrate legacy projects to use ai-handoff.yaml
   watch         Start the watcher daemon for automated orchestration
   state         View or update the orchestration state file
   session       Manage tmux session (start/attach/kill)
@@ -246,6 +211,9 @@ def main() -> int:
     elif command == "setup":
         target = sys.argv[2] if len(sys.argv) > 2 else "."
         return setup_command(target)
+    elif command == "migrate":
+        from ai_handoff.migrate import migrate_command
+        return migrate_command(sys.argv[2:])
     elif command == "watch":
         from ai_handoff.watcher import watch_command
         return watch_command(sys.argv[2:])

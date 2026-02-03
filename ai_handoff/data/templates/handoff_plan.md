@@ -1,8 +1,8 @@
 # Handoff: [Phase Name] - Plan Review
 
 **Date:** [YYYY-MM-DD]
-**From:** [Lead agent name] (Lead)
-**To:** [Reviewer agent name] (Reviewer)
+**From:** {{lead}} (Lead)
+**To:** {{reviewer}} (Reviewer)
 **Type:** Planning Review
 
 ## Summary
