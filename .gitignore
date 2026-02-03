@@ -28,3 +28,6 @@ Thumbs.db
 # Handoff orchestration state (ephemeral, not committed)
 handoff-state.json
 .handoff-state.tmp
+
+# User project artifacts (created by setup command or TUI, not part of this repo)
+projects/

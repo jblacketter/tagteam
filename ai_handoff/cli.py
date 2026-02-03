@@ -7,6 +7,7 @@ Usage:
     python -m ai_handoff watch       - Start the watcher daemon
     python -m ai_handoff state       - View/update orchestration state
     python -m ai_handoff session     - Manage tmux session
+    python -m ai_handoff serve       - Start the web dashboard server
 """
 
 import os
@@ -102,6 +103,21 @@ def prompt_input(prompt: str, valid_options: list[str] | None = None, lowercase:
         return check_value if lowercase else raw_value
 
 
+def write_config(target_dir: str, lead_name: str, reviewer_name: str) -> Path:
+    """Write ai-handoff.yaml to target_dir. Non-interactive.
+
+    This can be called from the CLI init flow, the TUI, or the web dashboard
+    without requiring stdin.
+    """
+    config_path = Path(target_dir) / "ai-handoff.yaml"
+    config_content = CONFIG_TEMPLATE.format(
+        lead_name=lead_name,
+        reviewer_name=reviewer_name,
+    )
+    config_path.write_text(config_content)
+    return config_path
+
+
 def init_command() -> int:
     """Interactive init command to create ai-handoff.yaml."""
     config_path = Path("ai-handoff.yaml")
@@ -163,12 +179,8 @@ def init_command() -> int:
         lead_name = agent2_name
         reviewer_name = agent1_name
 
-    # Write config
-    config_content = CONFIG_TEMPLATE.format(
-        lead_name=lead_name,
-        reviewer_name=reviewer_name
-    )
-    config_path.write_text(config_content)
+    # Write config using the shared non-interactive function
+    write_config(".", lead_name, reviewer_name)
 
     print(f"Created ai-handoff.yaml")
     print(f"  Lead: {lead_name}")
@@ -197,6 +209,8 @@ Commands:
   watch         Start the watcher daemon for automated orchestration
   state         View or update the orchestration state file
   session       Manage tmux session (start/attach/kill)
+  serve         Start the web dashboard server
+  tui           Launch the Handoff Saloon terminal UI
 
 Workflow:
   1. Run 'python -m ai_handoff setup' to copy framework files
@@ -207,6 +221,15 @@ Automated orchestration:
   1. Run 'python -m ai_handoff session start' to create tmux layout
   2. Start your agents in the lead and reviewer panes
   3. Press Enter in the watcher pane to begin monitoring
+
+Dashboard:
+  Run 'python -m ai_handoff serve --dir ~/projects/myproject' to open
+  the Handoff Saloon dashboard at http://localhost:8080
+  For a new project, the Mayor will guide you through setup.
+
+Terminal UI:
+  Run 'python -m ai_handoff tui --dir ~/projects/myproject' to open
+  the Handoff Saloon in your terminal (requires: pip install ai-handoff[tui])
 """
 
 
@@ -232,6 +255,17 @@ def main() -> int:
     elif command == "session":
         from ai_handoff.session import session_command
         return session_command(sys.argv[2:])
+    elif command == "serve":
+        from ai_handoff.server import serve_command
+        return serve_command(sys.argv[2:])
+    elif command == "tui":
+        try:
+            from ai_handoff.tui import tui_command
+        except ImportError:
+            print("The TUI requires the 'textual' package.")
+            print("Install it with: pip install ai-handoff[tui]")
+            return 1
+        return tui_command(sys.argv[2:])
     elif command in ["-h", "--help", "help"]:
         print(HELP_TEXT)
         return 0

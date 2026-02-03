@@ -195,6 +195,83 @@ python -m ai_handoff watch --mode notify
 
 This prints turn changes and sends macOS desktop notifications. You still switch terminals manually, but the watcher tells you exactly when and what command to run.
 
+## Dashboard
+
+The Handoff Saloon is a web dashboard for monitoring and controlling handoff cycles. The Mayor character guides you through setup and provides contextual help.
+
+### Starting the Dashboard
+
+```bash
+# Existing project
+python -m ai_handoff serve --dir ~/projects/myproject
+
+# New project (Mayor will guide you through setup)
+mkdir ~/projects/newproject
+python -m ai_handoff serve --dir ~/projects/newproject
+```
+
+Open **http://localhost:8080** in your browser. Use `--port 3000` for a different port.
+
+### Dashboard Modes
+
+- **Welcome** (no `ai-handoff.yaml`): Click the Mayor to get started. He'll guide you through entering your agent names, which creates the config file.
+- **Idle** (config exists, no active handoff): Click the Mayor to start a new phase, see a status summary, or learn how it works. Timeline shows past activity.
+- **Active** (handoff in progress): Full controls — Approve, Request Changes, Escalate, Abort. Mayor provides contextual tips. Timeline and cycle viewer update live.
+
+### Dashboard Controls
+
+| Button | Action |
+|--------|--------|
+| Approve | Mark the current handoff as done/approved |
+| Req Changes | Bump the round and switch turn to the other agent |
+| Escalate | Flag for human intervention |
+| Abort | Cancel the current cycle (prompts for reason) |
+
+The saloon scene reflects state visually: clock turns blue when working, characters turn green on approval, red on escalation, and muted on abort.
+
+## Terminal UI (TUI)
+
+The Handoff Saloon also comes as a terminal-based UI with ASCII art characters, sound effects, and an immersive dialogue system.
+
+### Installation
+
+```bash
+pip install ai-handoff[tui]
+```
+
+### Running the TUI
+
+```bash
+# Existing project
+python -m ai_handoff tui --dir ~/projects/myproject
+
+# New project (Mayor will guide you through setup)
+python -m ai_handoff tui
+
+# With sound effects
+python -m ai_handoff tui --dir ~/projects/myproject --sound
+```
+
+### TUI Features
+
+- **ASCII Saloon Scene** — Mayor (lead agent) and Rabbit Bartender (reviewer) characters
+- **Dialogue System** — Agent output rendered as character speech with typing effect
+- **Cuckoo Clock** — Shows whose turn it is with animated state changes
+- **Phase Map** — Press `m` to see project phase progress
+- **Review Replay** — Press `r` to replay past review cycles as conversation
+- **Sound Effects** — Optional tick, chime, bell, and stamp sounds (enable with `--sound`)
+- **First-Time Setup** — If no project exists, the Mayor guides you through creating one
+- **Escalation Handling** — When agents disagree, you make the call via dialogue choices
+
+### TUI Controls
+
+| Key | Action |
+|-----|--------|
+| `m` | Toggle phase map overlay |
+| `r` | Replay last review cycle |
+| `q` | Quit |
+| Space/Enter | Advance dialogue or skip typing |
+
 ## Configuration
 
 The `ai-handoff.yaml` file in your project root defines your agents:
@@ -235,6 +312,8 @@ your-project/
 ```bash
 python -m ai_handoff init          # Configure agents interactively
 python -m ai_handoff setup .       # Copy framework files to project
+python -m ai_handoff serve --dir . # Start the web dashboard
+python -m ai_handoff tui --dir .   # Launch the terminal UI
 python -m ai_handoff watch         # Start watcher daemon
 python -m ai_handoff state         # View/update orchestration state
 python -m ai_handoff session start # Create tmux session

@@ -3,7 +3,7 @@
 ## Overview
 AI Handoff Framework - A collaboration framework enabling structured, multi-phase AI-to-AI collaboration with human oversight.
 
-**Tech Stack:** Python 3.8+, YAML configuration, Markdown templates
+**Tech Stack:** Python 3.10+, YAML configuration, Markdown templates, Textual (TUI)
 
 **Workflow:** Lead / Reviewer with Human Arbiter
 
@@ -37,14 +37,24 @@ AI Handoff Framework - A collaboration framework enabling structured, multi-phas
   - `python -m ai_handoff session` tmux session management
   - `/handoff-cycle` skill updated with state file integration
 
-### Phase 4: Template Variable Substitution
+### Phase 4: TUI Consolidation
+- **Status:** Complete
+- **Description:** Consolidate the gamerfy TUI into ai-handoff as a subpackage. Adds `python -m ai_handoff tui` command with `--dir` flag, first-time user setup via TUI dialogue, and sound effects.
+- **Key Deliverables:**
+  - `ai_handoff/tui/` subpackage with ASCII saloon scene, dialogue system, map widget
+  - `python -m ai_handoff tui [--dir PATH]` CLI subcommand
+  - First-time user flow with project scaffolding via TUI
+  - `pip install ai-handoff[tui]` optional dependency
+  - Sound effects bundled in package
+
+### Phase 5: Template Variable Substitution
 - **Status:** Not Started
 - **Description:** Templates automatically use configured agent names
 - **Key Deliverables:**
   - Variable substitution in templates ({{lead}}, {{reviewer}})
   - Generated docs reflect config
 
-### Phase 5: Migration & Advanced Features
+### Phase 6: Migration & Advanced Features
 - **Status:** Not Started
 - **Description:** Migration path for existing users, multi-agent support
 - **Key Deliverables:**
