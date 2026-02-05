@@ -13,6 +13,9 @@ This framework provides skills, templates, and checklists for structured AI-to-A
 Configure your agents via `ai-handoff.yaml` - use any AI combination (Claude + Codex, Gemini + Claude, etc.).
 
 ## Installation
+### known issues 
+### this is tested on macos and linux, but has some minor issues on windows at the moment.
+### TUI automated hand off with the saloon is not yet fully functional. hand off and review cycle requires manual input
 
 ### From GitHub
 
