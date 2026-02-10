@@ -44,6 +44,16 @@ python -m ai_handoff setup .
 python -m ai_handoff init
 ```
 
+### Upgrading Existing Projects
+
+If you already have skill files from a previous version, re-run setup to get the new unified `/handoff` command:
+
+```bash
+python -m ai_handoff setup .
+```
+
+This adds the new `handoff.md` skill and marks the old individual skills as deprecated. Your existing cycle documents and state files are unchanged.
+
 ## Getting Started
 
 ### 1. Initialize Your Agents
@@ -76,68 +86,54 @@ Agent 2 role (lead/reviewer): reviewer
 Tell your AI agent:
 
 ```
-Read ai-handoff.yaml to see your role, then read .claude/skills/ for the workflow.
+Read ai-handoff.yaml to see your role, then read .claude/skills/handoff.md for the workflow.
 ```
 
 ### 3. Begin Working
 
 ```
-/handoff-status           # Check project status
-/handoff-plan create [phase]  # Create first phase plan
+/handoff status          # Check project status and orientation
+/handoff start [phase]   # Create first phase plan and start review cycle
 ```
 
-## Skills
+## Commands
 
-| Skill | Purpose | Primary User |
-|-------|---------|--------------|
-| `/handoff-plan` | Create and update phase plans | Lead |
-| `/handoff-handoff` | Create handoff documents | Lead |
-| `/handoff-review` | Review plans or implementations | Reviewer |
-| `/handoff-implement` | Track implementation progress | Lead |
-| `/handoff-phase` | Manage phase lifecycle | Both |
-| `/handoff-status` | Quick project status overview | Both |
-| `/handoff-decide` | Log decisions with rationale | Both |
-| `/handoff-escalate` | Escalate disagreements to arbiter | Both |
-| `/handoff-sync` | Generate sync summaries for sessions | Both |
-| `/handoff-cycle` | Automated review cycles (reduces copy-paste) | Both |
+The entire workflow uses a single unified command:
+
+| Command | Purpose | Who |
+|---------|---------|-----|
+| `/handoff` | Main command — reads state, does the right thing | Both |
+| `/handoff start [phase]` | Begin a new phase (plan + review cycle) | Lead |
+| `/handoff status` | Orientation, status check, drift reset | Both |
+
+The `/handoff` command auto-detects your role from `ai-handoff.yaml` and the current state from `handoff-state.json`, then acts accordingly. Every response ends with the exact next command to copy-paste.
+
+<details>
+<summary>Legacy skills (deprecated)</summary>
+
+The following individual skills still exist for backward compatibility but are replaced by `/handoff`:
+
+`/handoff-plan`, `/handoff-handoff`, `/handoff-review`, `/handoff-implement`, `/handoff-phase`, `/handoff-status`, `/handoff-decide`, `/handoff-escalate`, `/handoff-sync`, `/handoff-cycle`
+
+</details>
 
 ## Workflow
 
 ```
-Planning Cycle:
-  Lead: /handoff-plan create [phase]
-  Lead: /handoff-handoff plan [phase]
-  Reviewer: /handoff-review plan [phase]
-  Lead: /handoff-handoff read [phase] → incorporate feedback or proceed
-
-Implementation Cycle:
-  Lead: /handoff-implement start [phase]
-  [Lead implements]
-  Lead: /handoff-implement complete [phase]
-  Lead: /handoff-handoff impl [phase]
-  Reviewer: /handoff-review impl [phase]
-  Lead: /handoff-handoff read [phase] → fix issues or proceed
-
-Completion:
-  /handoff-phase complete [phase]
-  Start next phase...
+Lead:     /handoff start [phase]     → creates plan + review cycle
+Reviewer: /handoff                   → reviews, APPROVE or REQUEST_CHANGES
+Lead:     /handoff                   → addresses feedback
+Reviewer: /handoff                   → reviews again
+  ↓
+(repeat until approved or round 5 auto-escalation)
+  ↓
+Lead:     /handoff start [phase] impl → starts implementation review
+Reviewer: /handoff                    → reviews implementation
+  ↓
+(approved → next phase)
 ```
 
-### Automated Review Cycle (Alternative)
-
-Use `/handoff-cycle` to reduce manual copy-paste during multi-round reviews:
-
-```
-Lead: /handoff-cycle start [phase] plan
-  ↓
-Reviewer: /handoff-cycle [phase]  → APPROVE or REQUEST_CHANGES
-  ↓
-Lead: /handoff-cycle [phase]      → address feedback
-  ↓
-(repeat until approved or round 5 escalation)
-```
-
-Both agents work from one file. Auto-escalates to human after 5 rounds.
+Both agents work from one cycle document. Auto-escalates to human after 5 rounds.
 
 ## Automated Orchestration
 

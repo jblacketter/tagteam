@@ -65,6 +65,26 @@ AI Handoff Framework - A collaboration framework enabling structured, multi-phas
   - Forward-compatible `model_patterns` schema field with overlap validation
   - Unit tests for config and migration modules
 
+### Phase 7: Unified Command (Command Drift Fix)
+- **Status:** Complete
+- **Description:** Replace 10 skill files (~30+ subcommands) with a single `/handoff` command that auto-detects role and state. Fixes agent drift in long context windows.
+- **Key Deliverables:**
+  - Single `/handoff` skill file (<150 lines)
+  - State-driven auto-dispatch (reads role + state, does the right thing)
+  - Mandatory NEXT COMMAND output box on every response
+  - Deprecation notices on old skill files
+  - 3 commands total: `/handoff`, `/handoff start [phase]`, `/handoff status`
+
+### Phase 8: Orchestration Fix
+- **Status:** Complete
+- **Description:** Fix the watcher daemon and tmux send-keys integration so agents automatically pick up tasks when it's their turn
+- **Key Deliverables:** TBD (debugging existing infrastructure)
+
+### Phase 9: Saloon TUI Overhaul
+- **Status:** Not Started
+- **Description:** Fix TUI state updates (depends on Phase 8), then improve graphics
+- **Key Deliverables:** TBD
+
 ## Decision Log
 See `docs/decision_log.md`
 

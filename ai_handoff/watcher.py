@@ -27,16 +27,95 @@ def notify_macos(title: str, message: str) -> None:
         pass
 
 
-def send_tmux_keys(pane_target: str, command: str) -> bool:
-    """Send keys to a tmux pane. Returns True on success."""
+def pane_exists(pane_target: str) -> bool:
+    """Check if a tmux pane exists."""
     try:
         result = subprocess.run(
-            ["tmux", "send-keys", "-t", pane_target, command, "Enter"],
+            ["tmux", "display-message", "-t", pane_target, "-p", "#{pane_id}"],
             capture_output=True, text=True, timeout=5,
         )
-        return result.returncode == 0
+        return result.returncode == 0 and result.stdout.strip() != ""
     except Exception:
         return False
+
+
+def capture_pane(pane_target: str, last_n_lines: int = 5) -> str:
+    """Capture the last N lines of a tmux pane's visible content."""
+    try:
+        result = subprocess.run(
+            ["tmux", "capture-pane", "-t", pane_target, "-p",
+             "-S", str(-last_n_lines)],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout
+        return ""
+    except Exception:
+        return ""
+
+
+def send_tmux_keys(
+    pane_target: str,
+    command: str,
+    max_retries: int = 3,
+    retry_delay: float = 2.0,
+    pre_send_delay: float = 1.0,
+) -> bool:
+    """Send keys to a tmux pane with retry logic.
+
+    Steps:
+    1. Verify pane exists
+    2. Wait pre_send_delay for agent to settle
+    3. Clear any partial input (C-u)
+    4. Send command as literal text + Enter
+    5. Retry on failure
+    """
+    if not pane_exists(pane_target):
+        print(f"[{_ts()}]    ERROR: Pane '{pane_target}' does not exist")
+        return False
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            if pre_send_delay > 0:
+                time.sleep(pre_send_delay)
+
+            # Clear any partial input on the current line
+            subprocess.run(
+                ["tmux", "send-keys", "-t", pane_target, "C-u"],
+                capture_output=True, timeout=5,
+            )
+            time.sleep(0.2)
+
+            # Send command as literal text (-l flag prevents key name interpretation)
+            subprocess.run(
+                ["tmux", "send-keys", "-t", pane_target, "-l", command],
+                capture_output=True, text=True, timeout=5, check=True,
+            )
+            time.sleep(0.1)
+
+            # Send Enter separately (not literal — Enter is a tmux key name)
+            result = subprocess.run(
+                ["tmux", "send-keys", "-t", pane_target, "Enter"],
+                capture_output=True, text=True, timeout=5,
+            )
+
+            if result.returncode == 0:
+                return True
+
+            print(f"[{_ts()}]    Attempt {attempt}/{max_retries} failed"
+                  f" (rc={result.returncode})")
+
+        except subprocess.CalledProcessError as e:
+            print(f"[{_ts()}]    Attempt {attempt}/{max_retries} error:"
+                  f" {e.stderr.strip() if e.stderr else e}")
+        except Exception as e:
+            print(f"[{_ts()}]    Attempt {attempt}/{max_retries} error: {e}")
+
+        if attempt < max_retries:
+            print(f"[{_ts()}]    Retrying in {retry_delay}s...")
+            time.sleep(retry_delay)
+
+    return False
 
 
 def _ts() -> str:
@@ -69,6 +148,9 @@ def watch(
     confirm: bool = False,
     timeout_minutes: int = 30,
     project_dir: str = ".",
+    max_retries: int = 3,
+    retry_delay: float = 2.0,
+    pre_send_delay: float = 1.0,
 ) -> None:
     """Main watch loop. Blocks until interrupted with Ctrl-C."""
 
@@ -86,11 +168,16 @@ def watch(
     print(f"[{_ts()}] Lead: {lead_name} | Reviewer: {reviewer_name}")
     if mode == "tmux":
         print(f"[{_ts()}] Panes: lead={lead_pane}, reviewer={reviewer_pane}")
+        # Verify panes exist at startup
+        for name, pane in [("lead", lead_pane), ("reviewer", reviewer_pane)]:
+            if pane_exists(pane):
+                print(f"[{_ts()}]   {name} pane OK: {pane}")
+            else:
+                print(f"[{_ts()}]   WARNING: {name} pane '{pane}' not found")
     if confirm:
         print(f"[{_ts()}] Confirm mode: will pause before sending commands")
     print()
 
-    watcher_start = datetime.now(timezone.utc)
     last_processed_at = None
     idle_since = time.time()
 
@@ -104,14 +191,21 @@ def watch(
 
             updated_at_raw = state.get("updated_at")
             updated_at = updated_at_raw or "__missing__"
-            updated_dt = _parse_timestamp(updated_at_raw)
 
-            # Skip if we already processed this state change (idempotency)
-            if last_processed_at is None and updated_dt and updated_dt <= watcher_start:
-                last_processed_at = updated_at
-                idle_since = time.time()
-                time.sleep(interval)
-                continue
+            # On first poll: process current state if it's actionable (ready).
+            # This ensures a watcher restart mid-cycle picks up the active turn.
+            if last_processed_at is None:
+                if state.get("status") != "ready":
+                    # Not actionable — just record and wait for changes
+                    last_processed_at = updated_at
+                    idle_since = time.time()
+                    print(f"[{_ts()}] Current state: {state.get('status', '?')}"
+                          f" (turn: {state.get('turn', '?')},"
+                          f" phase: {state.get('phase', '?')})")
+                    time.sleep(interval)
+                    continue
+                # State is ready — fall through to process it
+                print(f"[{_ts()}] Picking up active turn from existing state")
 
             if updated_at == last_processed_at:
                 # Check for stuck agent
@@ -150,14 +244,19 @@ def watch(
                                   f" '{command}' to {pane}...")
                         except EOFError:
                             break
-                    success = send_tmux_keys(pane, command)
+                    success = send_tmux_keys(
+                        pane, command,
+                        max_retries=max_retries,
+                        retry_delay=retry_delay,
+                        pre_send_delay=pre_send_delay,
+                    )
                     if success:
                         print(f"[{_ts()}]    Sent to {pane}: {command}")
                     else:
-                        print(f"[{_ts()}]    ERROR: Failed to send to"
-                              f" tmux pane '{pane}'")
+                        print(f"[{_ts()}]    FAILED: Could not send to"
+                              f" '{pane}' after {max_retries} attempts")
                         notify_macos("AI Handoff",
-                                     f"Failed to send to {pane}")
+                                     f"Failed to send to {pane} after retries")
 
                 elif mode == "notify":
                     print(f"[{_ts()}]    Command: {command}")
@@ -197,6 +296,9 @@ def watch_command(args: list[str]) -> int:
     reviewer_pane = "ai-handoff:0.2"
     confirm = False
     timeout_minutes = 30
+    max_retries = 3
+    retry_delay = 2.0
+    pre_send_delay = 1.0
 
     i = 0
     while i < len(args):
@@ -222,6 +324,15 @@ def watch_command(args: list[str]) -> int:
         elif arg == "--timeout" and i + 1 < len(args):
             timeout_minutes = int(args[i + 1])
             i += 2
+        elif arg == "--retries" and i + 1 < len(args):
+            max_retries = int(args[i + 1])
+            i += 2
+        elif arg == "--retry-delay" and i + 1 < len(args):
+            retry_delay = float(args[i + 1])
+            i += 2
+        elif arg == "--send-delay" and i + 1 < len(args):
+            pre_send_delay = float(args[i + 1])
+            i += 2
         elif arg in ("-h", "--help"):
             print("Usage: python -m ai_handoff watch [options]")
             print()
@@ -232,6 +343,9 @@ def watch_command(args: list[str]) -> int:
             print("  --reviewer-pane T  tmux pane target for reviewer (default: ai-handoff:0.2)")
             print("  --confirm          Pause for confirmation before sending commands")
             print("  --timeout N        Alert after N minutes of inactivity (default: 30)")
+            print("  --retries N        Max send retries on failure (default: 3)")
+            print("  --retry-delay N    Seconds between retries (default: 2.0)")
+            print("  --send-delay N     Seconds to wait before sending (default: 1.0)")
             return 0
         else:
             print(f"Unknown argument: {arg}")
@@ -244,5 +358,8 @@ def watch_command(args: list[str]) -> int:
         reviewer_pane=reviewer_pane,
         confirm=confirm,
         timeout_minutes=timeout_minutes,
+        max_retries=max_retries,
+        retry_delay=retry_delay,
+        pre_send_delay=pre_send_delay,
     )
     return 0

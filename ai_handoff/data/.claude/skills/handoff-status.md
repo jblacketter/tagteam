@@ -1,3 +1,5 @@
+> **DEPRECATED:** Use `/handoff status` instead. This skill is replaced by the unified `/handoff` command. See `handoff.md`.
+
 # Skill: /status
 
 > **Before using this skill**:

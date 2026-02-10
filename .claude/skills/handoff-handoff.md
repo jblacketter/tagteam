@@ -1,4 +1,6 @@
-# Skill: /handoff-handoff-handoff
+> **DEPRECATED:** Use `/handoff` instead. This skill is replaced by the unified `/handoff` command. See `handoff.md`.
+
+# Skill: /handoff-handoff
 
 > **Before using this skill**:
 > 1. Read `ai-handoff.yaml` in the project root to see your configured role

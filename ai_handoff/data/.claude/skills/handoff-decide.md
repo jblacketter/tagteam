@@ -1,3 +1,5 @@
+> **DEPRECATED:** Use `/handoff` instead. This skill is replaced by the unified `/handoff` command. See `handoff.md`.
+
 # Skill: /decide
 
 > **Before using this skill**:

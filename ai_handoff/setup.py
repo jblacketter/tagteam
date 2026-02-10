@@ -145,8 +145,8 @@ def main(target_dir: str = ".") -> None:
     print()
     print("Next steps:")
     print("  1. Run 'python -m ai_handoff init' to configure your agents")
-    print("  2. Tell your AI: 'Read ai-handoff.yaml to see your role, then read .claude/skills/'")
-    print("  3. Then ask your AI to run /handoff-status or /handoff-plan create [phase]")
+    print("  2. Tell your AI: 'Read ai-handoff.yaml to see your role, then read .claude/skills/handoff.md'")
+    print("  3. Then ask your AI to run /handoff status or /handoff start [phase]")
 
 
 def cli():
