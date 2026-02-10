@@ -78,7 +78,16 @@ AI Handoff Framework - A collaboration framework enabling structured, multi-phas
 ### Phase 8: Orchestration Fix
 - **Status:** Complete
 - **Description:** Fix the watcher daemon and tmux send-keys integration so agents automatically pick up tasks when it's their turn
-- **Key Deliverables:** TBD (debugging existing infrastructure)
+- **Key Deliverables:**
+  - `_log()` helper with `flush=True` for visible watcher output in tmux panes
+  - Escape x3 + C-c input clearing (C-u doesn't work in TUI agents)
+  - C-m submit instead of Enter (reliable across Claude Code and Codex)
+  - Agent idle detection via `capture-pane` (waits for prompt before sending)
+  - Universal text command instead of `/handoff` for cross-agent compatibility
+  - Directory-based skill format (`handoff/SKILL.md` with YAML frontmatter)
+  - `setup.py` copies directory-based skills alongside flat `.md` files
+  - `session.py` creates 3-column layout with mouse mode and pane labels
+  - `--dir` flag for `session start` to set working directory
 
 ### Phase 9: Saloon TUI Overhaul
 - **Status:** Not Started

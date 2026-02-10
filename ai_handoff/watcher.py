@@ -5,6 +5,7 @@ Polls handoff-state.json and triggers agents via desktop notifications
 or tmux send-keys when it's their turn.
 """
 
+import re
 import subprocess
 import sys
 import time
@@ -54,6 +55,60 @@ def capture_pane(pane_target: str, last_n_lines: int = 5) -> str:
         return ""
 
 
+def is_agent_idle(pane_target: str) -> bool:
+    """Check if an agent TUI is at its input prompt (idle, ready for input).
+
+    Looks for prompt indicators in the last few lines of the pane:
+    - Claude Code: ❯ or ›  followed by placeholder text or empty input
+    - Codex: › followed by placeholder or empty
+    - Also checks for "? for shortcuts" which appears when idle
+    """
+    content = capture_pane(pane_target, last_n_lines=5)
+    if not content.strip():
+        return False
+
+    lines = content.strip().splitlines()
+    # Check last few lines for idle indicators
+    tail = "\n".join(lines[-4:])
+
+    # Agent is busy if it shows these patterns
+    busy_patterns = [
+        "esc to interrupt",
+        "thinking",
+        "Running",
+        "Do you want to proceed",
+        "Do you want to make this edit",
+    ]
+    for pattern in busy_patterns:
+        if pattern.lower() in tail.lower():
+            return False
+
+    # Agent is idle if showing prompt indicators
+    idle_patterns = [
+        "? for shortcuts",
+        "context left",
+    ]
+    for pattern in idle_patterns:
+        if pattern.lower() in tail.lower():
+            return True
+
+    return False
+
+
+def wait_for_idle(
+    pane_target: str,
+    timeout: float = 300.0,
+    poll_interval: float = 5.0,
+) -> bool:
+    """Wait until the agent in the given pane is idle, up to timeout seconds."""
+    start = time.time()
+    while time.time() - start < timeout:
+        if is_agent_idle(pane_target):
+            return True
+        time.sleep(poll_interval)
+    return False
+
+
 def send_tmux_keys(
     pane_target: str,
     command: str,
@@ -65,9 +120,9 @@ def send_tmux_keys(
 
     Steps:
     1. Verify pane exists
-    2. Wait pre_send_delay for agent to settle
-    3. Clear any partial input (Escape x3 for TUI agents, then C-u fallback)
-    4. Send command as literal text + Enter
+    2. Wait for agent to be idle (at input prompt)
+    3. Clear any partial input (Escape x3 + C-c)
+    4. Send command as literal text + C-m
     5. Retry on failure
     """
     if not pane_exists(pane_target):
@@ -76,6 +131,11 @@ def send_tmux_keys(
 
     for attempt in range(1, max_retries + 1):
         try:
+            # Wait for agent to be idle before sending
+            _log(f"   Waiting for agent in {pane_target} to be idle...")
+            if not wait_for_idle(pane_target, timeout=300.0, poll_interval=5.0):
+                _log(f"   WARNING: Agent in {pane_target} not idle after 5m, sending anyway")
+
             if pre_send_delay > 0:
                 time.sleep(pre_send_delay)
 

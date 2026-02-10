@@ -150,14 +150,14 @@ This rigid visual pattern:
 - `.claude/skills/handoff-*.md` — Deprecation notices on existing project copies
 
 ## Success Criteria
-- [ ] Single `/handoff` skill file under 150 lines
-- [ ] `/handoff` auto-detects role and state correctly
-- [ ] Every `/handoff` response ends with the NEXT COMMAND box
-- [ ] `/handoff start [phase]` creates plan + cycle doc + state
-- [ ] `/handoff status` provides full orientation summary
-- [ ] Old skills have deprecation notice pointing to `/handoff`
-- [ ] README reflects simplified 3-command workflow
-- [ ] `setup.py` next-steps references `/handoff` instead of old commands
+- [x] Single `/handoff` skill file under 150 lines
+- [x] `/handoff` auto-detects role and state correctly
+- [x] Every `/handoff` response ends with the NEXT COMMAND box
+- [x] `/handoff start [phase]` creates plan + cycle doc + state
+- [x] `/handoff status` provides full orientation summary
+- [x] Old skills have deprecation notice pointing to `/handoff`
+- [x] README reflects simplified 3-command workflow
+- [x] `setup.py` next-steps references `/handoff` instead of old commands
 
 ## Open Questions
 - Should `/handoff start [phase]` handle both plan and impl cycles, or just plan? (Proposal: It asks the lead what type — plan or impl — keeping the command surface minimal)

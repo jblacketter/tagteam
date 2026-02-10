@@ -52,7 +52,7 @@ If you already have skill files from a previous version, re-run setup to get the
 python -m ai_handoff setup .
 ```
 
-This adds the new `handoff.md` skill and marks the old individual skills as deprecated. Your existing cycle documents and state files are unchanged.
+This adds the new `handoff/SKILL.md` directory-based skill and marks the old individual skills as deprecated. Your existing cycle documents and state files are unchanged.
 
 ## Getting Started
 
@@ -86,7 +86,7 @@ Agent 2 role (lead/reviewer): reviewer
 Tell your AI agent:
 
 ```
-Read ai-handoff.yaml to see your role, then read .claude/skills/handoff.md for the workflow.
+Read ai-handoff.yaml to see your role, then read .claude/skills/handoff/SKILL.md for the workflow.
 ```
 
 ### 3. Begin Working
@@ -149,41 +149,39 @@ python -m ai_handoff session start
 tmux attach -t ai-handoff
 ```
 
-This gives you a 3-pane layout:
+This gives you a 3-pane layout with labeled borders:
 
 ```
-┌──────────────────┬──────────────────┐
-│  Pane 0: Lead    │  Pane 2: Reviewer│
-│  (Claude Code)   │  (Codex)         │
-├──────────────────┴──────────────────┤
-│  Pane 1: Watcher                    │
-│  (monitors state, triggers agents)  │
-└─────────────────────────────────────┘
+┌──────────────┬──────────────┬──────────────┐
+│ CLAUDE (Lead)│   WATCHER    │CODEX (Review)│
+│              │              │              │
+│              │              │              │
+└──────────────┴──────────────┴──────────────┘
 ```
 
-**Navigating tmux panes:** Press `Ctrl-b` (release), then an arrow key to move between panes. If keyboard navigation doesn't work, enable mouse support:
+**Mouse mode is enabled automatically** — click any pane to switch focus. TUI agents (Claude Code, Codex) capture `Ctrl-b`, so keyboard-based tmux navigation may not work while agents are running.
+
+You can also specify a project directory:
 
 ```bash
-tmux set -g mouse on
+python -m ai_handoff session start --dir ~/projects/myproject
 ```
-
-This lets you click directly on panes to switch focus.
 
 ### Starting Agents
 
-1. Click on **Pane 0** (top-left) and start your lead agent (e.g. `claude`)
-2. Click on **Pane 2** (top-right) and start your reviewer agent (e.g. `codex`)
-3. Click on **Pane 1** (bottom) and press Enter to start the watcher
+1. Click **Pane 0** (left) and start your lead agent (e.g. `claude`)
+2. Click **Pane 2** (right) and start your reviewer agent (e.g. `codex`)
+3. Click **Pane 1** (center) and press Enter to start the watcher
 
 ### Running a Cycle
 
-In the lead pane, start a review cycle as normal:
+In the lead pane, start a review cycle:
 
 ```
-/handoff-cycle start my-phase plan
+/handoff start my-phase
 ```
 
-The skill automatically writes `handoff-state.json`. The watcher detects the turn change and sends `/handoff-cycle my-phase` to the reviewer's pane. The reviewer processes it, updates state, and the watcher sends back to the lead. This repeats until the cycle is approved, escalated, or aborted -- with zero manual intervention.
+The skill writes `handoff-state.json`. The watcher detects the turn change, waits for the target agent to be idle, then sends the handoff command to the reviewer's pane. The reviewer processes it, updates state, and the watcher sends back to the lead. This repeats until the cycle is approved, escalated, or aborted — with zero manual intervention.
 
 ### Orchestration Commands
 

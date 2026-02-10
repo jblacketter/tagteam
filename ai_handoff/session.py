@@ -25,15 +25,16 @@ def session_exists() -> bool:
     return result.returncode == 0
 
 
-def create_session() -> bool:
-    """Create tmux session with lead, reviewer, and watcher panes.
+def create_session(project_dir: str | None = None) -> bool:
+    """Create tmux session with lead, watcher, and reviewer panes.
 
-    Layout:
-        ┌──────────────┬──────────────┐
-        │   0: lead    │  1: reviewer │
-        ├──────────────┴──────────────┤
-        │         2: watcher          │
-        └─────────────────────────────┘
+    Layout (3 equal columns):
+        ┌──────────┬──────────┬──────────┐
+        │ 0: lead  │ 1: watch │ 2: review│
+        └──────────┴──────────┴──────────┘
+
+    Enables mouse mode so you can click to switch panes
+    (TUI agents capture Ctrl-b, making keyboard navigation unreliable).
     """
     if session_exists():
         print(f"Session '{SESSION_NAME}' already exists.")
@@ -41,23 +42,39 @@ def create_session() -> bool:
         print(f"  Kill:   tmux kill-session -t {SESSION_NAME}")
         return False
 
+    start_dir = project_dir or "."
+
     try:
         # Create session with lead pane (pane 0)
-        _tmux("new-session", "-d", "-s", SESSION_NAME, "-n", "handoff")
+        _tmux("new-session", "-d", "-s", SESSION_NAME, "-n", "handoff",
+              "-c", start_dir)
 
-        # Split bottom for watcher pane (pane 1, 20% height)
-        _tmux("split-window", "-v", "-t", f"{SESSION_NAME}:0.0",
-              "-l", "20%")
+        # Split right for watcher (pane 1)
+        _tmux("split-window", "-h", "-t", f"{SESSION_NAME}:0.0",
+              "-c", start_dir)
 
-        # Go back to top pane and split right for reviewer (pane 2)
-        _tmux("split-window", "-h", "-t", f"{SESSION_NAME}:0.0")
+        # Split right again for reviewer (pane 2)
+        _tmux("split-window", "-h", "-t", f"{SESSION_NAME}:0.1",
+              "-c", start_dir)
 
-        # After splits, pane indices are:
-        #   0 = lead (top-left)
-        #   1 = watcher (bottom, from the vertical split)
-        #   2 = reviewer (top-right, from the horizontal split)
+        # Even out the columns
+        _tmux("select-layout", "-t", f"{SESSION_NAME}:0", "even-horizontal")
 
-        # Pre-type the watcher command in the bottom pane (don't auto-start)
+        # Label panes
+        _tmux("select-pane", "-t", f"{SESSION_NAME}:0.0", "-T", "CLAUDE (Lead)")
+        _tmux("select-pane", "-t", f"{SESSION_NAME}:0.1", "-T", "WATCHER")
+        _tmux("select-pane", "-t", f"{SESSION_NAME}:0.2", "-T", "CODEX (Reviewer)")
+
+        # Show pane titles in borders
+        _tmux("set-option", "-t", SESSION_NAME, "pane-border-status", "top")
+        _tmux("set-option", "-t", SESSION_NAME, "pane-border-format",
+              " #{pane_title} ")
+
+        # Enable mouse mode — click to switch panes
+        # (TUI agents like Claude Code/Codex capture Ctrl-b)
+        _tmux("set-option", "-t", SESSION_NAME, "mouse", "on")
+
+        # Pre-type the watcher command (don't auto-start)
         _tmux("send-keys", "-t", f"{SESSION_NAME}:0.1",
               "python -m ai_handoff watch --mode tmux", "")
 
@@ -66,9 +83,11 @@ def create_session() -> bool:
 
         print(f"Created tmux session '{SESSION_NAME}'")
         print()
-        print("  Pane 0 (top-left):  Lead agent      - start Claude Code here")
-        print("  Pane 1 (bottom):    Watcher daemon   - press Enter to start")
-        print("  Pane 2 (top-right): Reviewer agent   - start Codex here")
+        print("  Pane 0 (left):   Lead agent   - start Claude Code here")
+        print("  Pane 1 (center): Watcher      - press Enter to start")
+        print("  Pane 2 (right):  Reviewer     - start Codex here")
+        print()
+        print("  Mouse mode is ON — click a pane to switch to it")
         print()
         print(f"  Attach: tmux attach -t {SESSION_NAME}")
         return True
@@ -98,7 +117,10 @@ def session_command(args: list[str]) -> int:
     subcmd = args[0]
 
     if subcmd == "start":
-        create_session()
+        project_dir = None
+        if len(args) > 1 and args[1] == "--dir" and len(args) > 2:
+            project_dir = args[2]
+        create_session(project_dir=project_dir)
         return 0
 
     if subcmd == "attach":

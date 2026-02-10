@@ -78,11 +78,11 @@ Based on known code analysis, likely fixes include:
 - `ai_handoff/state.py` — Only if state format changes needed
 
 ## Success Criteria
-- [ ] Watcher successfully sends `/handoff` to the correct tmux pane
-- [ ] Agent CLI receives and executes the command
-- [ ] A full plan review cycle completes with zero manual intervention
-- [ ] Watcher handles agent-not-ready gracefully (retries or waits)
-- [ ] Watcher restart mid-cycle picks up the current state
+- [x] Watcher successfully sends command to the correct tmux pane
+- [x] Agent CLI receives and executes the command
+- [x] A full plan review cycle completes (Claude creates plan → watcher relays → Codex reviews and approves)
+- [x] Watcher handles agent-not-ready gracefully (idle detection via capture-pane, waits up to 5m)
+- [x] Watcher restart mid-cycle picks up the current state
 
 ## Open Questions
 - What specific failures does the user observe? (To be filled in during debugging)
