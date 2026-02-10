@@ -1,4 +1,7 @@
-> **NOTE:** This file is superseded by `handoff/SKILL.md` (directory-based skill format). See that file for the full skill definition.
+---
+name: handoff
+description: Unified command for the AI handoff workflow. Auto-detects role and state, then executes the appropriate action.
+---
 
 # Skill: /handoff
 
@@ -39,13 +42,13 @@ Unified command for the AI handoff workflow. Reads your role and current state, 
 2. Address the feedback: update the plan or implementation files
 3. Add a new `## Round [N+1]` section to the cycle file with `### Lead` (your response) and `### Reviewer` (`_awaiting response_`)
 4. Update CYCLE_STATUS: `READY_FOR: reviewer`, increment `ROUND`
-5. Run: `python -m ai_handoff state set --turn reviewer --status ready --command "/handoff" --phase [phase] --round [N+1] --updated-by [your-agent-name]`
+5. Run: `python -m ai_handoff state set --turn reviewer --status ready --command "Read .claude/skills/handoff/SKILL.md and handoff-state.json, then act on your turn" --phase [phase] --round [N+1] --updated-by [your-agent-name]`
 
 #### As Reviewer (your turn)
 1. Read the lead's submission and the referenced plan/implementation files
 2. Choose ONE action:
    - **APPROVE** — Set `STATE: approved`. Run: `python -m ai_handoff state set --status done --result approved --updated-by [your-agent-name]`
-   - **REQUEST_CHANGES** — Write specific feedback. If round 5: set `STATE: escalated`, run: `python -m ai_handoff state set --status escalated --updated-by [your-agent-name]`. Otherwise: set `READY_FOR: lead`, run: `python -m ai_handoff state set --turn lead --status ready --command "/handoff" --phase [phase] --round [round] --updated-by [your-agent-name]`
+   - **REQUEST_CHANGES** — Write specific feedback. If round 5: set `STATE: escalated`, run: `python -m ai_handoff state set --status escalated --updated-by [your-agent-name]`. Otherwise: set `READY_FOR: lead`, run: `python -m ai_handoff state set --turn lead --status ready --command "Read .claude/skills/handoff/SKILL.md and handoff-state.json, then act on your turn" --phase [phase] --round [round] --updated-by [your-agent-name]`
    - **ESCALATE** — Set `STATE: escalated`. Run: `python -m ai_handoff state set --status escalated --updated-by [your-agent-name]`
    - **NEED_HUMAN** — Add `### Human Input Needed` section with your question. Set `STATE: needs-human`, `READY_FOR: human`. Run: `python -m ai_handoff state set --status escalated --updated-by [your-agent-name]`
 
@@ -72,7 +75,7 @@ Replace `[agent name]` with the next agent's name. For completed/escalated/needs
    - Reference to plan file (or implementation files if impl)
    - `## Round 1` with `### Lead` (Action: SUBMIT_FOR_REVIEW, summary) and `### Reviewer` (`_awaiting response_`)
    - CYCLE_STATUS block: `READY_FOR: reviewer`, `ROUND: 1`, `STATE: in-progress`
-4. Run: `python -m ai_handoff state set --turn reviewer --status ready --command "/handoff" --phase [phase] --type [plan|impl] --round 1 --updated-by [your-agent-name]`
+4. Run: `python -m ai_handoff state set --turn reviewer --status ready --command "Read .claude/skills/handoff/SKILL.md and handoff-state.json, then act on your turn" --phase [phase] --type [plan|impl] --round 1 --updated-by [your-agent-name]`
 5. End with the NEXT COMMAND box.
 
 ---

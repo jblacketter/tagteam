@@ -66,12 +66,12 @@ def send_tmux_keys(
     Steps:
     1. Verify pane exists
     2. Wait pre_send_delay for agent to settle
-    3. Clear any partial input (C-u)
+    3. Clear any partial input (Escape x3 for TUI agents, then C-u fallback)
     4. Send command as literal text + Enter
     5. Retry on failure
     """
     if not pane_exists(pane_target):
-        print(f"[{_ts()}]    ERROR: Pane '{pane_target}' does not exist")
+        _log(f"   ERROR: Pane '{pane_target}' does not exist")
         return False
 
     for attempt in range(1, max_retries + 1):
@@ -79,43 +79,57 @@ def send_tmux_keys(
             if pre_send_delay > 0:
                 time.sleep(pre_send_delay)
 
-            # Clear any partial input on the current line
+            # Clear any partial input — different TUIs need different keys:
+            # Escape x3 clears Claude Code, C-c clears Codex
+            for _ in range(3):
+                subprocess.run(
+                    ["tmux", "send-keys", "-t", pane_target, "Escape"],
+                    capture_output=True, timeout=5,
+                )
+                time.sleep(0.15)
+            time.sleep(0.3)
             subprocess.run(
-                ["tmux", "send-keys", "-t", pane_target, "C-u"],
+                ["tmux", "send-keys", "-t", pane_target, "C-c"],
                 capture_output=True, timeout=5,
             )
-            time.sleep(0.2)
+            time.sleep(0.5)
 
             # Send command as literal text (-l flag prevents key name interpretation)
             subprocess.run(
                 ["tmux", "send-keys", "-t", pane_target, "-l", command],
                 capture_output=True, text=True, timeout=5, check=True,
             )
-            time.sleep(0.1)
+            time.sleep(1.0)
 
-            # Send Enter separately (not literal — Enter is a tmux key name)
+            # Send C-m (carriage return) to submit — more reliable
+            # than "Enter" with TUI agents like Claude Code and Codex
             result = subprocess.run(
-                ["tmux", "send-keys", "-t", pane_target, "Enter"],
+                ["tmux", "send-keys", "-t", pane_target, "C-m"],
                 capture_output=True, text=True, timeout=5,
             )
 
             if result.returncode == 0:
                 return True
 
-            print(f"[{_ts()}]    Attempt {attempt}/{max_retries} failed"
-                  f" (rc={result.returncode})")
+            _log(f"   Attempt {attempt}/{max_retries} failed"
+                 f" (rc={result.returncode})")
 
         except subprocess.CalledProcessError as e:
-            print(f"[{_ts()}]    Attempt {attempt}/{max_retries} error:"
-                  f" {e.stderr.strip() if e.stderr else e}")
+            _log(f"   Attempt {attempt}/{max_retries} error:"
+                 f" {e.stderr.strip() if e.stderr else e}")
         except Exception as e:
-            print(f"[{_ts()}]    Attempt {attempt}/{max_retries} error: {e}")
+            _log(f"   Attempt {attempt}/{max_retries} error: {e}")
 
         if attempt < max_retries:
-            print(f"[{_ts()}]    Retrying in {retry_delay}s...")
+            _log(f"   Retrying in {retry_delay}s...")
             time.sleep(retry_delay)
 
     return False
+
+
+def _log(msg: str) -> None:
+    """Print with timestamp and flush (required for tmux pane output)."""
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
 def _ts() -> str:
@@ -164,19 +178,19 @@ def watch(
         lead_name = "lead"
         reviewer_name = "reviewer"
 
-    print(f"[{_ts()}] Watching handoff-state.json (interval: {interval}s, mode: {mode})")
-    print(f"[{_ts()}] Lead: {lead_name} | Reviewer: {reviewer_name}")
+    _log(f"Watching handoff-state.json (interval: {interval}s, mode: {mode})")
+    _log(f"Lead: {lead_name} | Reviewer: {reviewer_name}")
     if mode == "tmux":
-        print(f"[{_ts()}] Panes: lead={lead_pane}, reviewer={reviewer_pane}")
+        _log(f"Panes: lead={lead_pane}, reviewer={reviewer_pane}")
         # Verify panes exist at startup
         for name, pane in [("lead", lead_pane), ("reviewer", reviewer_pane)]:
             if pane_exists(pane):
-                print(f"[{_ts()}]   {name} pane OK: {pane}")
+                _log(f"  {name} pane OK: {pane}")
             else:
-                print(f"[{_ts()}]   WARNING: {name} pane '{pane}' not found")
+                _log(f"  WARNING: {name} pane '{pane}' not found")
     if confirm:
-        print(f"[{_ts()}] Confirm mode: will pause before sending commands")
-    print()
+        _log("Confirm mode: will pause before sending commands")
+    print(flush=True)
 
     last_processed_at = None
     idle_since = time.time()
@@ -199,21 +213,21 @@ def watch(
                     # Not actionable — just record and wait for changes
                     last_processed_at = updated_at
                     idle_since = time.time()
-                    print(f"[{_ts()}] Current state: {state.get('status', '?')}"
-                          f" (turn: {state.get('turn', '?')},"
-                          f" phase: {state.get('phase', '?')})")
+                    _log(f"Current state: {state.get('status', '?')}"
+                         f" (turn: {state.get('turn', '?')},"
+                         f" phase: {state.get('phase', '?')})")
                     time.sleep(interval)
                     continue
                 # State is ready — fall through to process it
-                print(f"[{_ts()}] Picking up active turn from existing state")
+                _log("Picking up active turn from existing state")
 
             if updated_at == last_processed_at:
                 # Check for stuck agent
                 elapsed = time.time() - idle_since
                 if (elapsed > timeout_minutes * 60
                         and state.get("status") == "working"):
-                    print(f"[{_ts()}] Warning: no state change for {timeout_minutes}m"
-                          " - agent may be stuck")
+                    _log(f"Warning: no state change for {timeout_minutes}m"
+                         " - agent may be stuck")
                     notify_macos("AI Handoff", f"No activity for {timeout_minutes}m")
                     idle_since = time.time()  # avoid spamming
 
@@ -234,8 +248,8 @@ def watch(
             pane = lead_pane if current_turn == "lead" else reviewer_pane
 
             if current_status == "ready" and command:
-                print(f"[{_ts()}] >> {agent_name}'s turn"
-                      f" (phase: {phase}, round: {round_num})")
+                _log(f">> {agent_name}'s turn"
+                     f" (phase: {phase}, round: {round_num})")
 
                 if mode == "tmux":
                     if confirm:
@@ -251,39 +265,39 @@ def watch(
                         pre_send_delay=pre_send_delay,
                     )
                     if success:
-                        print(f"[{_ts()}]    Sent to {pane}: {command}")
+                        _log(f"   Sent to {pane}: {command}")
                     else:
-                        print(f"[{_ts()}]    FAILED: Could not send to"
-                              f" '{pane}' after {max_retries} attempts")
+                        _log(f"   FAILED: Could not send to"
+                             f" '{pane}' after {max_retries} attempts")
                         notify_macos("AI Handoff",
                                      f"Failed to send to {pane} after retries")
 
                 elif mode == "notify":
-                    print(f"[{_ts()}]    Command: {command}")
+                    _log(f"   Command: {command}")
                     notify_macos("AI Handoff",
                                  f"{agent_name}'s turn: {command}")
 
             elif current_status == "working":
-                print(f"[{_ts()}]    {agent_name} is working...")
+                _log(f"   {agent_name} is working...")
 
             elif current_status == "done":
                 result = state.get("result", "completed")
-                print(f"[{_ts()}] ** Cycle complete: {result}")
+                _log(f"** Cycle complete: {result}")
                 notify_macos("AI Handoff", f"Cycle complete: {result}")
 
             elif current_status == "escalated":
-                print(f"[{_ts()}] !! Escalated to human arbiter")
+                _log("!! Escalated to human arbiter")
                 notify_macos("AI Handoff", "Escalated to human arbiter!")
 
             elif current_status == "aborted":
                 reason = state.get("reason", "unknown")
-                print(f"[{_ts()}] -- Cycle aborted: {reason}")
+                _log(f"-- Cycle aborted: {reason}")
                 notify_macos("AI Handoff", f"Cycle aborted: {reason}")
 
             time.sleep(interval)
 
     except KeyboardInterrupt:
-        print(f"\n[{_ts()}] Watcher stopped.")
+        _log("Watcher stopped.")
 
 
 # --- CLI entry point ---

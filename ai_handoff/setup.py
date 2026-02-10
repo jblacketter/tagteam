@@ -83,7 +83,7 @@ def main(target_dir: str = ".") -> None:
         print("No config found - templates will have {{variable}} placeholders")
     print()
 
-    # Copy skills
+    # Copy skills (both flat .md files and directory-based skills)
     print("Copying skills...")
     skills_src = source / ".claude" / "skills"
     skills_dst = target / ".claude" / "skills"
@@ -91,6 +91,13 @@ def main(target_dir: str = ".") -> None:
         for f in skills_src.glob("*.md"):
             shutil.copy2(f, skills_dst / f.name)
             print(f"  - {f.name}")
+        for d in skills_src.iterdir():
+            if d.is_dir():
+                dst_dir = skills_dst / d.name
+                if dst_dir.exists():
+                    shutil.rmtree(dst_dir)
+                shutil.copytree(d, dst_dir)
+                print(f"  - {d.name}/ (directory skill)")
     else:
         print(f"  Warning: Skills not found at {skills_src}")
 
@@ -145,7 +152,7 @@ def main(target_dir: str = ".") -> None:
     print()
     print("Next steps:")
     print("  1. Run 'python -m ai_handoff init' to configure your agents")
-    print("  2. Tell your AI: 'Read ai-handoff.yaml to see your role, then read .claude/skills/handoff.md'")
+    print("  2. Tell your AI: 'Read ai-handoff.yaml to see your role, then read .claude/skills/handoff/SKILL.md'")
     print("  3. Then ask your AI to run /handoff status or /handoff start [phase]")
 
 
