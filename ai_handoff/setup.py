@@ -83,10 +83,36 @@ def main(target_dir: str = ".") -> None:
         print("No config found - templates will have {{variable}} placeholders")
     print()
 
-    # Copy skills (both flat .md files and directory-based skills)
+    # Remove deprecated flat-file skills from previous versions
+    deprecated_skills = [
+        "handoff-plan.md",
+        "handoff-handoff.md",
+        "handoff-review.md",
+        "handoff-implement.md",
+        "handoff-phase.md",
+        "handoff-status.md",
+        "handoff-decide.md",
+        "handoff-escalate.md",
+        "handoff-sync.md",
+        "handoff-cycle.md",
+        "handoff.md",
+    ]
+    skills_dst = target / ".claude" / "skills"
+    removed = []
+    for name in deprecated_skills:
+        old_file = skills_dst / name
+        if old_file.exists():
+            old_file.unlink()
+            removed.append(name)
+    if removed:
+        print(f"Removed {len(removed)} deprecated skill files:")
+        for name in removed:
+            print(f"  - {name}")
+        print()
+
+    # Copy skills (directory-based skills)
     print("Copying skills...")
     skills_src = source / ".claude" / "skills"
-    skills_dst = target / ".claude" / "skills"
     if skills_src.exists():
         for f in skills_src.glob("*.md"):
             shutil.copy2(f, skills_dst / f.name)
