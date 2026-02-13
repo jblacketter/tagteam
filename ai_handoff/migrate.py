@@ -24,7 +24,7 @@ def detect_agent_names(project_dir: Path) -> tuple[str, str]:
     if handoffs_dir.exists():
         for md_file in handoffs_dir.glob("*.md"):
             try:
-                content = md_file.read_text()
+                content = md_file.read_text(encoding="utf-8")
             except Exception:
                 continue
 

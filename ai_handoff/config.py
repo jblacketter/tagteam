@@ -29,7 +29,7 @@ def read_config(config_path: Path | str) -> dict | None:
         return None
 
     try:
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         if HAS_YAML:
             result = yaml.safe_load(content)
             # Only return if it's a dict (not [], "foo", or other valid YAML)

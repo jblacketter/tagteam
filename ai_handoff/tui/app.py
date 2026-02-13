@@ -331,12 +331,12 @@ class SaloonApp(App):
 
         # Check for existing entry
         if log_path.exists():
-            existing = log_path.read_text()
+            existing = log_path.read_text(encoding="utf-8")
             if key in existing:
                 return  # Already logged
         else:
             # Create with header
-            log_path.write_text("# Decision Log\n\n<!-- Add new decisions at the top -->\n\n")
+            log_path.write_text("# Decision Log\n\n<!-- Add new decisions at the top -->\n\n", encoding="utf-8")
 
         today = date.today().isoformat()
         entry = (
@@ -356,7 +356,7 @@ class SaloonApp(App):
             f"- Agents should read this decision and resume the cycle accordingly\n"
         )
 
-        with open(log_path, "a") as f:
+        with open(log_path, "a", encoding="utf-8") as f:
             f.write(entry)
 
     # --- ConversationEngine callbacks ---

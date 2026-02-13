@@ -27,7 +27,7 @@ def read_state(project_dir: str = ".") -> dict | None:
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
 
@@ -39,7 +39,7 @@ def write_state(state: dict, project_dir: str = ".") -> None:
 
     state["updated_at"] = datetime.now(timezone.utc).isoformat()
 
-    tmp_path.write_text(json.dumps(state, indent=2) + "\n")
+    tmp_path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
     tmp_path.rename(path)
 
 

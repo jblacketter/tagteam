@@ -62,7 +62,7 @@ def _read_doc(project_dir: str, subdir: str, filename: str) -> str | None:
     path = Path(project_dir) / "docs" / subdir / safe
     if not path.is_file():
         return None
-    return path.read_text()
+    return path.read_text(encoding="utf-8")
 
 
 def make_handler(project_dir: str):
@@ -195,7 +195,7 @@ def make_handler(project_dir: str):
                     return
 
                 content = CONFIG_TEMPLATE.format(lead_name=lead, reviewer_name=reviewer)
-                config_path.write_text(content)
+                config_path.write_text(content, encoding="utf-8")
                 self._send_json(_read_config(project_dir) or {})
 
             elif path == "/api/start-phase":

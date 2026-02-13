@@ -16,10 +16,10 @@ from ai_handoff.templates import get_template_variables, render_template
 
 def copy_md_file(src: Path, dst: Path, variables: dict[str, str]) -> None:
     """Copy a markdown file, applying variable substitution if variables provided."""
-    content = src.read_text()
+    content = src.read_text(encoding="utf-8")
     if variables:
         content = render_template(content, variables)
-    dst.write_text(content)
+    dst.write_text(content, encoding="utf-8")
 
 
 def get_data_dir() -> Path:

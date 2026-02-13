@@ -44,7 +44,7 @@ def extract_all_rounds(cycle_path: Path) -> list[dict] | None:
     Returns None if parsing fails.
     """
     try:
-        content = cycle_path.read_text()
+        content = cycle_path.read_text(encoding="utf-8")
     except OSError:
         return None
 

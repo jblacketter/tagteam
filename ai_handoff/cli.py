@@ -78,7 +78,7 @@ def write_config(target_dir: str, lead_name: str, reviewer_name: str) -> Path:
         lead_name=lead_name,
         reviewer_name=reviewer_name,
     )
-    config_path.write_text(config_content)
+    config_path.write_text(config_content, encoding="utf-8")
     return config_path
 
 

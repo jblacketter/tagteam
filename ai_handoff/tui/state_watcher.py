@@ -97,7 +97,7 @@ def read_handoff_state(path: Path | None = None) -> HandoffState | None:
     if not path.exists():
         return None
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
         return HandoffState.from_dict(data)
     except (json.JSONDecodeError, OSError):
         return None

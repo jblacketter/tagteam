@@ -91,7 +91,7 @@ def _parse_phase_names(roadmap_path: Path) -> list[str]:
         return []
 
     names: list[str] = []
-    for line in roadmap_path.read_text().splitlines():
+    for line in roadmap_path.read_text(encoding="utf-8").splitlines():
         # Match "### Phase N: name"
         m = re.match(r"^###\s+Phase\s+\d+:\s+(.+)$", line)
         if m:
@@ -107,7 +107,7 @@ def _parse_phase_status(phase_path: Path) -> str:
     if not phase_path.exists():
         return "not-started"
 
-    text = phase_path.read_text()
+    text = phase_path.read_text(encoding="utf-8")
 
     # Find the ## Status section
     in_status = False
@@ -139,7 +139,7 @@ def _parse_criteria_counts(phase_path: Path) -> tuple[int, int]:
     if not phase_path.exists():
         return (0, 0)
 
-    text = phase_path.read_text()
+    text = phase_path.read_text(encoding="utf-8")
 
     in_criteria = False
     done = 0
