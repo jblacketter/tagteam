@@ -89,10 +89,17 @@ AI Handoff Framework - A collaboration framework enabling structured, multi-phas
   - `session.py` creates 3-column layout with mouse mode and pane labels
   - `--dir` flag for `session start` to set working directory
 
-### Phase 9: Saloon TUI Overhaul
-- **Status:** Not Started
-- **Description:** Fix TUI state updates (depends on Phase 8), then improve graphics
-- **Key Deliverables:** TBD
+### Phase 9: Dashboard & TUI Polish
+- **Status:** Complete
+- **Description:** Fix TUI bugs (GAMERFY naming, silent poll failures, status bar overflow), extract shared parser for TUI and web dashboard, improve web dashboard with escalation choices, phase map, and structured round display, split 46KB HTML into 3 files, add unit test coverage
+- **Key Deliverables:**
+  - Shared `ai_handoff/parser.py` used by both TUI and web dashboard
+  - `GAMERFY_SOUND` → `HANDOFF_SOUND` rename with backward-compat fallback
+  - TUI state poller: failure logging + `[STALE]` indicator
+  - Status bar: action truncation (25 chars), `Round N` display (no `/5`)
+  - Web dashboard split: `index.html` + `styles.css` + `app.js`
+  - Web dashboard: escalation choice buttons, phase map, structured rounds
+  - 39 new unit tests across 3 test files (parser, state_watcher, review_dialogue)
 
 ## Decision Log
 See `docs/decision_log.md`

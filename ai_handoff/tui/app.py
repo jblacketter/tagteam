@@ -84,6 +84,7 @@ class SaloonApp(App):
         self._intro_complete = False
         self._dialogue_queue: deque[tuple[str, str]] = deque()
         self._escalation_pending = False
+        self._poll_failures = 0
 
     def compose(self) -> ComposeResult:
         yield SceneWidget()
@@ -125,9 +126,20 @@ class SaloonApp(App):
     def _poll_state(self) -> None:
         """Read handoff-state.json and post StateChanged if different."""
         current = read_handoff_state(self._state_path)
-        # Ignore transient read failures when we already have valid state
         if current is None and self._last_state is not None:
+            self._poll_failures += 1
+            if self._poll_failures >= 3:
+                self.log.warning(f"State file read failed {self._poll_failures} consecutive times")
+                status_bar = self.query_one("#status-bar", StatusBar)
+                status_bar.set_stale(True)
+                status_bar.update_state(self._last_state)
             return
+        if self._poll_failures > 0:
+            self._poll_failures = 0
+            status_bar = self.query_one("#status-bar", StatusBar)
+            status_bar.set_stale(False)
+            # Force re-render to clear [STALE] badge even if state is unchanged
+            status_bar.update_state(current or self._last_state)
         if state_has_changed(current, self._last_state):
             previous = self._last_state
             self._last_state = current

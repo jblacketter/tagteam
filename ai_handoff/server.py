@@ -18,6 +18,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from ai_handoff.config import read_config as _read_config_file, get_agent_names
+from ai_handoff.parser import extract_all_rounds, format_rounds_html
 from ai_handoff.state import read_state, update_state
 
 
@@ -41,10 +42,29 @@ def _read_config(project_dir: str) -> dict | None:
     return _read_config_file(config_path)
 
 
+_WEB_DIR = Path(__file__).parent / "data" / "web"
+
+_CONTENT_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+}
+
+
 def _get_dashboard_html() -> bytes:
     """Load the dashboard HTML from package data."""
-    html_path = Path(__file__).parent / "data" / "web" / "index.html"
-    return html_path.read_bytes()
+    return (_WEB_DIR / "index.html").read_bytes()
+
+
+def _get_static_file(filename: str) -> tuple[bytes, str] | None:
+    """Load a static file from the web data directory. Returns (content, content_type) or None."""
+    safe = Path(filename).name
+    path = _WEB_DIR / safe
+    if not path.is_file():
+        return None
+    suffix = path.suffix.lower()
+    content_type = _CONTENT_TYPES.get(suffix, "application/octet-stream")
+    return path.read_bytes(), content_type
 
 
 def _list_dir_md(project_dir: str, subdir: str) -> list[str]:
@@ -63,6 +83,63 @@ def _read_doc(project_dir: str, subdir: str, filename: str) -> str | None:
     if not path.is_file():
         return None
     return path.read_text(encoding="utf-8")
+
+
+def _get_phases(project_dir: str) -> list[dict]:
+    """Build structured phase list with status from cycle documents."""
+    phase_files = _list_dir_md(project_dir, "phases")
+    handoff_files = _list_dir_md(project_dir, "handoffs")
+    current_state = read_state(project_dir) or {}
+
+    phases = []
+    for pf in phase_files:
+        phase_name = pf.rsplit(".", 1)[0]  # strip .md
+        # Find matching cycle docs
+        plan_cycle = f"{phase_name}_plan_cycle.md"
+        impl_cycle = f"{phase_name}_impl_cycle.md"
+        has_plan = plan_cycle in handoff_files
+        has_impl = impl_cycle in handoff_files
+
+        # Determine type and status from cycle docs
+        step_type = "impl" if has_impl else "plan" if has_plan else ""
+        cycle_file = impl_cycle if has_impl else plan_cycle if has_plan else None
+
+        status = "pending"
+        if cycle_file:
+            status = _extract_cycle_state(project_dir, cycle_file)
+
+        # Override with current active state if this is the active phase
+        if current_state.get("phase") == phase_name:
+            active_status = current_state.get("status", "")
+            if active_status in ("ready", "working", "escalated"):
+                status = active_status
+            elif current_state.get("result") == "approved":
+                status = "done"
+
+        phases.append({
+            "phase": phase_name,
+            "type": step_type,
+            "status": status,
+            "result": "approved" if status == "done" else "",
+        })
+
+    return phases
+
+
+def _extract_cycle_state(project_dir: str, cycle_filename: str) -> str:
+    """Extract STATE from a cycle document's CYCLE_STATUS section."""
+    path = Path(project_dir) / "docs" / "handoffs" / cycle_filename
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError:
+        return "pending"
+    match = re.search(r"STATE:\s*(\S+)", content)
+    if match:
+        state_val = match.group(1).strip()
+        if state_val == "approved":
+            return "done"
+        return state_val
+    return "pending"
 
 
 def make_handler(project_dir: str):
@@ -135,8 +212,56 @@ def make_handler(project_dir: str):
                     self._send_text(content)
 
             elif path == "/api/phases":
-                files = _list_dir_md(project_dir, "phases")
-                self._send_json(files)
+                phases = _get_phases(project_dir)
+                self._send_json(phases)
+
+            elif path.startswith("/api/rounds/"):
+                filename = path[len("/api/rounds/"):]
+                safe = Path(filename).name
+                cycle_path = Path(project_dir) / "docs" / "handoffs" / safe
+                if not cycle_path.is_file():
+                    self._send_404(f"Cycle doc not found: {filename}")
+                else:
+                    rounds = extract_all_rounds(cycle_path)
+                    if rounds is None:
+                        self._send_json([])
+                    else:
+                        # Return structured JSON and pre-rendered HTML
+                        self._send_json({
+                            "rounds": rounds,
+                            "html": format_rounds_html(rounds),
+                        })
+
+            elif path == "/api/dialogue":
+                state = read_state(project_dir)
+                if not state or not state.get("phase") or not state.get("type"):
+                    self._send_json({"lines": []})
+                else:
+                    # Import dialogue builder (requires textual optional dep)
+                    try:
+                        from ai_handoff.tui.review_dialogue import build_state_dialogue
+                        from ai_handoff.tui.state_watcher import HandoffState
+                        hs = HandoffState.from_dict(state)
+                        lines = build_state_dialogue(hs, None, project_dir=project_dir)
+                        self._send_json({"lines": [{"speaker": s, "text": t} for s, t in lines]})
+                    except ImportError:
+                        # textual not installed — return empty
+                        self._send_json({"lines": [], "error": "TUI package not installed"})
+
+            elif path.startswith("/") and not path.startswith("/api/"):
+                # Serve static files (CSS, JS) from web directory
+                filename = path.lstrip("/")
+                result = _get_static_file(filename)
+                if result:
+                    content, content_type = result
+                    self.send_response(200)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.send_header("Content-Length", str(len(content)))
+                    self.end_headers()
+                    self.wfile.write(content)
+                else:
+                    self._send_404()
 
             else:
                 self._send_404()

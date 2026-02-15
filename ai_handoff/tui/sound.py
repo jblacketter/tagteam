@@ -1,6 +1,6 @@
 """Sound effects — non-blocking audio playback.
 
-Opt-in via GAMERFY_SOUND=1 environment variable. Uses macOS ``afplay``
+Opt-in via HANDOFF_SOUND=1 environment variable. Uses macOS ``afplay``
 for playback. Silently no-ops when sound is disabled or ``afplay`` is
 not available.
 """
@@ -11,7 +11,11 @@ import os
 import subprocess
 from pathlib import Path
 
-_ENABLED = os.environ.get("GAMERFY_SOUND", "").strip().lower() in ("1", "true", "yes")
+# Support both new and legacy env var names
+_ENABLED = (
+    os.environ.get("HANDOFF_SOUND", "").strip().lower() in ("1", "true", "yes")
+    or os.environ.get("GAMERFY_SOUND", "").strip().lower() in ("1", "true", "yes")
+)
 _SOUND_DIR = Path(__file__).parent / "sounds"
 
 

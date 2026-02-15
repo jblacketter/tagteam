@@ -27,7 +27,24 @@ Unified command for the AI handoff workflow. Reads your role and current state, 
 
 **Step 1:** Read `ai-handoff.yaml` (your role), `handoff-state.json` (state), and the active cycle file `docs/handoffs/[phase]_[type]_cycle.md`.
 
-**Step 2:** Check state and act:
+**Step 2 — CRITICAL: You MUST begin every `/handoff` response with this status banner:**
+
+```
+Phase: [phase] | Type: [plan/impl] | Round: [N] | Turn: [agent] | Status: [status]
+ [Human-readable description of what's happening]
+```
+
+Use values from `handoff-state.json`. For the description line, use context-appropriate text:
+- Your turn (lead): "Addressing reviewer feedback." or "Submitting for review."
+- Your turn (reviewer): "Reviewing lead's submission."
+- Not your turn: "Waiting for [agent]'s response."
+- Approved: "Cycle complete — approved!"
+- Escalated: "Escalated to human arbiter."
+- No state: "No active handoff cycle."
+
+If there is no state file, show: `Phase: — | Type: — | Round: — | Turn: — | Status: none`
+
+**Step 3:** Check state and act:
 
 - **No state file or empty:** "No active cycle. Lead should run `/handoff start [phase]`."
 - **Approved / done:** If plan → "Plan approved! Implement, then `/handoff start [phase] impl`." If impl → "Implementation approved! Start next phase."
@@ -52,7 +69,7 @@ Unified command for the AI handoff workflow. Reads your role and current state, 
    - **ESCALATE** — Set `STATE: escalated`. Run: `python -m ai_handoff state set --status escalated --updated-by [your-agent-name]`
    - **NEED_HUMAN** — Add `### Human Input Needed` section with your question. Set `STATE: needs-human`, `READY_FOR: human`. Run: `python -m ai_handoff state set --status escalated --updated-by [your-agent-name]`
 
-**Step 3 — CRITICAL: You MUST end every `/handoff` response with this exact box:**
+**Step 4 — CRITICAL: You MUST end every `/handoff` response with this exact box:**
 
 ```
 ┌──────────────────────────────────────────────────┐
@@ -76,7 +93,8 @@ Replace `[agent name]` with the next agent's name. For completed/escalated/needs
    - `## Round 1` with `### Lead` (Action: SUBMIT_FOR_REVIEW, summary) and `### Reviewer` (`_awaiting response_`)
    - CYCLE_STATUS block: `READY_FOR: reviewer`, `ROUND: 1`, `STATE: in-progress`
 4. Run: `python -m ai_handoff state set --turn reviewer --status ready --command "Read .claude/skills/handoff/SKILL.md and handoff-state.json, then act on your turn" --phase [phase] --type [plan|impl] --round 1 --updated-by [your-agent-name]`
-5. End with the NEXT COMMAND box.
+5. Begin your response with the status banner (showing the newly created state).
+6. End with the NEXT COMMAND box.
 
 ---
 
@@ -87,5 +105,6 @@ For both agents. Re-reads everything and gives a full orientation.
 1. Read `ai-handoff.yaml` → show role assignment
 2. Read `handoff-state.json` → show current state
 3. Read active cycle file → show round, last action
-4. Output: `Phase: [phase] | Type: [plan/impl] | Round: [N] | Turn: [agent] | Status: [state]`
-5. End with the NEXT COMMAND box showing the appropriate next action.
+4. Begin with the status banner: `Phase: [phase] | Type: [plan/impl] | Round: [N] | Turn: [agent] | Status: [state]` and description line
+5. Show role assignments and cycle details below the banner
+6. End with the NEXT COMMAND box showing the appropriate next action.

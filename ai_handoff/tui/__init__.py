@@ -33,7 +33,7 @@ def tui_command(args: list[str]) -> int:
             return 1
 
     if sound:
-        os.environ["GAMERFY_SOUND"] = "1"
+        os.environ["HANDOFF_SOUND"] = "1"
 
     # Resolve project directory
     if project_dir is None:

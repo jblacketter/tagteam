@@ -18,6 +18,8 @@ _AGENT_NAMES = {
     "reviewer": "Rabbit",
 }
 
+_MAX_ACTION_LEN = 25
+
 
 class StatusBar(Static):
     """Thin status bar showing handoff state."""
@@ -33,8 +35,16 @@ class StatusBar(Static):
     }
     """
 
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._stale = False
+
     def on_mount(self) -> None:
         self.display = False
+
+    def set_stale(self, stale: bool) -> None:
+        """Mark the status bar as showing stale data."""
+        self._stale = stale
 
     def update_state(
         self, state: HandoffState | None, last_action: str | None = None
@@ -50,11 +60,15 @@ class StatusBar(Static):
         turn_name = _AGENT_NAMES.get(state.turn, state.turn)
 
         text = Text()
+
+        if self._stale:
+            text.append(" [STALE] ", style="bold #cc4444")
+
         text.append(" Phase: ", style="#5a4a2a")
         text.append(state.phase or "—", style="#8a7a5a")
         text.append("  │  ", style="#3a2a1a")
         text.append("Round: ", style="#5a4a2a")
-        round_str = f"{state.round}/5" if state.round else "—"
+        round_str = str(state.round) if state.round else "—"
         text.append(round_str, style="#8a7a5a")
         text.append("  │  ", style="#3a2a1a")
         text.append("Turn: ", style="#5a4a2a")
@@ -68,8 +82,9 @@ class StatusBar(Static):
             text.append(state.result, style=f"italic {color}")
 
         if last_action:
+            truncated = last_action if len(last_action) <= _MAX_ACTION_LEN else last_action[:_MAX_ACTION_LEN - 3] + "..."
             text.append("  │  ", style="#3a2a1a")
             text.append("Last: ", style="#5a4a2a")
-            text.append(last_action, style="#8a7a5a")
+            text.append(truncated, style="#8a7a5a")
 
         self.update(text)
