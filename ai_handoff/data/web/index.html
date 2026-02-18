@@ -9,115 +9,119 @@
 <body>
 
 <div class="dashboard">
-  <h1>The Handoff Saloon</h1>
 
-  <div class="top-row">
-    <!-- SALOON -->
-    <div class="saloon-col">
-      <div class="panel">
-        <div class="scene" id="scene">
-          <div class="saloon-wrapper">
-            <pre class="saloon-art" id="saloon-art"></pre>
-            <div class="mayor-hitzone mayor-glow" id="mayor-hitzone" title="Click the Mayor"></div>
-            <div class="mayor-dialogue hidden" id="mayor-dialogue">
-              <button class="dialogue-close" id="dialogue-close">&times;</button>
-              <div class="dialogue-header">Mayor</div>
-              <div class="dialogue-text" id="dialogue-text"></div>
-              <div class="dialogue-actions" id="dialogue-actions"></div>
-            </div>
-          </div>
-        </div>
-        <div class="mayor-prompt" id="mayor-prompt">Click the Mayor to get started</div>
+  <!-- SALOON BANNER -->
+  <header class="saloon-banner" id="saloon-banner">
+    <div class="banner-backdrop" id="banner-backdrop"></div>
+    <div class="banner-characters">
+      <div class="banner-char banner-mayor" id="banner-mayor" title="Click the Mayor"></div>
+      <div class="banner-char banner-clock" id="banner-clock">
+        <div class="clock-body" id="clock-body"></div>
+        <div class="pendulum-wrap" id="pendulum-wrap"></div>
+        <div class="cuckoo-wrap hidden" id="cuckoo-wrap"></div>
       </div>
+      <div class="banner-char banner-rabbit" id="banner-rabbit"></div>
     </div>
-
-    <!-- SIDE PANELS -->
-    <div class="side-col">
-      <!-- Setup form (Welcome mode) -->
-      <div class="panel hidden" id="setup-form">
-        <div class="panel-title">Setup</div>
-        <div class="form-group">
-          <label class="form-label" for="setup-lead">Lead Agent</label>
-          <input class="form-input" id="setup-lead" type="text" placeholder="e.g. claude">
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="setup-reviewer">Reviewer Agent</label>
-          <input class="form-input" id="setup-reviewer" type="text" placeholder="e.g. codex">
-        </div>
-        <button class="form-btn" id="setup-submit">Get Started</button>
-      </div>
-
-      <!-- Phase form -->
-      <div class="panel hidden" id="phase-form">
-        <div class="panel-title">New Phase</div>
-        <div class="form-group">
-          <label class="form-label" for="phase-name">Phase Name</label>
-          <input class="form-input" id="phase-name" type="text" placeholder="e.g. foundation">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Type</label>
-          <div class="form-radio-group">
-            <label><input type="radio" name="phase-type" value="plan" checked> plan</label>
-            <label><input type="radio" name="phase-type" value="impl"> impl</label>
-          </div>
-        </div>
-        <button class="form-btn" id="phase-submit">Start Phase</button>
-      </div>
-
-      <!-- Status panel (Idle/Active modes) -->
-      <div class="panel hidden" id="status-panel">
-        <div class="panel-title">Status</div>
-        <div class="status-grid" id="status-grid">
-          <span class="status-label">Phase</span>
-          <span class="status-value" id="st-phase">--</span>
-          <span class="status-label">Type</span>
-          <span class="status-value" id="st-type">--</span>
-          <span class="status-label">Round</span>
-          <span class="status-value" id="st-round">--</span>
-          <span class="status-label">Turn</span>
-          <span class="status-value" id="st-turn">--</span>
-          <span class="status-label">Status</span>
-          <span class="status-value" id="st-status">--</span>
-          <span class="status-label">Result</span>
-          <span class="status-value" id="st-result">--</span>
-        </div>
-      </div>
-
-      <!-- Controls (Active mode only) -->
-      <div class="panel hidden" id="controls-panel">
-        <div class="panel-title">Controls</div>
-        <div class="controls">
-          <button class="ctrl-btn btn-approve" id="btn-approve" disabled>Approve</button>
-          <button class="ctrl-btn btn-changes" id="btn-changes" disabled>Req Changes</button>
-          <button class="ctrl-btn btn-escalate" id="btn-escalate" disabled>Escalate</button>
-          <button class="ctrl-btn btn-abort" id="btn-abort" disabled>Abort</button>
-        </div>
-        <!-- Escalation choices (shown when escalated) -->
-        <div class="escalation-choices hidden" id="escalation-choices">
-          <div class="panel-title" style="margin-top:8px;">Arbiter Decision</div>
-          <button class="ctrl-btn btn-agree-lead" id="btn-agree-lead">Agree with Lead</button>
-          <button class="ctrl-btn btn-agree-reviewer" id="btn-agree-reviewer">Agree with Reviewer</button>
-          <button class="ctrl-btn btn-defer" id="btn-defer">Defer</button>
-        </div>
-      </div>
-
-      <!-- Phase Map -->
-      <div class="panel phase-map-panel hidden" id="phase-map-panel">
-        <div class="panel-title">Phase Map</div>
-        <ul class="phase-map-list" id="phase-map-list"></ul>
-      </div>
-
+    <div class="banner-title">
+      <h1>The Handoff Saloon</h1>
       <div class="conn-status">
         <span class="conn-dot" id="conn-dot"></span>
         <span id="conn-text">Connecting...</span>
       </div>
     </div>
-  </div>
+  </header>
+
+  <!-- DIALOGUE PANEL -->
+  <section class="dialogue-panel hidden" id="dialogue-panel">
+    <div class="dialogue-portrait" id="dialogue-portrait"></div>
+    <div class="dialogue-body">
+      <div class="dialogue-speaker" id="dialogue-speaker">Mayor</div>
+      <div class="dialogue-body-text" id="dialogue-body-text"></div>
+      <div class="dialogue-body-actions" id="dialogue-body-actions" style="display:none"></div>
+    </div>
+    <button class="dialogue-advance" id="dialogue-advance">&#9654;</button>
+  </section>
+
+  <!-- STATUS CARDS -->
+  <section class="status-section" id="status-section">
+    <!-- Setup card (Welcome mode) -->
+    <div class="card hidden" id="setup-form">
+      <div class="card-title">Setup</div>
+      <div class="form-group">
+        <label class="form-label" for="setup-lead">Lead Agent</label>
+        <input class="form-input" id="setup-lead" type="text" placeholder="e.g. claude">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="setup-reviewer">Reviewer Agent</label>
+        <input class="form-input" id="setup-reviewer" type="text" placeholder="e.g. codex">
+      </div>
+      <button class="form-btn" id="setup-submit">Get Started</button>
+    </div>
+
+    <!-- Phase form -->
+    <div class="card hidden" id="phase-form">
+      <div class="card-title">New Phase</div>
+      <div class="form-group">
+        <label class="form-label" for="phase-name">Phase Name</label>
+        <input class="form-input" id="phase-name" type="text" placeholder="e.g. foundation">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Type</label>
+        <div class="form-radio-group">
+          <label><input type="radio" name="phase-type" value="plan" checked> plan</label>
+          <label><input type="radio" name="phase-type" value="impl"> impl</label>
+        </div>
+      </div>
+      <button class="form-btn" id="phase-submit">Start Phase</button>
+    </div>
+
+    <!-- Status card -->
+    <div class="card hidden" id="status-panel">
+      <div class="card-title">Status</div>
+      <div class="status-grid" id="status-grid">
+        <span class="status-label">Phase</span>
+        <span class="status-value" id="st-phase">--</span>
+        <span class="status-label">Type</span>
+        <span class="status-value" id="st-type">--</span>
+        <span class="status-label">Round</span>
+        <span class="status-value" id="st-round">--</span>
+        <span class="status-label">Turn</span>
+        <span class="status-value" id="st-turn">--</span>
+        <span class="status-label">Status</span>
+        <span class="status-value" id="st-status">--</span>
+        <span class="status-label">Result</span>
+        <span class="status-value" id="st-result">--</span>
+      </div>
+    </div>
+
+    <!-- Controls card -->
+    <div class="card hidden" id="controls-panel">
+      <div class="card-title">Controls</div>
+      <div class="controls">
+        <button class="ctrl-btn btn-approve" id="btn-approve" disabled>Approve</button>
+        <button class="ctrl-btn btn-changes" id="btn-changes" disabled>Req Changes</button>
+        <button class="ctrl-btn btn-escalate" id="btn-escalate" disabled>Escalate</button>
+        <button class="ctrl-btn btn-abort" id="btn-abort" disabled>Abort</button>
+      </div>
+      <div class="escalation-choices hidden" id="escalation-choices">
+        <div class="card-title" style="margin-top:8px;">Arbiter Decision</div>
+        <button class="ctrl-btn btn-agree-lead" id="btn-agree-lead">Agree with Lead</button>
+        <button class="ctrl-btn btn-agree-reviewer" id="btn-agree-reviewer">Agree with Reviewer</button>
+        <button class="ctrl-btn btn-defer" id="btn-defer">Defer</button>
+      </div>
+    </div>
+
+    <!-- Phase Map card -->
+    <div class="card phase-map-card hidden" id="phase-map-panel">
+      <div class="card-title">Phase Map</div>
+      <ul class="phase-map-list" id="phase-map-list"></ul>
+    </div>
+  </section>
 
   <!-- TIMELINE -->
-  <div class="timeline-section hidden" id="timeline-section">
-    <div class="panel">
-      <div class="panel-title">Timeline</div>
+  <section class="timeline-section hidden" id="timeline-section">
+    <div class="card">
+      <div class="card-title">Timeline</div>
       <div class="timeline" id="timeline">
         <div class="timeline-entry">
           <span class="timeline-dot"></span>
@@ -126,14 +130,14 @@
         </div>
       </div>
     </div>
-  </div>
+  </section>
 
   <!-- CYCLE DOCUMENT -->
-  <div class="cycle-section hidden" id="cycle-section">
-    <div class="panel">
+  <section class="cycle-section hidden" id="cycle-section">
+    <div class="card">
       <div class="cycle-toggle" id="cycle-toggle">
         <span class="arrow">&#9654;</span>
-        <span class="panel-title" style="margin-bottom:0; border-bottom:none; padding-bottom:0;">Cycle Document</span>
+        <span class="card-title" style="margin-bottom:0; border-bottom:none; padding-bottom:0;">Cycle Document</span>
       </div>
       <select class="cycle-select" id="cycle-select" style="display:none">
         <option value="">Select a cycle document...</option>
@@ -141,7 +145,8 @@
       <div class="cycle-content" id="cycle-content"></div>
       <div class="rounds-content hidden" id="rounds-content"></div>
     </div>
-  </div>
+  </section>
+
 </div>
 
 <!-- Abort modal -->
@@ -159,6 +164,8 @@
   </div>
 </div>
 
+<script src="/sprites.js"></script>
+<script src="/conversation.js"></script>
 <script src="/app.js"></script>
 
 </body>

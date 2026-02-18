@@ -2,112 +2,173 @@
   'use strict';
 
   // --- DOM refs ---
-  const saloonArt    = document.getElementById('saloon-art');
-  const mayorHitzone = document.getElementById('mayor-hitzone');
-  const mayorDialogue = document.getElementById('mayor-dialogue');
-  const dialogueText = document.getElementById('dialogue-text');
-  const dialogueActions = document.getElementById('dialogue-actions');
-  const dialogueCloseBtn = document.getElementById('dialogue-close');
-  const mayorPrompt  = document.getElementById('mayor-prompt');
+  var bannerMayor    = document.getElementById('banner-mayor');
+  var bannerRabbit   = document.getElementById('banner-rabbit');
+  var clockBody      = document.getElementById('clock-body');
+  var pendulumWrap   = document.getElementById('pendulum-wrap');
+  var cuckooWrap     = document.getElementById('cuckoo-wrap');
+  var bannerBackdrop = document.getElementById('banner-backdrop');
+  var dialoguePanel  = document.getElementById('dialogue-panel');
 
-  const setupFormEl   = document.getElementById('setup-form');
-  const setupLeadIn   = document.getElementById('setup-lead');
-  const setupRevIn    = document.getElementById('setup-reviewer');
-  const setupSubmit   = document.getElementById('setup-submit');
+  var setupFormEl   = document.getElementById('setup-form');
+  var setupLeadIn   = document.getElementById('setup-lead');
+  var setupRevIn    = document.getElementById('setup-reviewer');
+  var setupSubmit   = document.getElementById('setup-submit');
 
-  const phaseFormEl   = document.getElementById('phase-form');
-  const phaseNameIn   = document.getElementById('phase-name');
-  const phaseSubmit   = document.getElementById('phase-submit');
+  var phaseFormEl   = document.getElementById('phase-form');
+  var phaseNameIn   = document.getElementById('phase-name');
+  var phaseSubmit   = document.getElementById('phase-submit');
 
-  const statusPanel  = document.getElementById('status-panel');
-  const controlsPanel = document.getElementById('controls-panel');
-  const timelineSec  = document.getElementById('timeline-section');
-  const cycleSec     = document.getElementById('cycle-section');
+  var statusPanel   = document.getElementById('status-panel');
+  var controlsPanel = document.getElementById('controls-panel');
+  var timelineSec   = document.getElementById('timeline-section');
+  var cycleSec      = document.getElementById('cycle-section');
 
-  const stPhase  = document.getElementById('st-phase');
-  const stType   = document.getElementById('st-type');
-  const stRound  = document.getElementById('st-round');
-  const stTurn   = document.getElementById('st-turn');
-  const stStatus = document.getElementById('st-status');
-  const stResult = document.getElementById('st-result');
+  var stPhase  = document.getElementById('st-phase');
+  var stType   = document.getElementById('st-type');
+  var stRound  = document.getElementById('st-round');
+  var stTurn   = document.getElementById('st-turn');
+  var stStatus = document.getElementById('st-status');
+  var stResult = document.getElementById('st-result');
 
-  const btnApprove  = document.getElementById('btn-approve');
-  const btnChanges  = document.getElementById('btn-changes');
-  const btnEscalate = document.getElementById('btn-escalate');
-  const btnAbort    = document.getElementById('btn-abort');
+  var btnApprove  = document.getElementById('btn-approve');
+  var btnChanges  = document.getElementById('btn-changes');
+  var btnEscalate = document.getElementById('btn-escalate');
+  var btnAbort    = document.getElementById('btn-abort');
 
-  const connDot  = document.getElementById('conn-dot');
-  const connText = document.getElementById('conn-text');
+  var connDot  = document.getElementById('conn-dot');
+  var connText = document.getElementById('conn-text');
 
-  const timelineEl   = document.getElementById('timeline');
-  const cycleToggle  = document.getElementById('cycle-toggle');
-  const cycleSelect  = document.getElementById('cycle-select');
-  const cycleContent = document.getElementById('cycle-content');
+  var timelineEl   = document.getElementById('timeline');
+  var cycleToggle  = document.getElementById('cycle-toggle');
+  var cycleSelect  = document.getElementById('cycle-select');
+  var cycleContent = document.getElementById('cycle-content');
 
-  const abortModal   = document.getElementById('abort-modal');
-  const abortReason  = document.getElementById('abort-reason');
-  const abortCancel  = document.getElementById('abort-cancel');
-  const abortConfirm = document.getElementById('abort-confirm');
+  var abortModal   = document.getElementById('abort-modal');
+  var abortReason  = document.getElementById('abort-reason');
+  var abortCancel  = document.getElementById('abort-cancel');
+  var abortConfirm = document.getElementById('abort-confirm');
 
-  const escalationChoices = document.getElementById('escalation-choices');
-  const btnAgreeLead      = document.getElementById('btn-agree-lead');
-  const btnAgreeReviewer  = document.getElementById('btn-agree-reviewer');
-  const btnDefer          = document.getElementById('btn-defer');
+  var escalationChoices = document.getElementById('escalation-choices');
+  var btnAgreeLead      = document.getElementById('btn-agree-lead');
+  var btnAgreeReviewer  = document.getElementById('btn-agree-reviewer');
+  var btnDefer          = document.getElementById('btn-defer');
 
-  const phaseMapPanel = document.getElementById('phase-map-panel');
-  const phaseMapList  = document.getElementById('phase-map-list');
+  var phaseMapPanel = document.getElementById('phase-map-panel');
+  var phaseMapList  = document.getElementById('phase-map-list');
 
   // --- State ---
-  let currentState = {};
-  let agentConfig = {};
-  let lastUpdatedAt = null;
-  let cycleOpen = false;
-  let dialogueVisible = false;
-  let activeForm = null; // null, 'setup', 'phase'
+  var currentState = {};
+  var prevState = {};
+  var agentConfig = {};
+  var lastUpdatedAt = null;
+  var cycleOpen = false;
+  var activeForm = null; // null, 'setup', 'phase'
+  var dialogueCtrl = null;
+  var bannerRendered = false;
+
+  // --- Initialize dialogue controller ---
+  dialogueCtrl = new Conversation.DialogueController(dialoguePanel);
+
+  // --- Render banner scene ---
+  function renderBanner() {
+    if (bannerRendered) return;
+    bannerRendered = true;
+
+    // Backdrop
+    bannerBackdrop.innerHTML = Sprites.renderSaloonBackdrop();
+
+    // Characters
+    updateBannerCharacters('');
+
+    // Clock
+    clockBody.innerHTML = Sprites.renderClock('');
+    pendulumWrap.innerHTML = Sprites.renderPendulum();
+    cuckooWrap.innerHTML = Sprites.renderCuckoo();
+
+    // Mayor glow on welcome
+    bannerMayor.classList.add('mayor-glow');
+  }
+
+  function updateBannerCharacters(status) {
+    var state = '';
+    if (status === 'working') state = 'working';
+    else if (status === 'done') state = 'approved';
+    else if (status === 'escalated') state = 'escalated';
+    else if (status === 'aborted') state = 'aborted';
+
+    bannerMayor.innerHTML = Sprites.renderMayor(state);
+    bannerRabbit.innerHTML = Sprites.renderRabbit(state);
+    clockBody.innerHTML = Sprites.renderClock(state);
+
+    // Pendulum animation state
+    if (status === 'escalated' || status === 'aborted') {
+      pendulumWrap.classList.add('paused');
+    } else {
+      pendulumWrap.classList.remove('paused');
+    }
+  }
+
+  function triggerCuckoo() {
+    cuckooWrap.classList.remove('hidden');
+    cuckooWrap.classList.add('cuckoo-active');
+    setTimeout(function() {
+      cuckooWrap.classList.remove('cuckoo-active');
+      setTimeout(function() {
+        cuckooWrap.classList.add('hidden');
+      }, 300);
+    }, 2000);
+  }
+
+  renderBanner();
 
   // --- Mode computation ---
   function getMode() {
     if (!agentConfig || !agentConfig.agents) return 'welcome';
-    const status = currentState && currentState.status;
+    var status = currentState && currentState.status;
     if (!status || status === 'done' || status === 'aborted') return 'idle';
     return 'active'; // ready, working, escalated
   }
 
   function updateVisibility() {
-    const mode = getMode();
+    var mode = getMode();
 
     // If mode no longer matches form, close it
     if (mode !== 'welcome' && activeForm === 'setup') activeForm = null;
     if (mode === 'active' && activeForm === 'phase') activeForm = null;
 
-    // Setup form: shown when activeForm is 'setup'
+    // Setup form
     show(setupFormEl, activeForm === 'setup');
 
-    // Phase form: shown when activeForm is 'phase'
+    // Phase form
     show(phaseFormEl, activeForm === 'phase');
 
-    // Status panel: visible in idle and active modes (hidden when a form is active)
+    // Status panel
     show(statusPanel, mode !== 'welcome' && activeForm !== 'setup' && activeForm !== 'phase');
 
-    // Controls: only in active mode
+    // Controls
     show(controlsPanel, mode === 'active');
 
-    // Escalation choices: only when escalated
-    const isEscalated = currentState.status === 'escalated';
+    // Escalation choices
+    var isEscalated = currentState.status === 'escalated';
     show(escalationChoices, mode === 'active' && isEscalated);
 
-    // Timeline: visible if there's history and not in welcome mode
-    const hasHistory = currentState.history && currentState.history.length > 0;
+    // Timeline
+    var hasHistory = currentState.history && currentState.history.length > 0;
     show(timelineSec, mode !== 'welcome' && hasHistory);
 
-    // Cycle viewer: visible if not in welcome mode
+    // Cycle viewer
     show(cycleSec, mode !== 'welcome');
 
-    // Phase map: visible if not in welcome mode
+    // Phase map
     show(phaseMapPanel, mode !== 'welcome');
 
-    // Mayor prompt: welcome mode, no dialogue, no setup form
-    show(mayorPrompt, mode === 'welcome' && !dialogueVisible && activeForm !== 'setup');
+    // Mayor glow
+    if (mode === 'welcome') {
+      bannerMayor.classList.add('mayor-glow');
+    } else {
+      bannerMayor.classList.remove('mayor-glow');
+    }
   }
 
   function show(el, visible) {
@@ -115,248 +176,82 @@
     el.classList.toggle('hidden', !visible);
   }
 
-  // --- Saloon ASCII art scene ---
-  const SALOON_LINES = [
-    { text: "\u2554" + "\u2550".repeat(78) + "\u2557", cls: "ch-border" },
-    { parts: [
-      { text: "\u2551  ", cls: "ch-border" },
-      { text: "THE HANDOFF SALOON", cls: "ch-title" },
-      { text: " ".repeat(58) + "\u2551", cls: "ch-border" },
-    ]},
-    { text: "\u2551" + "\u2500".repeat(78) + "\u2551", cls: "ch-border" },
-    { parts: [
-      { text: "\u2551", cls: "ch-border" },
-      { text: "                                            \u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510", cls: "ch-shelf" },
-      { text: "       \u2551", cls: "ch-border" },
-    ]},
-    { parts: [
-      { text: "\u2551", cls: "ch-border" },
-      { text: "       \u250C\u2500\u2500\u2500\u2510", cls: "ch-mayor" },
-      { text: "              ", cls: "bg" },
-      { text: "\u2554\u2550\u2550\u2550\u2550\u2557", cls: "ch-clock" },
-      { text: "            ", cls: "bg" },
-      { text: "\u2502 \u2591 WHISKEY  RYE  CORN  \u2591 \u2502", cls: "ch-shelf" },
-      { text: "       \u2551", cls: "ch-border" },
-    ]},
-    { parts: [
-      { text: "\u2551", cls: "ch-border" },
-      { text: "       \u2502 \u2666 \u2502", cls: "ch-mayor" },
-      { text: "              ", cls: "bg" },
-      { text: "\u2551 \u2302  \u2551", cls: "ch-clock" },
-      { text: "            ", cls: "bg" },
-      { text: "\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518", cls: "ch-shelf" },
-      { text: "       \u2551", cls: "ch-border" },
-    ]},
-    { parts: [
-      { text: "\u2551", cls: "ch-border" },
-      { text: "       \u2514\u2500\u252C\u2500\u2518", cls: "ch-mayor" },
-      { text: "              ", cls: "bg" },
-      { text: "\u2551\u2500\u2500\u2500\u2500\u2551", cls: "ch-clock" },
-      { text: "                          ", cls: "bg" },
-      { text: "(\\ /)", cls: "ch-rabbit" },
-      { text: "               \u2551", cls: "ch-border" },
-    ]},
-    { parts: [
-      { text: "\u2551", cls: "ch-border" },
-      { text: "      \u250C\u2500\u2500\u2534\u2500\u2500\u2510", cls: "ch-mayor" },
-      { text: "             ", cls: "bg" },
-      { text: "\u2551 \u25F7  \u2551", cls: "ch-clock" },
-      { text: "                          ", cls: "bg" },
-      { text: "( . .)", cls: "ch-rabbit" },
-      { text: "              \u2551", cls: "ch-border" },
-    ]},
-    { parts: [
-      { text: "\u2551", cls: "ch-border" },
-      { text: "      \u2502 \u25C9 \u25C9 \u2502", cls: "ch-mayor" },
-      { text: "             ", cls: "bg" },
-      { text: "\u2551    \u2551", cls: "ch-clock" },
-      { text: "                          ", cls: "bg" },
-      { text: "c(\")(\")", cls: "ch-rabbit" },
-      { text: "             \u2551", cls: "ch-border" },
-    ]},
-    { parts: [
-      { text: "\u2551", cls: "ch-border" },
-      { text: "      \u2502  \u25BD  \u2502", cls: "ch-mayor" },
-      { text: "             ", cls: "bg" },
-      { text: "\u255A\u2564\u2550\u2550\u2564\u255D", cls: "ch-clock" },
-      { text: "                         ", cls: "bg" },
-      { text: "\u250C\u2500\u2500\u2534\u2500\u2500\u2510", cls: "ch-rabbit" },
-      { text: "              \u2551", cls: "ch-border" },
-    ]},
-    { parts: [
-      { text: "\u2551", cls: "ch-border" },
-      { text: "      \u2502 \u256E\u2500\u256F \u2502", cls: "ch-mayor" },
-      { text: "              ", cls: "bg" },
-      { id: "pendulum", text: " \u2502  \u2502", cls: "ch-pendulum" },
-      { text: "                          ", cls: "bg" },
-      { text: "\u2502     \u2502", cls: "ch-rabbit" },
-      { text: "              \u2551", cls: "ch-border" },
-    ]},
-    { parts: [
-      { text: "\u2551", cls: "ch-border" },
-      { text: "      \u2514\u2500\u2500\u252C\u2500\u2500\u2518", cls: "ch-mayor" },
-      { text: "              ", cls: "bg" },
-      { id: "pendulum-bobs", text: " \u25EF  \u25EF", cls: "ch-pendulum" },
-      { text: "                          ", cls: "bg" },
-      { text: "\u2502 \u250C\u2500\u2510 \u2502", cls: "ch-rabbit" },
-      { text: "              \u2551", cls: "ch-border" },
-    ]},
-    { parts: [
-      { text: "\u2551", cls: "ch-border" },
-      { text: "      \u2554\u2550\u2550\u2567\u2550\u2550\u2557", cls: "ch-mayor" },
-      { text: "                                            ", cls: "bg" },
-      { text: "\u2502 \u2502B\u2502 \u2502", cls: "ch-rabbit" },
-      { text: "              \u2551", cls: "ch-border" },
-    ]},
-    { parts: [
-      { text: "\u2551", cls: "ch-border" },
-      { text: "      \u2551MAYOR\u2551", cls: "ch-mayor" },
-      { text: "                                            ", cls: "bg" },
-      { text: "\u2502 \u2514\u2500\u2518 \u2502", cls: "ch-rabbit" },
-      { text: "              \u2551", cls: "ch-border" },
-    ]},
-    { parts: [
-      { text: "\u2551", cls: "ch-border" },
-      { text: "      \u255A\u2550\u2550\u2564\u2550\u2550\u255D", cls: "ch-mayor" },
-      { text: "                               ", cls: "bg" },
-      { text: "\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550", cls: "ch-counter" },
-      { text: "\u2514\u2500\u2500\u252C\u2500\u2500\u2518", cls: "ch-rabbit" },
-      { text: "\u2550\u2550\u2550\u2550\u2550\u2550", cls: "ch-counter" },
-      { text: "        \u2551", cls: "ch-border" },
-    ]},
-    { parts: [
-      { text: "\u2551", cls: "ch-border" },
-      { text: "        /|\\", cls: "ch-mayor" },
-      { text: "   ", cls: "bg" },
-      { text: "\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510", cls: "ch-table" },
-      { text: "                                 ", cls: "bg" },
-      { text: "/|\\", cls: "ch-rabbit" },
-      { text: "                \u2551", cls: "ch-border" },
-    ]},
-    { parts: [
-      { text: "\u2551", cls: "ch-border" },
-      { text: "       / | \\", cls: "ch-mayor" },
-      { text: "  ", cls: "bg" },
-      { text: "\u2502          \u2502", cls: "ch-table" },
-      { text: "                                ", cls: "bg" },
-      { text: "/ | \\", cls: "ch-rabbit" },
-      { text: "               \u2551", cls: "ch-border" },
-    ]},
-    { parts: [
-      { text: "\u2551", cls: "ch-border" },
-      { text: "              ", cls: "bg" },
-      { text: "\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518", cls: "ch-table" },
-      { text: " ".repeat(53) + "\u2551", cls: "ch-border" },
-    ]},
-    { parts: [
-      { text: "\u2551  ", cls: "ch-border" },
-      { text: "\u2584".repeat(64), cls: "ch-floor" },
-      { text: "            \u2551", cls: "ch-border" },
-    ]},
-    { text: "\u255A" + "\u2550".repeat(78) + "\u255D", cls: "ch-border" },
-  ];
-
-  // --- Render saloon art ---
-  function renderSaloon() {
-    let html = '';
-    for (const line of SALOON_LINES) {
-      if (line.text !== undefined) {
-        html += '<span class="' + line.cls + '">' + escHtml(line.text) + '</span>\n';
-      } else if (line.parts) {
-        for (const part of line.parts) {
-          const idAttr = part.id ? ' id="' + part.id + '"' : '';
-          html += '<span class="' + part.cls + '"' + idAttr + '>' + escHtml(part.text) + '</span>';
-        }
-        html += '\n';
-      }
+  // --- Mayor click ---
+  function onMayorClick() {
+    if (dialogueCtrl.visible) {
+      dialogueCtrl.hide();
+      return;
     }
-    saloonArt.innerHTML = html;
-  }
 
-  function escHtml(s) {
-    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  }
+    var mode = getMode();
 
-  renderSaloon();
-
-  // --- Pendulum animation ---
-  let pendulumTick = 0;
-  const pendulumFrames = [
-    [" \u25EF  \u2502", " \u25EF  \u25EF"],
-    [" \u2502  \u2502", " \u25EF  \u25EF"],
-    [" \u2502  \u25EF", " \u25EF  \u25EF"],
-    [" \u2502  \u2502", " \u25EF  \u25EF"],
-  ];
-  let pendulumRunning = true;
-
-  function animatePendulum() {
-    if (!pendulumRunning) return;
-    const pendEl = document.getElementById('pendulum');
-    const bobsEl = document.getElementById('pendulum-bobs');
-    if (pendEl && bobsEl) {
-      const frame = pendulumFrames[pendulumTick % pendulumFrames.length];
-      pendEl.textContent = frame[0];
-      bobsEl.textContent = frame[1];
-      pendulumTick++;
-    }
-  }
-
-  setInterval(animatePendulum, 800);
-
-  // --- Saloon state mapping ---
-  function applySaloonState(state) {
-    const status = state.status || '';
-    const result = state.result || '';
-
-    saloonArt.classList.remove('muted', 'state-working', 'state-approved', 'state-escalated');
-    pendulumRunning = true;
-
-    if (status === 'working') {
-      saloonArt.classList.add('state-working');
-    } else if (status === 'done' && result === 'approved') {
-      saloonArt.classList.add('state-approved');
-    } else if (status === 'escalated') {
-      saloonArt.classList.add('state-escalated');
-      pendulumRunning = false;
-    } else if (status === 'aborted') {
-      saloonArt.classList.add('muted');
-      pendulumRunning = false;
-    }
-  }
-
-  // --- Mayor dialogue system ---
-  function showDialogue(text, actions) {
-    dialogueText.textContent = text;
-    dialogueActions.innerHTML = '';
-    for (const action of actions) {
-      const btn = document.createElement('button');
-      btn.className = 'dialogue-action-btn';
-      btn.textContent = action.label;
-      btn.addEventListener('click', function(e) {
-        e.stopPropagation();
-        action.action();
+    if (mode === 'welcome') {
+      // Play setup intro via dialogue
+      dialogueCtrl.playScript(Conversation.SETUP_INTRO, function(inputs) {
+        var lead = inputs.setup_lead || 'claude';
+        var reviewer = inputs.setup_reviewer || 'codex';
+        submitSetupFromDialogue(lead, reviewer);
       });
-      dialogueActions.appendChild(btn);
+    } else if (mode === 'idle') {
+      var idleScript = [
+        {
+          id: 'idle_menu',
+          speaker: 'mayor',
+          type: 'choice',
+          text: getMayorIdleText(),
+          choices: [
+            { label: 'Start new phase', next: 'start_phase' },
+            { label: 'How it works', next: 'how' },
+            { label: 'Never mind', next: null },
+          ],
+        },
+        {
+          id: 'start_phase',
+          speaker: 'mayor',
+          type: 'dialogue',
+          text: "Fill in the phase details below and we'll get rolling!",
+          next: null,
+        },
+        {
+          id: 'how',
+          speaker: 'mayor',
+          type: 'dialogue',
+          text: "The Handoff Saloon orchestrates work between two AI agents. A Lead does the work, a Reviewer checks it, and you \u2014 the human \u2014 are the arbiter. They go back and forth until the work is approved.",
+          next: 'how_rabbit',
+        },
+        {
+          id: 'how_rabbit',
+          speaker: 'rabbit',
+          type: 'dialogue',
+          text: "I keep track of every round and make sure the handoffs run smooth. Click the Mayor when you're ready to start a phase!",
+          next: null,
+        },
+      ];
+
+      dialogueCtrl.playScript(idleScript, function(inputs, lastNodeId) {
+        // Only open phase form if they chose "Start new phase"
+        if (lastNodeId === 'start_phase') {
+          activeForm = 'phase';
+          updateVisibility();
+        }
+      });
+    } else if (mode === 'active') {
+      var activeScript = [
+        {
+          id: 'active_info',
+          speaker: 'mayor',
+          type: 'dialogue',
+          text: getMayorActiveText(),
+          next: null,
+        },
+      ];
+      dialogueCtrl.playScript(activeScript);
     }
-    mayorDialogue.classList.remove('hidden');
-    dialogueVisible = true;
-    updateVisibility();
   }
-
-  function closeDialogue() {
-    mayorDialogue.classList.add('hidden');
-    dialogueVisible = false;
-    updateVisibility();
-  }
-
-  dialogueCloseBtn.addEventListener('click', function(e) {
-    e.stopPropagation();
-    closeDialogue();
-  });
 
   function getMayorIdleText() {
-    const status = currentState.status;
-    const result = currentState.result;
+    var status = currentState.status;
+    var result = currentState.result;
     if (status === 'done' && result === 'approved') {
       return "Phase complete! Ready for the next one?";
     }
@@ -367,8 +262,8 @@
   }
 
   function getMayorActiveText() {
-    const status = currentState.status;
-    const turn = currentState.turn;
+    var status = currentState.status;
+    var turn = currentState.turn;
     if (status === 'working') {
       return "An agent is working. Sit tight, partner.";
     }
@@ -376,115 +271,70 @@
       return "Handoff ready \u2014 " + agentName(turn) + " is up next.";
     }
     if (status === 'escalated') {
-      return "This got escalated. A human needs to step in.";
+      return "This got escalated. A human needs to step in. Use the controls below.";
     }
     return "The saloon is busy.";
   }
 
-  function onMayorClick() {
-    if (dialogueVisible) {
-      closeDialogue();
-      return;
-    }
+  bannerMayor.addEventListener('click', onMayorClick);
 
-    const mode = getMode();
-
-    if (mode === 'welcome') {
-      showDialogue(
-        "Welcome to the Handoff Saloon! I'll help you set up your project. Enter your agent names on the right.",
-        []
-      );
-      activeForm = 'setup';
-      updateVisibility();
-    } else if (mode === 'idle') {
-      const actions = [
-        { label: 'Start new phase', action: startNewPhase },
-        { label: 'Status summary', action: showStatusSummary },
-        { label: 'How it works', action: showHowItWorks },
-      ];
-      showDialogue(getMayorIdleText(), actions);
-    } else if (mode === 'active') {
-      const actions = [
-        { label: 'Status summary', action: showStatusSummary },
-        { label: 'How it works', action: showHowItWorks },
-      ];
-      showDialogue(getMayorActiveText(), actions);
-    }
-  }
-
-  function startNewPhase() {
-    closeDialogue();
-    activeForm = 'phase';
-    updateVisibility();
-  }
-
-  function showStatusSummary() {
-    const s = currentState;
-    const lines = [];
-    if (s.phase) lines.push("Phase: " + s.phase);
-    if (s.type)  lines.push("Type: " + s.type);
-    if (s.round) lines.push("Round: " + s.round);
-    if (s.turn)  lines.push("Turn: " + agentName(s.turn));
-    if (s.status) lines.push("Status: " + s.status);
-    if (s.result) lines.push("Result: " + s.result);
-    const text = lines.length > 0 ? lines.join("\n") : "No active handoff.";
-    showDialogue(text, [{ label: 'Close', action: closeDialogue }]);
-  }
-
-  function showHowItWorks() {
-    showDialogue(
-      "The Handoff Saloon orchestrates work between two AI agents. " +
-      "A lead agent does the work, then hands off to a reviewer. " +
-      "They go back and forth until the work is approved. " +
-      "You can monitor, approve, request changes, escalate, or abort from here.",
-      [{ label: 'Got it', action: closeDialogue }]
-    );
-  }
-
-  mayorHitzone.addEventListener('click', onMayorClick);
-
-  // --- Setup form ---
-  async function submitSetup() {
-    const lead = setupLeadIn.value.trim();
-    const reviewer = setupRevIn.value.trim();
-
-    if (!lead || !reviewer) {
-      showDialogue("Please fill in both agent names.", []);
-      return;
-    }
-
-    setupSubmit.disabled = true;
+  // --- Setup ---
+  async function submitSetupFromDialogue(lead, reviewer) {
     try {
-      const r = await fetch('/api/config', {
+      var r = await fetch('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ lead: lead, reviewer: reviewer }),
       });
-      const data = await r.json();
+      var data = await r.json();
 
       if (r.ok) {
         agentConfig = data;
         activeForm = null;
-        showDialogue("You're all set! Click me anytime to start a new phase or get help.", []);
+        dialogueCtrl.playLines([
+          { speaker: 'mayor', text: "You're all set! Click me anytime to start a new phase." },
+        ]);
         updateVisibility();
       } else if (r.status === 409) {
-        showDialogue("Config already exists \u2014 overwrite?", [
-          { label: 'Overwrite', action: function() { submitSetupOverwrite(lead, reviewer); } },
-          { label: 'Cancel', action: closeDialogue },
-        ]);
+        dialogueCtrl.playScript([
+          {
+            id: 'overwrite_q',
+            speaker: 'mayor',
+            type: 'choice',
+            text: "Config already exists. Want to overwrite it?",
+            choices: [
+              { label: 'Yes, overwrite', next: 'do_overwrite' },
+              { label: 'Cancel', next: null },
+            ],
+          },
+          {
+            id: 'do_overwrite',
+            speaker: 'mayor',
+            type: 'dialogue',
+            text: "Overwriting...",
+            next: null,
+          },
+        ], function(inputs, lastNodeId) {
+          // Only overwrite if they chose "Yes, overwrite" (reached do_overwrite node)
+          if (lastNodeId === 'do_overwrite') {
+            submitSetupOverwrite(lead, reviewer);
+          }
+        });
       } else {
-        showDialogue(data.error || "Something went wrong.", []);
+        dialogueCtrl.playLines([
+          { speaker: 'mayor', text: data.error || "Something went wrong." },
+        ]);
       }
     } catch (e) {
-      showDialogue("Failed to connect to the server.", []);
-    } finally {
-      setupSubmit.disabled = false;
+      dialogueCtrl.playLines([
+        { speaker: 'mayor', text: "Failed to connect to the server." },
+      ]);
     }
   }
 
   async function submitSetupOverwrite(lead, reviewer) {
     try {
-      const r = await fetch('/api/config', {
+      var r = await fetch('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ lead: lead, reviewer: reviewer, overwrite: true }),
@@ -492,14 +342,81 @@
       if (r.ok) {
         agentConfig = await r.json();
         activeForm = null;
-        showDialogue("Config updated! Click me to start a new phase.", []);
+        dialogueCtrl.playLines([
+          { speaker: 'mayor', text: "Config updated! Click me to start a new phase." },
+        ]);
         updateVisibility();
-      } else {
-        const data = await r.json();
-        showDialogue(data.error || "Something went wrong.", []);
       }
     } catch (e) {
-      showDialogue("Failed to connect to the server.", []);
+      dialogueCtrl.playLines([
+        { speaker: 'mayor', text: "Failed to connect to the server." },
+      ]);
+    }
+  }
+
+  // --- Setup form (manual, as fallback) ---
+  async function submitSetup() {
+    var lead = setupLeadIn.value.trim();
+    var reviewer = setupRevIn.value.trim();
+
+    if (!lead || !reviewer) {
+      dialogueCtrl.playLines([
+        { speaker: 'mayor', text: "Please fill in both agent names." },
+      ]);
+      return;
+    }
+
+    setupSubmit.disabled = true;
+    try {
+      var r = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lead: lead, reviewer: reviewer }),
+      });
+      var data = await r.json();
+
+      if (r.ok) {
+        agentConfig = data;
+        activeForm = null;
+        dialogueCtrl.playLines([
+          { speaker: 'mayor', text: "You're all set! Click me to start a new phase." },
+        ]);
+        updateVisibility();
+      } else if (r.status === 409) {
+        dialogueCtrl.playScript([
+          {
+            id: 'ow',
+            speaker: 'mayor',
+            type: 'choice',
+            text: "Config already exists \u2014 overwrite?",
+            choices: [
+              { label: 'Overwrite', next: 'ow_confirm' },
+              { label: 'Cancel', next: null },
+            ],
+          },
+          {
+            id: 'ow_confirm',
+            speaker: 'mayor',
+            type: 'dialogue',
+            text: "Overwriting...",
+            next: null,
+          },
+        ], function(inputs, lastNodeId) {
+          if (lastNodeId === 'ow_confirm') {
+            submitSetupOverwrite(lead, reviewer);
+          }
+        });
+      } else {
+        dialogueCtrl.playLines([
+          { speaker: 'mayor', text: data.error || "Something went wrong." },
+        ]);
+      }
+    } catch (e) {
+      dialogueCtrl.playLines([
+        { speaker: 'mayor', text: "Failed to connect to the server." },
+      ]);
+    } finally {
+      setupSubmit.disabled = false;
     }
   }
 
@@ -509,40 +426,54 @@
 
   // --- Phase form ---
   async function submitPhase() {
-    const phase = phaseNameIn.value.trim();
-    const typeEl = document.querySelector('input[name="phase-type"]:checked');
-    const type = typeEl ? typeEl.value : '';
+    var phase = phaseNameIn.value.trim();
+    var typeEl = document.querySelector('input[name="phase-type"]:checked');
+    var type = typeEl ? typeEl.value : '';
 
     if (!phase) {
-      showDialogue("Please enter a phase name.", []);
+      dialogueCtrl.playLines([
+        { speaker: 'mayor', text: "Please enter a phase name." },
+      ]);
       return;
     }
     if (!type) {
-      showDialogue("Please select a phase type.", []);
+      dialogueCtrl.playLines([
+        { speaker: 'mayor', text: "Please select a phase type." },
+      ]);
       return;
     }
 
     phaseSubmit.disabled = true;
     try {
-      const r = await fetch('/api/start-phase', {
+      var r = await fetch('/api/start-phase', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phase: phase, type: type }),
       });
-      const data = await r.json();
+      var data = await r.json();
 
       if (r.ok) {
         activeForm = null;
         handleNewState(data);
-        showDialogue('Phase "' + phase + '" started! The lead agent is up first.', []);
+        triggerCuckoo();
+        dialogueCtrl.playLines([
+          { speaker: 'mayor', text: 'Phase "' + phase + '" started! The lead agent is up first.' },
+          { speaker: 'rabbit', text: "I've got my notebook ready. Let's see what they come up with!" },
+        ]);
         updateVisibility();
       } else if (r.status === 409) {
-        showDialogue(data.error || "There's already an active handoff. Finish or abort it first.", []);
+        dialogueCtrl.playLines([
+          { speaker: 'mayor', text: data.error || "There's already an active handoff. Finish or abort it first." },
+        ]);
       } else {
-        showDialogue(data.error || "Something went wrong.", []);
+        dialogueCtrl.playLines([
+          { speaker: 'mayor', text: data.error || "Something went wrong." },
+        ]);
       }
     } catch (e) {
-      showDialogue("Failed to connect to the server.", []);
+      dialogueCtrl.playLines([
+        { speaker: 'mayor', text: "Failed to connect to the server." },
+      ]);
     } finally {
       phaseSubmit.disabled = false;
     }
@@ -553,16 +484,20 @@
 
   // --- Status badges ---
   function statusBadge(status) {
-    const map = {
+    var map = {
       'ready': 'badge-yellow', 'working': 'badge-blue', 'done': 'badge-green',
       'escalated': 'badge-red', 'aborted': 'badge-gray', 'approved': 'badge-green',
     };
     return '<span class="badge ' + (map[status] || 'badge-gray') + '">' + escHtml(status || '--') + '</span>';
   }
 
+  function escHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
   function agentName(role) {
     if (!agentConfig.agents) return role;
-    const agent = agentConfig.agents[role];
+    var agent = agentConfig.agents[role];
     return agent ? agent.name : role;
   }
 
@@ -570,16 +505,16 @@
     stPhase.textContent  = state.phase  || '--';
     stType.textContent   = state.type   || '--';
     stRound.textContent  = state.round  || '--';
-    const turn = state.turn || '--';
+    var turn = state.turn || '--';
     stTurn.innerHTML = escHtml(turn) + ' <span style="color:var(--text-dim)">(' + escHtml(agentName(turn)) + ')</span>';
     stStatus.innerHTML = statusBadge(state.status);
     stResult.innerHTML = state.result ? statusBadge(state.result) : '--';
   }
 
   function updateControls(state) {
-    const status = state.status || '';
-    const active = status === 'ready' || status === 'working';
-    const notDone = status !== 'done' && status !== 'aborted';
+    var status = state.status || '';
+    var active = status === 'ready' || status === 'working';
+    var notDone = status !== 'done' && status !== 'aborted';
     btnApprove.disabled  = !active;
     btnChanges.disabled  = !active;
     btnEscalate.disabled = !notDone;
@@ -587,13 +522,13 @@
   }
 
   function updateTimeline(state) {
-    const history = state.history || [];
+    var history = state.history || [];
     if (history.length === 0) return;
-    const entries = history.slice(-10).reverse();
+    var entries = history.slice(-10).reverse();
     timelineEl.innerHTML = entries.map(function(h) {
-      const ts = h.timestamp ? formatTime(h.timestamp) : '--:--';
-      const turn = h.turn || '?';
-      const status = h.status || '?';
+      var ts = h.timestamp ? formatTime(h.timestamp) : '--:--';
+      var turn = h.turn || '?';
+      var status = h.status || '?';
       return '<div class="timeline-entry">' +
         '<span class="timeline-dot"></span>' +
         '<span class="timeline-time">' + ts + '</span>' +
@@ -605,6 +540,14 @@
   function formatTime(iso) {
     try { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
     catch (e) { return '--:--'; }
+  }
+
+  // --- State-change dialogue ---
+  function playStateDialogue(state, prev) {
+    var lines = Conversation.buildStateDialogue(state, prev);
+    if (lines.length > 0 && !dialogueCtrl.visible) {
+      dialogueCtrl.playLines(lines);
+    }
   }
 
   // --- Cycle document ---
@@ -650,7 +593,6 @@
       .then(function(r) { if (!r.ok) throw new Error(); return r.text(); })
       .then(function(md) { cycleContent.innerHTML = renderMarkdown(md); })
       .catch(function() { cycleContent.innerHTML = '<em>Could not load document.</em>'; });
-    // Also load structured rounds view
     loadRounds(filename);
   }
 
@@ -682,7 +624,6 @@
     var container = document.getElementById('rounds-content');
     if (!container) return;
 
-    // Use pre-rendered HTML from the backend (format_rounds_html)
     if (data.html) {
       container.innerHTML = data.html;
       container.classList.remove('hidden');
@@ -703,7 +644,7 @@
   // --- Control actions ---
   async function postState(updates) {
     try {
-      const r = await fetch('/api/state', {
+      var r = await fetch('/api/state', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
@@ -716,7 +657,7 @@
     postState({ status: 'done', result: 'approved' });
   });
   btnChanges.addEventListener('click', function() {
-    const otherTurn = currentState.turn === 'lead' ? 'reviewer' : 'lead';
+    var otherTurn = currentState.turn === 'lead' ? 'reviewer' : 'lead';
     postState({ status: 'ready', turn: otherTurn, round: (currentState.round || 1) + 1 });
   });
   btnEscalate.addEventListener('click', function() { postState({ status: 'escalated' }); });
@@ -788,23 +729,36 @@
 
   // --- State transition ---
   function handleNewState(state) {
+    prevState = Object.assign({}, currentState);
     lastUpdatedAt = state.updated_at || null;
     currentState = state;
+
     updateStatusPanel(state);
     updateControls(state);
     updateTimeline(state);
-    applySaloonState(state);
+    updateBannerCharacters(state.status || '');
     updateVisibility();
+
+    // State-change dialogue
+    if (prevState.status && prevState.status !== state.status) {
+      playStateDialogue(state, prevState);
+      // Trigger cuckoo on significant transitions
+      if (state.status === 'done' || state.status === 'escalated') {
+        triggerCuckoo();
+      }
+    }
   }
 
   // --- Polling ---
-  let pollOk = false;
+  var pollOk = false;
   async function poll() {
     try {
-      const [stateR, configR] = await Promise.all([
+      var results = await Promise.all([
         fetch('/api/state'),
         fetch('/api/config'),
       ]);
+      var stateR = results[0];
+      var configR = results[1];
       if (stateR.ok && configR.ok) {
         if (!pollOk) { pollOk = true; connDot.className = 'conn-dot ok'; connText.textContent = 'Connected'; }
         agentConfig = await configR.json();
@@ -821,10 +775,12 @@
 
   async function init() {
     try {
-      const [stateR, configR] = await Promise.all([
+      var results = await Promise.all([
         fetch('/api/state'),
         fetch('/api/config'),
       ]);
+      var stateR = results[0];
+      var configR = results[1];
       if (configR.ok) agentConfig = await configR.json();
       if (stateR.ok) {
         pollOk = true;
@@ -835,6 +791,13 @@
     } catch (e) {}
     updateVisibility();
     loadPhaseMap();
+
+    // Auto-play intro if welcome mode
+    if (getMode() === 'welcome') {
+      setTimeout(function() {
+        dialogueCtrl.playScript(Conversation.INTRO);
+      }, 500);
+    }
   }
 
   init();
