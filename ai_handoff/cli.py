@@ -162,6 +162,45 @@ def setup_command(target_dir: str = ".") -> int:
     return 0
 
 
+def upgrade_command() -> int:
+    """Re-run setup on all registered projects."""
+    from ai_handoff.registry import get_registered_projects
+    from ai_handoff.setup import main as setup_main
+
+    projects = get_registered_projects()
+
+    if not projects:
+        print("No registered projects found.")
+        print()
+        print("Projects are registered automatically when you run 'ai-handoff setup'.")
+        print("Run 'ai-handoff setup <dir>' in each project directory first.")
+        return 0
+
+    print(f"Upgrading {len(projects)} registered project(s)...")
+    print()
+
+    failed = []
+    for project_dir in projects:
+        print(f"{'=' * 60}")
+        print(f"Project: {project_dir}")
+        print(f"{'=' * 60}")
+        try:
+            setup_main(project_dir)
+        except Exception as e:
+            print(f"  ERROR: {e}")
+            failed.append(project_dir)
+        print()
+
+    if failed:
+        print(f"Completed with {len(failed)} error(s):")
+        for p in failed:
+            print(f"  - {p}")
+        return 1
+
+    print(f"All {len(projects)} project(s) upgraded successfully.")
+    return 0
+
+
 HELP_TEXT = """\
 AI Handoff Framework
 
@@ -176,6 +215,7 @@ Commands:
   session       Manage tmux session (start/attach/kill)
   serve         Start the web dashboard server
   tui           Launch the Handoff Saloon terminal UI
+  upgrade       Re-run setup on all registered projects (after pip upgrade)
 
 Workflow:
   1. Run 'python -m ai_handoff setup' to copy framework files
@@ -234,6 +274,8 @@ def main() -> int:
             print("Install it with: pip install ai-handoff[tui]")
             return 1
         return tui_command(sys.argv[2:])
+    elif command == "upgrade":
+        return upgrade_command()
     elif command in ["-h", "--help", "help"]:
         print(HELP_TEXT)
         return 0

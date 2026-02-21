@@ -84,26 +84,17 @@ def main(target_dir: str = ".") -> None:
     print()
 
     # Remove deprecated flat-file skills from previous versions
-    deprecated_skills = [
-        "handoff-plan.md",
-        "handoff-handoff.md",
-        "handoff-review.md",
-        "handoff-implement.md",
-        "handoff-phase.md",
-        "handoff-status.md",
-        "handoff-decide.md",
-        "handoff-escalate.md",
-        "handoff-sync.md",
-        "handoff-cycle.md",
-        "handoff.md",
-    ]
+    # Uses glob to catch any handoff-*.md files, not just known ones
     skills_dst = target / ".claude" / "skills"
     removed = []
-    for name in deprecated_skills:
-        old_file = skills_dst / name
-        if old_file.exists():
-            old_file.unlink()
-            removed.append(name)
+    for old_file in skills_dst.glob("handoff-*.md"):
+        old_file.unlink()
+        removed.append(old_file.name)
+    # Also remove bare handoff.md (not matched by handoff-*.md)
+    bare_handoff = skills_dst / "handoff.md"
+    if bare_handoff.exists():
+        bare_handoff.unlink()
+        removed.append("handoff.md")
     if removed:
         print(f"Removed {len(removed)} deprecated skill files:")
         for name in removed:
@@ -172,6 +163,10 @@ def main(target_dir: str = ".") -> None:
         decision_log_src = source / "templates" / "decision_log.md"
         if decision_log_src.exists():
             copy_md_file(decision_log_src, decision_log_dst, variables)
+
+    # Register this project for future upgrades
+    from ai_handoff.registry import register_project
+    register_project(str(target))
 
     print()
     print("Setup complete!")
