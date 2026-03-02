@@ -64,8 +64,12 @@ BUSY_PATTERNS = [
 ]
 
 IDLE_PATTERNS = [
+    # Claude Code
     "? for shortcuts",
     "context left",
+    # Codex
+    "/skills to list",
+    "/model to change",
 ]
 
 
