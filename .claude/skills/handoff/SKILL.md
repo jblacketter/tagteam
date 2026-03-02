@@ -109,8 +109,11 @@ Replace `[agent name]` with the next agent's name. For completed/escalated/needs
 **Lead only.** Runs all remaining roadmap phases end-to-end with review gates.
 
 1. Read `ai-handoff.yaml` to confirm you are the lead
-2. Parse `docs/roadmap.md` to extract incomplete phases using `ai_handoff.roadmap.build_queue()`
-3. If `[phase]` is provided, start from that phase (skip earlier incomplete phases)
+2. Build the phase queue using the CLI:
+   - All incomplete phases: `python -m ai_handoff roadmap queue`
+   - Starting from a specific phase: `python -m ai_handoff roadmap queue [phase-slug]`
+   - This prints a comma-separated list of phase slugs (e.g. `api-gateway,dashboard,ci-integration`)
+3. The first slug in the output is the starting phase
 4. Create the plan for the first phase at `docs/phases/[phase].md` if it doesn't exist
 5. Create `docs/handoffs/[phase]_plan_cycle.md` (same format as single-phase)
 6. Run:
@@ -118,7 +121,7 @@ Replace `[agent name]` with the next agent's name. For completed/escalated/needs
    python -m ai_handoff state set --turn reviewer --status ready \
      --phase [first-phase] --type plan --round 1 \
      --run-mode full-roadmap \
-     --roadmap-queue [comma-separated-slugs] \
+     --roadmap-queue [comma-separated-slugs-from-step-2] \
      --roadmap-index 0 \
      --command "Read .claude/skills/handoff/SKILL.md and handoff-state.json, then act on your turn" \
      --updated-by [your-agent-name]

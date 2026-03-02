@@ -139,3 +139,46 @@ def build_queue(
 
     start_idx = slugs.index(start_phase)
     return slugs[start_idx:]
+
+
+def roadmap_command(args: list[str]) -> int:
+    """Handle `python -m ai_handoff roadmap [subcommand]`.
+
+    Subcommands:
+        queue [start-phase]   Print comma-separated queue of incomplete phase slugs
+        phases                List all phases with their status
+    """
+    if not args:
+        print("Usage: python -m ai_handoff roadmap <queue|phases> [options]")
+        print()
+        print("Subcommands:")
+        print("  queue [start-phase]   Print comma-separated queue of incomplete phase slugs")
+        print("  phases                List all phases with their status")
+        return 1
+
+    subcmd = args[0]
+    roadmap_path = Path("docs/roadmap.md")
+
+    if subcmd == "queue":
+        start_phase = args[1] if len(args) > 1 else None
+        try:
+            slugs = build_queue(roadmap_path, start_phase=start_phase)
+        except (FileNotFoundError, ValueError) as e:
+            print(f"Error: {e}")
+            return 1
+        print(",".join(slugs))
+        return 0
+
+    if subcmd == "phases":
+        try:
+            phases = parse_roadmap(roadmap_path)
+        except (FileNotFoundError, ValueError) as e:
+            print(f"Error: {e}")
+            return 1
+        for p in phases:
+            print(f"{p.slug}\t{p.status}\t{p.name}")
+        return 0
+
+    print(f"Unknown roadmap subcommand: {subcmd}")
+    print("Usage: python -m ai_handoff roadmap <queue|phases>")
+    return 1

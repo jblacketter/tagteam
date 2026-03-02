@@ -12,6 +12,7 @@ from ai_handoff.roadmap import (
     parse_roadmap,
     get_incomplete_phases,
     build_queue,
+    roadmap_command,
 )
 from ai_handoff.state import (
     VALID_RUN_MODES,
@@ -403,3 +404,52 @@ class TestRoadmapAdvance:
         }, str(tmp_path))
         state = read_state(str(tmp_path))
         assert _try_roadmap_advance(state, str(tmp_path)) is None
+
+
+# ── roadmap CLI command ─────────────────────────────────────────
+
+
+class TestRoadmapCommand:
+    def test_queue_prints_slugs(self, tmp_path, monkeypatch, capsys):
+        _write_roadmap(tmp_path, SAMPLE_ROADMAP)
+        monkeypatch.chdir(tmp_path)
+
+        result = roadmap_command(["queue"])
+        assert result == 0
+        assert capsys.readouterr().out.strip() == "api-gateway,dashboard,ci-integration"
+
+    def test_queue_with_start_phase(self, tmp_path, monkeypatch, capsys):
+        _write_roadmap(tmp_path, SAMPLE_ROADMAP)
+        monkeypatch.chdir(tmp_path)
+
+        result = roadmap_command(["queue", "dashboard"])
+        assert result == 0
+        assert capsys.readouterr().out.strip() == "dashboard,ci-integration"
+
+    def test_queue_missing_roadmap(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.chdir(tmp_path)
+
+        result = roadmap_command(["queue"])
+        assert result == 1
+        assert "not found" in capsys.readouterr().out
+
+    def test_phases_lists_all(self, tmp_path, monkeypatch, capsys):
+        _write_roadmap(tmp_path, SAMPLE_ROADMAP)
+        monkeypatch.chdir(tmp_path)
+
+        result = roadmap_command(["phases"])
+        assert result == 0
+        output = capsys.readouterr().out
+        assert "auth-system\tComplete\tAuth System" in output
+        assert "api-gateway\tIn Progress\tAPI Gateway" in output
+        assert "ci-integration\tNot Started\tCI Integration" in output
+
+    def test_no_args_shows_usage(self, capsys):
+        result = roadmap_command([])
+        assert result == 1
+        assert "Usage" in capsys.readouterr().out
+
+    def test_unknown_subcommand(self, capsys):
+        result = roadmap_command(["foobar"])
+        assert result == 1
+        assert "Unknown" in capsys.readouterr().out
