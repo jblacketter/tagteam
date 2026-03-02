@@ -71,33 +71,36 @@ def create_session(project_dir: str) -> bool:
 
     abs_dir = str(Path(project_dir).resolve())
 
-    # AppleScript to create window + 3 tabs, capture session IDs
+    # AppleScript to create window + 3 tabs, capture session IDs.
+    # Key details:
+    # - `create tab` must be inside `tell current window` to avoid new windows
+    # - Tab title is set via `set name` on the session, not the tab
     script = f'''
     tell application "iTerm2"
         activate
 
-        -- Create a new window with the first tab (Lead)
-        set newWindow to (create window with default profile)
-        tell newWindow
-            -- Configure Lead tab
-            set name of current tab to "Lead"
+        -- Create a new window (comes with one tab)
+        create window with default profile
+        tell current window
+            -- Configure first tab as Lead
             tell current session of current tab
+                set name to "Lead"
                 write text "cd {abs_dir}"
             end tell
             set leadId to unique ID of current session of current tab
 
-            -- Create Watcher tab
+            -- Create Watcher tab (in same window)
             set watcherTab to (create tab with default profile)
-            set name of watcherTab to "Watcher"
             tell current session of watcherTab
+                set name to "Watcher"
                 write text "cd {abs_dir}"
             end tell
             set watcherId to unique ID of current session of watcherTab
 
-            -- Create Reviewer tab
+            -- Create Reviewer tab (in same window)
             set reviewerTab to (create tab with default profile)
-            set name of reviewerTab to "Reviewer"
             tell current session of reviewerTab
+                set name to "Reviewer"
                 write text "cd {abs_dir}"
             end tell
             set reviewerId to unique ID of current session of reviewerTab
