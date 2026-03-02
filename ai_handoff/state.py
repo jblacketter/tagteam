@@ -15,6 +15,7 @@ STATE_TMP = ".handoff-state.tmp"
 
 VALID_STATUSES = {"ready", "working", "done", "escalated", "aborted"}
 VALID_TURNS = {"lead", "reviewer"}
+VALID_RUN_MODES = {"single-phase", "full-roadmap"}
 
 
 def get_state_path(project_dir: str = ".") -> Path:
@@ -90,6 +91,7 @@ def format_state(state: dict) -> str:
     command = state.get("command", "")
     updated_at = state.get("updated_at", "?")
     updated_by = state.get("updated_by", "?")
+    run_mode = state.get("run_mode", "single-phase")
 
     lines = [
         f"Phase:      {phase}",
@@ -97,10 +99,28 @@ def format_state(state: dict) -> str:
         f"Turn:       {turn}",
         f"Status:     {status}",
         f"Round:      {round_num}",
+        f"Mode:       {run_mode}",
         f"Command:    {command}",
         f"Updated by: {updated_by}",
         f"Updated at: {updated_at}",
     ]
+
+    # Show roadmap progress if in full-roadmap mode
+    roadmap = state.get("roadmap")
+    if roadmap and run_mode == "full-roadmap":
+        queue = roadmap.get("queue", [])
+        idx = roadmap.get("current_index", 0)
+        completed = roadmap.get("completed", [])
+        pause_reason = roadmap.get("pause_reason")
+        total = len(queue)
+        progress = len(completed)
+        next_phase = queue[idx + 1] if idx + 1 < total else "(last)"
+
+        lines.append(f"Progress:   {progress}/{total}")
+        lines.append(f"Next phase: {next_phase}")
+        if pause_reason:
+            lines.append(f"Paused:     {pause_reason}")
+
     return "\n".join(lines)
 
 
@@ -137,9 +157,19 @@ def _state_set(args: list[str]) -> int:
     allowed_keys = {
         "--turn", "--status", "--command", "--phase",
         "--type", "--round", "--updated-by", "--result", "--reason",
+        "--run-mode", "--roadmap-queue", "--roadmap-index",
+        "--roadmap-completed", "--roadmap-pause-reason",
+    }
+
+    # Roadmap sub-fields are collected separately then merged into
+    # the top-level "roadmap" dict before writing.
+    ROADMAP_FIELDS = {
+        "roadmap_queue", "roadmap_index",
+        "roadmap_completed", "roadmap_pause_reason",
     }
 
     updates = {}
+    roadmap_updates = {}
     i = 0
     while i < len(args):
         key = args[i]
@@ -161,6 +191,9 @@ def _state_set(args: list[str]) -> int:
         if field == "status" and value not in VALID_STATUSES:
             print(f"Invalid status: {value}. Must be one of: {', '.join(VALID_STATUSES)}")
             return 1
+        if field == "run_mode" and value not in VALID_RUN_MODES:
+            print(f"Invalid run_mode: {value}. Must be one of: {', '.join(VALID_RUN_MODES)}")
+            return 1
         if field == "round":
             try:
                 value = int(value)
@@ -168,12 +201,41 @@ def _state_set(args: list[str]) -> int:
                 print(f"Round must be an integer, got: {value}")
                 return 1
 
-        updates[field] = value
+        # Roadmap sub-fields go into the nested roadmap object
+        if field in ROADMAP_FIELDS:
+            roadmap_key = field.removeprefix("roadmap_")
+            if roadmap_key == "queue":
+                value = [s.strip() for s in value.split(",") if s.strip()]
+            elif roadmap_key == "index":
+                try:
+                    value = int(value)
+                except ValueError:
+                    print(f"Roadmap index must be an integer, got: {value}")
+                    return 1
+            elif roadmap_key == "completed":
+                value = [s.strip() for s in value.split(",") if s.strip()]
+            elif roadmap_key == "pause_reason":
+                value = value if value else None
+            roadmap_updates[roadmap_key] = value
+        else:
+            updates[field] = value
         i += 2
 
-    if not updates:
+    if not updates and not roadmap_updates:
         print("No fields to update. Use --turn, --status, --command, etc.")
         return 1
+
+    # Merge roadmap sub-fields into the state's roadmap object
+    if roadmap_updates:
+        current = read_state() or {}
+        roadmap = current.get("roadmap") or {
+            "queue": [],
+            "current_index": 0,
+            "completed": [],
+            "pause_reason": None,
+        }
+        roadmap.update(roadmap_updates)
+        updates["roadmap"] = roadmap
 
     state = update_state(updates)
     print(f"State updated: turn={state.get('turn')}, status={state.get('status')}")

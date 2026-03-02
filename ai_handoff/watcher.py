@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ai_handoff.config import read_config, get_agent_names
-from ai_handoff.state import read_state, get_state_path
+from ai_handoff.state import read_state, update_state, get_state_path
 
 
 def notify_macos(title: str, message: str) -> None:
@@ -248,6 +248,98 @@ def send_iterm_command(
     return False
 
 
+def _try_roadmap_advance(state: dict, project_dir: str = ".") -> dict | None:
+    """Attempt to auto-advance to the next phase in full-roadmap mode.
+
+    Called when status is "done" and result is "approved".
+    Returns the new state if advanced, or None if no advance needed.
+    """
+    run_mode = state.get("run_mode", "single-phase")
+    if run_mode != "full-roadmap":
+        return None
+
+    roadmap = state.get("roadmap")
+    if not roadmap:
+        return None
+
+    result = state.get("result")
+    current_type = state.get("type")
+
+    if result != "approved":
+        return None
+
+    queue = roadmap.get("queue", [])
+    idx = roadmap.get("current_index", 0)
+    completed = roadmap.get("completed", [])
+
+    if current_type == "plan":
+        # Plan approved → hand to lead to implement and create impl cycle.
+        # Lead must run `/handoff start [phase] impl` to create cycle docs
+        # and submit for review — we do NOT skip to reviewer directly.
+        phase = state.get("phase", "?")
+        updates = {
+            "turn": "lead",
+            "status": "ready",
+            "result": None,
+            "command": f"/handoff start {phase} impl",
+        }
+        new_state = update_state(updates, project_dir)
+        _log(f"   AUTO-ADVANCE: plan approved → lead implements"
+             f" (phase: {phase})")
+        return new_state
+
+    if current_type == "impl":
+        # Impl approved → advance to next phase or complete
+        current_phase = state.get("phase")
+        if current_phase and current_phase not in completed:
+            completed = completed + [current_phase]
+
+        if idx + 1 < len(queue):
+            # More phases remain — hand to lead to create the next
+            # plan cycle. Lead must run `/handoff start [next-phase]`
+            # to create plan docs before reviewer sees anything.
+            next_idx = idx + 1
+            next_phase = queue[next_idx]
+            roadmap_update = {
+                "queue": queue,
+                "current_index": next_idx,
+                "completed": completed,
+                "pause_reason": None,
+            }
+            updates = {
+                "phase": next_phase,
+                "type": "plan",
+                "round": 1,
+                "turn": "lead",
+                "status": "ready",
+                "result": None,
+                "roadmap": roadmap_update,
+                "command": f"/handoff start {next_phase}",
+            }
+            new_state = update_state(updates, project_dir)
+            _log(f"   AUTO-ADVANCE: impl approved → lead starts next phase"
+                 f" ({next_phase})")
+            return new_state
+        else:
+            # Last phase — roadmap complete
+            roadmap_update = {
+                "queue": queue,
+                "current_index": idx,
+                "completed": completed,
+                "pause_reason": None,
+            }
+            updates = {
+                "status": "done",
+                "result": "roadmap-complete",
+                "roadmap": roadmap_update,
+            }
+            new_state = update_state(updates, project_dir)
+            _log("   ROADMAP COMPLETE: all phases finished!")
+            return new_state
+
+    return None
+
+
 def _log(msg: str) -> None:
     """Print with timestamp and flush (required for tmux pane output)."""
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
@@ -443,12 +535,36 @@ def watch(
 
             elif current_status == "done":
                 result = state.get("result", "completed")
-                _log(f"** Cycle complete: {result}")
-                notify_macos("AI Handoff", f"Cycle complete: {result}")
+
+                # In full-roadmap mode, try to auto-advance
+                advanced = _try_roadmap_advance(state, project_dir)
+                if advanced:
+                    # State was updated — reset tracking so next poll
+                    # picks up the new "ready" state
+                    last_processed_at = None
+                    idle_since = time.time()
+                    continue
+
+                if result == "roadmap-complete":
+                    _log("** Roadmap complete: all phases finished!")
+                    notify_macos("AI Handoff", "Roadmap complete!")
+                else:
+                    _log(f"** Cycle complete: {result}")
+                    notify_macos("AI Handoff", f"Cycle complete: {result}")
 
             elif current_status == "escalated":
-                _log("!! Escalated to human arbiter")
-                notify_macos("AI Handoff", "Escalated to human arbiter!")
+                # Show structured reason if available
+                roadmap = state.get("roadmap") or {}
+                pause_reason = roadmap.get("pause_reason") or state.get("reason")
+                if pause_reason:
+                    _log(f"!! Paused: {pause_reason}")
+                    _log("   Resume with: python -m ai_handoff state set"
+                         " --status ready --turn <lead|reviewer>")
+                    notify_macos("AI Handoff",
+                                 f"Paused: {pause_reason}")
+                else:
+                    _log("!! Escalated to human arbiter")
+                    notify_macos("AI Handoff", "Escalated to human arbiter!")
 
             elif current_status == "aborted":
                 reason = state.get("reason", "unknown")

@@ -17,8 +17,10 @@ Unified command for the AI handoff workflow. Reads your role and current state, 
 | Command | Description |
 |---------|-------------|
 | `/handoff` | Main command — auto-detects role + state, does the right thing |
-| `/handoff start [phase]` | Lead starts a plan review cycle for a new phase |
+| `/handoff start [phase]` | Lead starts a plan review cycle (single-phase mode) |
 | `/handoff start [phase] impl` | Lead starts an implementation review cycle |
+| `/handoff start --roadmap` | Lead starts full-roadmap mode (all incomplete phases) |
+| `/handoff start --roadmap [phase]` | Lead starts full-roadmap mode from a specific phase |
 | `/handoff status` | Show current state and orientation for both agents |
 
 ---
@@ -47,7 +49,11 @@ If there is no state file, show: `Phase: — | Type: — | Round: — | Turn: �
 **Step 3:** Check state and act:
 
 - **No state file or empty:** "No active cycle. Lead should run `/handoff start [phase]`."
-- **Approved / done:** If plan → "Plan approved! Implement, then `/handoff start [phase] impl`." If impl → "Implementation approved! Start next phase."
+- **Approved / done:** Check `run_mode` and `result` in state:
+  - If `result == "roadmap-complete"`: "Roadmap complete — all phases finished!"
+  - If plan → "Plan approved! Implement, then `/handoff start [phase] impl`."
+  - If impl and `run_mode == "full-roadmap"` → "Implementation approved! Watcher will auto-advance to next phase." (The watcher sets `turn: lead` for the next phase — lead runs `/handoff start [next-phase]`.)
+  - If impl (single-phase) → "Implementation approved! Start next phase."
 - **Escalated:** "Escalated to human arbiter. Waiting for decision in the cycle file."
 - **Needs-human:** "Paused for human input. Human should edit the cycle file's `Human Input Needed` section, set `STATE: in-progress`, and set `READY_FOR:` to the appropriate role."
 - **Aborted:** "Cycle was aborted. See cycle file for reason."
@@ -95,6 +101,41 @@ Replace `[agent name]` with the next agent's name. For completed/escalated/needs
 4. Run: `python -m ai_handoff state set --turn reviewer --status ready --command "Read .claude/skills/handoff/SKILL.md and handoff-state.json, then act on your turn" --phase [phase] --type [plan|impl] --round 1 --updated-by [your-agent-name]`
 5. Begin your response with the status banner (showing the newly created state).
 6. End with the NEXT COMMAND box.
+
+---
+
+## `/handoff start --roadmap [phase?]` — Start Full-Roadmap Mode
+
+**Lead only.** Runs all remaining roadmap phases end-to-end with review gates.
+
+1. Read `ai-handoff.yaml` to confirm you are the lead
+2. Parse `docs/roadmap.md` to extract incomplete phases using `ai_handoff.roadmap.build_queue()`
+3. If `[phase]` is provided, start from that phase (skip earlier incomplete phases)
+4. Create the plan for the first phase at `docs/phases/[phase].md` if it doesn't exist
+5. Create `docs/handoffs/[phase]_plan_cycle.md` (same format as single-phase)
+6. Run:
+   ```
+   python -m ai_handoff state set --turn reviewer --status ready \
+     --phase [first-phase] --type plan --round 1 \
+     --run-mode full-roadmap \
+     --roadmap-queue [comma-separated-slugs] \
+     --roadmap-index 0 \
+     --command "Read .claude/skills/handoff/SKILL.md and handoff-state.json, then act on your turn" \
+     --updated-by [your-agent-name]
+   ```
+7. Begin with the status banner. End with the NEXT COMMAND box.
+
+**Lifecycle in full-roadmap mode:**
+- Each phase goes through: plan cycle → (lead implements) → impl cycle → (advance)
+- After plan approval, watcher sets `turn: lead` — lead implements and runs `/handoff start [phase] impl`
+- After impl approval, watcher advances to next phase and sets `turn: lead` — lead runs `/handoff start [next-phase]`
+- After the last phase's impl approval, state is set to `result: "roadmap-complete"`
+
+**`/handoff status` in roadmap mode shows:**
+```
+Phase: phase-name | Type: plan | Round: 2 | Turn: lead | Status: ready
+ Mode: full-roadmap | Progress: 3/7 | Next: next-phase-name
+```
 
 ---
 
