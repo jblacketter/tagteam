@@ -13,9 +13,12 @@ This framework provides skills, templates, and checklists for structured AI-to-A
 Configure your agents via `ai-handoff.yaml` - use any AI combination (Claude + Codex, Gemini + Claude, etc.).
 
 ## Installation
-### known issues 
-### this is tested on macos and linux, but has some minor issues on windows at the moment.
-### TUI automated hand off with the saloon is not yet fully functional. hand off and review cycle requires manual input
+
+### Known Issues
+
+- Tested on macOS and Linux.
+- Windows has minor issues.
+- The Saloon TUI's automated handoff flow is still evolving; some handoff/review steps may require manual input.
 
 ### From GitHub
 
@@ -65,10 +68,12 @@ python -m ai_handoff init
 ```
 
 This will prompt you for:
+
 - Agent 1 name and role (lead or reviewer)
 - Agent 2 name and role
 
 Example:
+
 ```
 AI Handoff Setup
 ================
@@ -84,6 +89,7 @@ Agent 2 role (lead/reviewer): reviewer
 ### 2. Start Your AI Session
 
 Tell your AI agent:
+
 ```
 Read ai-handoff.yaml to see your role, then read .claude/skills/handoff/SKILL.md for the workflow.
 ```
@@ -99,11 +105,12 @@ Read ai-handoff.yaml to see your role, then read .claude/skills/handoff/SKILL.md
 
 The entire workflow uses a single unified command:
 
-| Command | Purpose | Who |
-|---------|---------|-----|
-| `/handoff` | Main command — reads state, does the right thing | Both |
-| `/handoff start [phase]` | Begin a new phase (plan + review cycle) | Lead |
-| `/handoff status` | Orientation, status check, drift reset | Both |
+| Command                  | Purpose                                           | Who  |
+| ------------------------ | ------------------------------------------------- | ---- |
+| `/handoff`               | Main command — reads state, does the right thing | Both |
+| `/handoff start [phase]` | Begin a new phase (plan + review cycle)           | Lead |
+| `/handoff start [phase] impl` | Begin implementation review for a phase     | Lead |
+| `/handoff status`        | Orientation, status check, drift reset            | Both |
 
 The `/handoff` command auto-detects your role from `ai-handoff.yaml` and the current state from `handoff-state.json`, then acts accordingly. Every response ends with the exact next command to copy-paste.
 
@@ -138,66 +145,52 @@ Both agents work from one cycle document. Auto-escalates to human after 5 rounds
 
 Eliminate manual copy-paste between agents entirely. A watcher daemon monitors a shared state file and automatically sends commands to each agent's terminal when it's their turn.
 
-### Quick Start
+### Quick Start (iTerm2 Default)
 
 ```bash
-# 1. Create a tmux session with lead, reviewer, and watcher panes
-python -m ai_handoff session start
-
-# 2. Attach to the session
-tmux attach -t ai-handoff
-```
-
-This gives you a 3-pane layout with labeled borders:
-
-```
-┌──────────────┬──────────────┬──────────────┐
-│ CLAUDE (Lead)│   WATCHER    │CODEX (Review)│
-│              │              │              │
-│              │              │              │
-└──────────────┴──────────────┴──────────────┘
-```
-
-**Mouse mode is enabled automatically** — click any pane to switch focus. TUI agents (Claude Code, Codex) capture `Ctrl-b`, so keyboard-based tmux navigation may not work while agents are running.
-
-You can also specify a project directory:
-
-```bash
+# 1. Create Lead / Watcher / Reviewer tabs in iTerm2
 python -m ai_handoff session start --dir ~/projects/myproject
+
+# 2. In the Watcher tab, start auto-send mode
+python -m ai_handoff watch --mode iterm2
 ```
+
+This creates three iTerm2 tabs: **Lead**, **Watcher**, and **Reviewer**.
 
 ### Starting Agents
 
-1. Click **Pane 0** (left) and start your lead agent (e.g. `claude`)
-2. Click **Pane 2** (right) and start your reviewer agent (e.g. `codex`)
-3. Click **Pane 1** (center) and press Enter to start the watcher
+1. In the **Lead** tab, start your lead agent (e.g. `claude`)
+2. In the **Reviewer** tab, start your reviewer agent (e.g. `codex`)
+3. In the **Watcher** tab, run `python -m ai_handoff watch --mode iterm2`
 
 ### Running a Cycle
 
-In the lead pane, start a review cycle:
+In the lead tab, start a review cycle:
 
 ```
 /handoff start my-phase
 ```
 
-The skill writes `handoff-state.json`. The watcher detects the turn change, waits for the target agent to be idle, then sends the handoff command to the reviewer's pane. The reviewer processes it, updates state, and the watcher sends back to the lead. This repeats until the cycle is approved, escalated, or aborted — with zero manual intervention.
+The skill writes `handoff-state.json`. The watcher detects the turn change, waits for the target agent to be idle, then sends the handoff command to the reviewer's tab. The reviewer processes it, updates state, and the watcher sends back to the lead tab. This repeats until the cycle is approved, escalated, or aborted.
 
 ### Orchestration Commands
 
 ```bash
-python -m ai_handoff session start    # Create tmux layout
-python -m ai_handoff session attach   # Attach to existing session
-python -m ai_handoff session kill     # Destroy the session
-python -m ai_handoff watch            # Start watcher (runs in session pane)
-python -m ai_handoff watch --mode notify  # Desktop notifications only (no auto-send)
+python -m ai_handoff session start --dir ~/projects/myproject  # Create iTerm2 tabs (default backend)
+python -m ai_handoff watch --mode iterm2                       # Auto-send to iTerm2 Lead/Reviewer tabs
+python -m ai_handoff session start --backend tmux              # Create tmux session (legacy backend)
+python -m ai_handoff session attach --backend tmux             # Attach to existing tmux session
+python -m ai_handoff watch --mode tmux                         # Auto-send to tmux panes
+python -m ai_handoff watch --mode notify                       # Desktop notifications only (no auto-send)
 python -m ai_handoff watch --confirm  # Pause for human approval before each send
 python -m ai_handoff state            # View current orchestration state
 python -m ai_handoff state reset      # Clear state file
+python -m ai_handoff session kill     # Destroy orchestration session
 ```
 
-### Without tmux
+### Notification-Only Mode
 
-If you prefer separate terminal windows, run the watcher in notify mode:
+If you prefer separate terminal windows and manual switching, run the watcher in notify mode:
 
 ```bash
 python -m ai_handoff watch --mode notify
@@ -230,12 +223,12 @@ Open **http://localhost:8080** in your browser. Use `--port 3000` for a differen
 
 ### Dashboard Controls
 
-| Button | Action |
-|--------|--------|
-| Approve | Mark the current handoff as done/approved |
+| Button      | Action                                            |
+| ----------- | ------------------------------------------------- |
+| Approve     | Mark the current handoff as done/approved         |
 | Req Changes | Bump the round and switch turn to the other agent |
-| Escalate | Flag for human intervention |
-| Abort | Cancel the current cycle (prompts for reason) |
+| Escalate    | Flag for human intervention                       |
+| Abort       | Cancel the current cycle (prompts for reason)     |
 
 The saloon scene reflects state visually: clock turns blue when working, characters turn green on approval, red on escalation, and muted on abort.
 
@@ -243,7 +236,7 @@ The saloon scene reflects state visually: clock turns blue when working, charact
 
 The Handoff Saloon also comes as a terminal-based UI with ASCII art characters, sound effects, and an immersive dialogue system.
 
-### Installation
+### TUI Installation
 
 ```bash
 pip install ai-handoff[tui]
@@ -275,11 +268,11 @@ python -m ai_handoff tui --dir ~/projects/myproject --sound
 
 ### TUI Controls
 
-| Key | Action |
-|-----|--------|
-| `m` | Toggle phase map overlay |
-| `r` | Replay last review cycle |
-| `q` | Quit |
+| Key         | Action                          |
+| ----------- | ------------------------------- |
+| `m`         | Toggle phase map overlay        |
+| `r`         | Replay last review cycle        |
+| `q`         | Quit                            |
 | Space/Enter | Advance dialogue or skip typing |
 
 ## Configuration
@@ -324,9 +317,9 @@ python -m ai_handoff init          # Configure agents interactively
 python -m ai_handoff setup .       # Copy framework files to project
 python -m ai_handoff serve --dir . # Start the web dashboard
 python -m ai_handoff tui --dir .   # Launch the terminal UI
-python -m ai_handoff watch         # Start watcher daemon
+python -m ai_handoff watch --mode iterm2 # Start watcher daemon for iTerm2 tabs
 python -m ai_handoff state         # View/update orchestration state
-python -m ai_handoff session start # Create tmux session
+python -m ai_handoff session start # Create session (default: iTerm2)
 python -m ai_handoff --help        # Show help
 ```
 
