@@ -139,8 +139,9 @@ def create_session(project_dir: str) -> bool:
 def write_text_to_session(session_id: str, text: str) -> bool:
     """Send a command to a specific iTerm2 session.
 
-    iTerm2's `write text` automatically appends a newline, so no C-m hack
-    is needed. The text is sent directly -- no input clearing required.
+    We send text with `newline NO` and then explicitly send ASCII 13
+    (carriage return). This is more reliable for TUIs like Codex, which
+    may not always treat iTerm2's implicit newline as a submit keypress.
     """
     # Escape backslashes and double quotes for AppleScript string
     escaped = text.replace("\\", "\\\\").replace('"', '\\"')
@@ -150,7 +151,9 @@ def write_text_to_session(session_id: str, text: str) -> bool:
             repeat with t in tabs of w
                 repeat with s in sessions of t
                     if unique ID of s is "{session_id}" then
-                        tell s to write text "{escaped}"
+                        tell s to write text "{escaped}" newline NO
+                        delay 0.05
+                        tell s to write text (ASCII character 13) newline NO
                         return "ok"
                     end if
                 end repeat

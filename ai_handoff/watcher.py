@@ -223,8 +223,8 @@ def send_iterm_command(
 ) -> bool:
     """Send a command to an iTerm2 session with retry logic.
 
-    Much simpler than send_tmux_keys: iTerm2's `write text` handles
-    submission automatically -- no Escape clearing, no C-m hack needed.
+    Simpler than tmux: no pre-send input clearing is needed. Submission
+    is handled inside write_text_to_session() with an explicit CR.
     """
     from ai_handoff.iterm import write_text_to_session, session_id_is_valid
 

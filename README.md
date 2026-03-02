@@ -84,7 +84,6 @@ Agent 2 role (lead/reviewer): reviewer
 ### 2. Start Your AI Session
 
 Tell your AI agent:
-
 ```
 Read ai-handoff.yaml to see your role, then read .claude/skills/handoff/SKILL.md for the workflow.
 ```

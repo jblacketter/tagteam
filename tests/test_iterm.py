@@ -71,6 +71,8 @@ class TestOsascriptCalls:
         call_script = mock_osascript.call_args[0][0]
         assert "session-123" in call_script
         assert "/handoff" in call_script
+        assert 'write text "/handoff" newline NO' in call_script
+        assert "ASCII character 13" in call_script
 
     @patch("ai_handoff.iterm._osascript")
     def test_write_text_not_found(self, mock_osascript):
