@@ -67,9 +67,13 @@ IDLE_PATTERNS = [
     # Claude Code
     "? for shortcuts",
     "context left",
+    "for help",
+    "> ",
     # Codex
     "/skills to list",
     "/model to change",
+    "type a message",
+    "enter a command",
 ]
 
 
@@ -147,8 +151,8 @@ def send_tmux_keys(
         try:
             # Wait for agent to be idle before sending
             _log(f"   Waiting for agent in {pane_target} to be idle...")
-            if not wait_for_idle(pane_target, timeout=300.0, poll_interval=5.0):
-                _log(f"   WARNING: Agent in {pane_target} not idle after 5m, sending anyway")
+            if not wait_for_idle(pane_target, timeout=60.0, poll_interval=5.0):
+                _log(f"   Agent in {pane_target} not detected as idle after 60s, sending anyway")
 
             if pre_send_delay > 0:
                 time.sleep(pre_send_delay)
@@ -234,8 +238,8 @@ def send_iterm_command(
 
     for attempt in range(1, max_retries + 1):
         _log(f"   Waiting for agent in session to be idle...")
-        if not wait_for_idle_iterm(session_id, timeout=300.0, poll_interval=5.0):
-            _log("   WARNING: Agent not idle after 5m, sending anyway")
+        if not wait_for_idle_iterm(session_id, timeout=60.0, poll_interval=5.0):
+            _log("   Agent not detected as idle after 60s, sending anyway")
 
         if write_text_to_session(session_id, command):
             return True
