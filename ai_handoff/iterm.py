@@ -74,42 +74,34 @@ def create_session(project_dir: str) -> bool:
     # AppleScript to create window + 3 tabs, capture session IDs.
     # Key details:
     # - `create tab` must be inside `tell current window` to avoid new windows
-    # - Tab title set via OSC escape sequence (shell precmd overrides `set name`)
-    # - printf \e]1;TITLE\a sets the tab/icon title in iTerm2
-    script = f'''
-    tell application "iTerm2"
-        activate
-
-        -- Create a new window (comes with one tab)
-        create window with default profile
-        tell current window
-            -- Configure first tab as Lead
-            tell current session of current tab
-                write text "printf '\\e]1;Lead\\a'; cd {abs_dir}"
-            end tell
-            set leadId to unique ID of current session of current tab
-
-            -- Create Watcher tab (in same window)
-            set watcherTab to (create tab with default profile)
-            tell current session of watcherTab
-                write text "printf '\\e]1;Watcher\\a'; cd {abs_dir}"
-            end tell
-            set watcherId to unique ID of current session of watcherTab
-
-            -- Create Reviewer tab (in same window)
-            set reviewerTab to (create tab with default profile)
-            tell current session of reviewerTab
-                write text "printf '\\e]1;Reviewer\\a'; cd {abs_dir}"
-            end tell
-            set reviewerId to unique ID of current session of reviewerTab
-
-            -- Switch back to Lead tab
-            select first tab
-        end tell
-
-        return leadId & "," & watcherId & "," & reviewerId
-    end tell
-    '''
+    # - `set name` on session sets tab title (shell may append its own suffix)
+    script = (
+        'tell application "iTerm2"\n'
+        '    activate\n'
+        '    create window with default profile\n'
+        '    tell current window\n'
+        '        tell current session of current tab\n'
+        '            set name to "Lead"\n'
+        '            write text "cd ' + abs_dir + '"\n'
+        '        end tell\n'
+        '        set leadId to unique ID of current session of current tab\n'
+        '        set watcherTab to (create tab with default profile)\n'
+        '        tell current session of watcherTab\n'
+        '            set name to "Watcher"\n'
+        '            write text "cd ' + abs_dir + '"\n'
+        '        end tell\n'
+        '        set watcherId to unique ID of current session of watcherTab\n'
+        '        set reviewerTab to (create tab with default profile)\n'
+        '        tell current session of reviewerTab\n'
+        '            set name to "Reviewer"\n'
+        '            write text "cd ' + abs_dir + '"\n'
+        '        end tell\n'
+        '        set reviewerId to unique ID of current session of reviewerTab\n'
+        '        select first tab\n'
+        '    end tell\n'
+        '    return leadId & "," & watcherId & "," & reviewerId\n'
+        'end tell'
+    )
 
     try:
         result = _osascript(script)
