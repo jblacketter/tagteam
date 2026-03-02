@@ -1,8 +1,9 @@
 """
-tmux session management for handoff orchestration.
+Session management for handoff orchestration.
 
-Creates a tmux session with named panes for the lead agent,
-reviewer agent, and watcher daemon.
+Supports two backends:
+- iterm2 (default): Creates iTerm2 tabs via AppleScript
+- tmux: Creates tmux session with named panes (legacy)
 """
 
 import subprocess
@@ -10,6 +11,8 @@ import sys
 
 SESSION_NAME = "ai-handoff"
 
+
+# --- tmux backend ---
 
 def _tmux(*args: str, check: bool = True) -> subprocess.CompletedProcess:
     """Run a tmux command."""
@@ -25,7 +28,7 @@ def session_exists() -> bool:
     return result.returncode == 0
 
 
-def create_session(project_dir: str | None = None) -> bool:
+def create_tmux_session(project_dir: str | None = None) -> bool:
     """Create tmux session with lead, watcher, and reviewer panes.
 
     Layout (3 equal columns):
@@ -101,29 +104,64 @@ def create_session(project_dir: str | None = None) -> bool:
         return False
 
 
+# Keep old name as alias for backward compatibility
+create_session = create_tmux_session
+
+
 # --- CLI entry point ---
+
+def _parse_backend(args: list[str]) -> tuple[str, list[str]]:
+    """Extract --backend flag from args, return (backend, remaining_args)."""
+    backend = "iterm2"
+    remaining = []
+    i = 0
+    while i < len(args):
+        if args[i] == "--backend" and i + 1 < len(args):
+            backend = args[i + 1]
+            if backend not in ("iterm2", "tmux"):
+                print(f"Invalid backend: {backend}. Use 'iterm2' or 'tmux'.")
+                sys.exit(1)
+            i += 2
+        else:
+            remaining.append(args[i])
+            i += 1
+    return backend, remaining
+
 
 def session_command(args: list[str]) -> int:
     """Handle `python -m ai_handoff session [subcommand]`."""
     if not args:
-        print("Usage: python -m ai_handoff session <command>")
+        print("Usage: python -m ai_handoff session <command> [--backend iterm2|tmux]")
         print()
         print("Commands:")
-        print("  start   Create tmux session with lead/reviewer/watcher panes")
-        print("  attach  Attach to existing session")
+        print("  start   Create session with lead/reviewer/watcher tabs (default: iTerm2)")
         print("  kill    Kill the session")
+        print("  attach  Attach to existing tmux session (tmux backend only)")
+        print()
+        print("Options:")
+        print("  --backend iterm2|tmux  Backend to use (default: iterm2)")
+        print("  --dir PATH            Project directory")
         return 1
 
-    subcmd = args[0]
+    backend, remaining = _parse_backend(args)
+    subcmd = remaining[0] if remaining else ""
 
     if subcmd == "start":
         project_dir = None
-        if len(args) > 1 and args[1] == "--dir" and len(args) > 2:
-            project_dir = args[2]
-        create_session(project_dir=project_dir)
+        if len(remaining) > 1 and remaining[1] == "--dir" and len(remaining) > 2:
+            project_dir = remaining[2]
+
+        if backend == "iterm2":
+            from ai_handoff.iterm import create_session as create_iterm_session
+            create_iterm_session(project_dir or ".")
+        else:
+            create_tmux_session(project_dir=project_dir)
         return 0
 
     if subcmd == "attach":
+        if backend == "iterm2":
+            print("The 'attach' command is not needed for iTerm2 (tabs are already visible).")
+            return 0
         if not session_exists():
             print(f"No session '{SESSION_NAME}' found. Run 'session start' first.")
             return 1
@@ -131,11 +169,18 @@ def session_command(args: list[str]) -> int:
         return 0
 
     if subcmd == "kill":
-        if not session_exists():
-            print(f"No session '{SESSION_NAME}' found.")
-            return 0
-        _tmux("kill-session", "-t", SESSION_NAME)
-        print(f"Session '{SESSION_NAME}' killed.")
+        if backend == "iterm2":
+            from ai_handoff.iterm import kill_session
+            project_dir = None
+            if len(remaining) > 1 and remaining[1] == "--dir" and len(remaining) > 2:
+                project_dir = remaining[2]
+            kill_session(project_dir or ".")
+        else:
+            if not session_exists():
+                print(f"No session '{SESSION_NAME}' found.")
+                return 0
+            _tmux("kill-session", "-t", SESSION_NAME)
+            print(f"Session '{SESSION_NAME}' killed.")
         return 0
 
     print(f"Unknown session subcommand: {subcmd}")

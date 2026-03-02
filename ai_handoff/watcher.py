@@ -55,44 +55,54 @@ def capture_pane(pane_target: str, last_n_lines: int = 5) -> str:
         return ""
 
 
-def is_agent_idle(pane_target: str) -> bool:
-    """Check if an agent TUI is at its input prompt (idle, ready for input).
+BUSY_PATTERNS = [
+    "esc to interrupt",
+    "thinking",
+    "Running",
+    "Do you want to proceed",
+    "Do you want to make this edit",
+]
 
-    Looks for prompt indicators in the last few lines of the pane:
-    - Claude Code: ❯ or ›  followed by placeholder text or empty input
-    - Codex: › followed by placeholder or empty
-    - Also checks for "? for shortcuts" which appears when idle
+IDLE_PATTERNS = [
+    "? for shortcuts",
+    "context left",
+]
+
+
+def _check_idle_patterns(content: str) -> bool:
+    """Check terminal content for idle/busy patterns.
+
+    Returns True if the agent appears idle (at input prompt),
+    False if busy or content is empty.
     """
-    content = capture_pane(pane_target, last_n_lines=5)
     if not content.strip():
         return False
 
     lines = content.strip().splitlines()
-    # Check last few lines for idle indicators
-    tail = "\n".join(lines[-4:])
+    tail = "\n".join(lines[-4:]).lower()
 
-    # Agent is busy if it shows these patterns
-    busy_patterns = [
-        "esc to interrupt",
-        "thinking",
-        "Running",
-        "Do you want to proceed",
-        "Do you want to make this edit",
-    ]
-    for pattern in busy_patterns:
-        if pattern.lower() in tail.lower():
+    for pattern in BUSY_PATTERNS:
+        if pattern.lower() in tail:
             return False
 
-    # Agent is idle if showing prompt indicators
-    idle_patterns = [
-        "? for shortcuts",
-        "context left",
-    ]
-    for pattern in idle_patterns:
-        if pattern.lower() in tail.lower():
+    for pattern in IDLE_PATTERNS:
+        if pattern.lower() in tail:
             return True
 
     return False
+
+
+def is_agent_idle(pane_target: str) -> bool:
+    """Check if an agent TUI in a tmux pane is idle (at input prompt)."""
+    content = capture_pane(pane_target, last_n_lines=5)
+    return _check_idle_patterns(content)
+
+
+def is_agent_idle_iterm(session_id: str) -> bool:
+    """Check if an agent TUI in an iTerm2 session is idle."""
+    from ai_handoff.iterm import get_session_contents
+    content = get_session_contents(session_id, last_n_lines=5)
+    return _check_idle_patterns(content)
 
 
 def wait_for_idle(
@@ -187,6 +197,53 @@ def send_tmux_keys(
     return False
 
 
+def wait_for_idle_iterm(
+    session_id: str,
+    timeout: float = 300.0,
+    poll_interval: float = 5.0,
+) -> bool:
+    """Wait until the agent in the given iTerm2 session is idle."""
+    start = time.time()
+    while time.time() - start < timeout:
+        if is_agent_idle_iterm(session_id):
+            return True
+        time.sleep(poll_interval)
+    return False
+
+
+def send_iterm_command(
+    session_id: str,
+    command: str,
+    max_retries: int = 3,
+    retry_delay: float = 2.0,
+) -> bool:
+    """Send a command to an iTerm2 session with retry logic.
+
+    Much simpler than send_tmux_keys: iTerm2's `write text` handles
+    submission automatically -- no Escape clearing, no C-m hack needed.
+    """
+    from ai_handoff.iterm import write_text_to_session, session_id_is_valid
+
+    if not session_id_is_valid(session_id):
+        _log(f"   ERROR: Session '{session_id}' does not exist")
+        return False
+
+    for attempt in range(1, max_retries + 1):
+        _log(f"   Waiting for agent in session to be idle...")
+        if not wait_for_idle_iterm(session_id, timeout=300.0, poll_interval=5.0):
+            _log("   WARNING: Agent not idle after 5m, sending anyway")
+
+        if write_text_to_session(session_id, command):
+            return True
+
+        _log(f"   Attempt {attempt}/{max_retries} failed")
+        if attempt < max_retries:
+            _log(f"   Retrying in {retry_delay}s...")
+            time.sleep(retry_delay)
+
+    return False
+
+
 def _log(msg: str) -> None:
     """Print with timestamp and flush (required for tmux pane output)."""
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
@@ -238,6 +295,18 @@ def watch(
         lead_name = "lead"
         reviewer_name = "reviewer"
 
+    # For iterm2 mode, discover session IDs from .handoff-session.json
+    lead_session_id = None
+    reviewer_session_id = None
+    if mode == "iterm2":
+        from ai_handoff.iterm import get_session_id, session_id_is_valid
+        lead_session_id = get_session_id("lead", project_dir)
+        reviewer_session_id = get_session_id("reviewer", project_dir)
+        if not lead_session_id or not reviewer_session_id:
+            _log("ERROR: Could not find session IDs in .handoff-session.json")
+            _log("  Run 'python -m ai_handoff session start' first.")
+            return
+
     _log(f"Watching handoff-state.json (interval: {interval}s, mode: {mode})")
     _log(f"Lead: {lead_name} | Reviewer: {reviewer_name}")
     if mode == "tmux":
@@ -248,6 +317,12 @@ def watch(
                 _log(f"  {name} pane OK: {pane}")
             else:
                 _log(f"  WARNING: {name} pane '{pane}' not found")
+    elif mode == "iterm2":
+        for name, sid in [("lead", lead_session_id), ("reviewer", reviewer_session_id)]:
+            if session_id_is_valid(sid):
+                _log(f"  {name} session OK: {sid}")
+            else:
+                _log(f"  WARNING: {name} session '{sid}' not found in iTerm2")
     if confirm:
         _log("Confirm mode: will pause before sending commands")
     print(flush=True)
@@ -306,12 +381,34 @@ def watch(
 
             agent_name = lead_name if current_turn == "lead" else reviewer_name
             pane = lead_pane if current_turn == "lead" else reviewer_pane
+            session_id = (lead_session_id if current_turn == "lead"
+                          else reviewer_session_id)
 
             if current_status == "ready" and command:
                 _log(f">> {agent_name}'s turn"
                      f" (phase: {phase}, round: {round_num})")
 
-                if mode == "tmux":
+                if mode == "iterm2":
+                    if confirm:
+                        try:
+                            input(f"[{_ts()}]    Press Enter to send"
+                                  f" '{command}' to {agent_name}...")
+                        except EOFError:
+                            break
+                    success = send_iterm_command(
+                        session_id, command,
+                        max_retries=max_retries,
+                        retry_delay=retry_delay,
+                    )
+                    if success:
+                        _log(f"   Sent to {agent_name}: {command}")
+                    else:
+                        _log(f"   FAILED: Could not send to"
+                             f" {agent_name} after {max_retries} attempts")
+                        notify_macos("AI Handoff",
+                                     f"Failed to send to {agent_name}")
+
+                elif mode == "tmux":
                     if confirm:
                         try:
                             input(f"[{_ts()}]    Press Enter to send"
@@ -382,8 +479,8 @@ def watch_command(args: list[str]) -> int:
             i += 2
         elif arg == "--mode" and i + 1 < len(args):
             mode = args[i + 1]
-            if mode not in ("notify", "tmux"):
-                print(f"Invalid mode: {mode}. Use 'notify' or 'tmux'.")
+            if mode not in ("notify", "tmux", "iterm2"):
+                print(f"Invalid mode: {mode}. Use 'notify', 'tmux', or 'iterm2'.")
                 return 1
             i += 2
         elif arg == "--lead-pane" and i + 1 < len(args):
@@ -412,7 +509,7 @@ def watch_command(args: list[str]) -> int:
             print()
             print("Options:")
             print("  --interval N       Poll interval in seconds (default: 10)")
-            print("  --mode MODE        'notify' or 'tmux' (default: notify)")
+            print("  --mode MODE        'notify', 'tmux', or 'iterm2' (default: notify)")
             print("  --lead-pane TARGET tmux pane target for lead (default: ai-handoff:0.0)")
             print("  --reviewer-pane T  tmux pane target for reviewer (default: ai-handoff:0.2)")
             print("  --confirm          Pause for confirmation before sending commands")

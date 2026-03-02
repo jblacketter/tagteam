@@ -212,7 +212,7 @@ Commands:
   migrate       Migrate legacy projects to use ai-handoff.yaml
   watch         Start the watcher daemon for automated orchestration
   state         View or update the orchestration state file
-  session       Manage tmux session (start/attach/kill)
+  session       Manage orchestration session (start/kill)
   serve         Start the web dashboard server
   tui           Launch the Handoff Saloon terminal UI
   upgrade       Re-run setup on all registered projects (after pip upgrade)
@@ -222,10 +222,12 @@ Workflow:
   2. Run 'python -m ai_handoff init' to configure your agents
   3. Start your AI with the getting started prompt
 
-Automated orchestration:
-  1. Run 'python -m ai_handoff session start' to create tmux layout
-  2. Start your agents in the lead and reviewer panes
-  3. Press Enter in the watcher pane to begin monitoring
+Automated orchestration (iTerm2):
+  1. Run 'python -m ai_handoff session start --dir ~/projects/myproject'
+  2. Start Claude Code in the Lead tab, Codex in the Reviewer tab
+  3. Press Enter in the Watcher tab to begin monitoring
+
+  Use --backend tmux for legacy tmux-based orchestration.
 
 Dashboard:
   Run 'python -m ai_handoff serve --dir ~/projects/myproject' to open
