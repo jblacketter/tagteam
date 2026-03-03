@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ai-handoff"
-version = "0.1.0"
+version = "0.2.0"
 description = "A collaboration framework for structured AI-to-AI handoffs with human oversight"
 readme = "README.md"
 license = {text = "MIT"}
