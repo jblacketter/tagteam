@@ -559,12 +559,29 @@ def watch(
                     idle_since = time.time()
                     continue
 
+                # Notify lead agent so it knows the cycle finished
+                done_msg = "/handoff"
                 if result == "roadmap-complete":
                     _log("** Roadmap complete: all phases finished!")
                     notify_macos("AI Handoff", "Roadmap complete!")
                 else:
                     _log(f"** Cycle complete: {result}")
                     notify_macos("AI Handoff", f"Cycle complete: {result}")
+
+                _log(f"   Sending completion notice to {lead_name}...")
+                if mode == "iterm2":
+                    send_iterm_command(
+                        lead_session_id, done_msg,
+                        max_retries=max_retries,
+                        retry_delay=retry_delay,
+                    )
+                elif mode == "tmux":
+                    send_tmux_keys(
+                        lead_pane, done_msg,
+                        max_retries=max_retries,
+                        retry_delay=retry_delay,
+                        pre_send_delay=pre_send_delay,
+                    )
 
             elif current_status == "escalated":
                 # Show structured reason if available
