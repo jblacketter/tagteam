@@ -105,12 +105,12 @@ Read ai-handoff.yaml to see your role, then read .claude/skills/handoff/SKILL.md
 
 The entire workflow uses a single unified command:
 
-| Command                  | Purpose                                           | Who  |
-| ------------------------ | ------------------------------------------------- | ---- |
-| `/handoff`               | Main command — reads state, does the right thing | Both |
-| `/handoff start [phase]` | Begin a new phase (plan + review cycle)           | Lead |
-| `/handoff start [phase] impl` | Begin implementation review for a phase     | Lead |
-| `/handoff status`        | Orientation, status check, drift reset            | Both |
+| Command                       | Purpose                                           | Who  |
+| ----------------------------- | ------------------------------------------------- | ---- |
+| `/handoff`                    | Main command — reads state, does the right thing | Both |
+| `/handoff start [phase]`      | Begin a new phase (plan + review cycle)           | Lead |
+| `/handoff start [phase] impl` | Begin implementation review for a phase           | Lead |
+| `/handoff status`             | Orientation, status check, drift reset            | Both |
 
 The `/handoff` command auto-detects your role from `ai-handoff.yaml` and the current state from `handoff-state.json`, then acts accordingly. Every response ends with the exact next command to copy-paste.
 

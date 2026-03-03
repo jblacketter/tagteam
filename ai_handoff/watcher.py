@@ -69,11 +69,17 @@ IDLE_PATTERNS = [
     "context left",
     "for help",
     "> ",
+    "\u276f",           # ❯ — Claude Code's actual prompt character
+    "accept edits",     # status bar: "⏵⏵ accept edits on (shift+tab to cycle)"
+    "shift+tab",        # alternate match for the same status bar
     # Codex
     "/skills to list",
     "/model to change",
     "type a message",
     "enter a command",
+    # Shell prompt (agent not yet started)
+    "$ ",
+    "% ",
 ]
 
 
@@ -106,11 +112,15 @@ def is_agent_idle(pane_target: str) -> bool:
     return _check_idle_patterns(content)
 
 
-def is_agent_idle_iterm(session_id: str) -> bool:
+def is_agent_idle_iterm(session_id: str, debug: bool = False) -> bool:
     """Check if an agent TUI in an iTerm2 session is idle."""
     from ai_handoff.iterm import get_session_contents
     content = get_session_contents(session_id, last_n_lines=5)
-    return _check_idle_patterns(content)
+    idle = _check_idle_patterns(content)
+    if debug and not idle:
+        tail = content.strip().splitlines()[-2:] if content.strip() else []
+        _log(f"   (not idle yet, last lines: {tail!r})")
+    return idle
 
 
 def wait_for_idle(
@@ -213,7 +223,7 @@ def wait_for_idle_iterm(
     """Wait until the agent in the given iTerm2 session is idle."""
     start = time.time()
     while time.time() - start < timeout:
-        if is_agent_idle_iterm(session_id):
+        if is_agent_idle_iterm(session_id, debug=True):
             return True
         time.sleep(poll_interval)
     return False

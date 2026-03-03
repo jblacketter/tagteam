@@ -41,10 +41,24 @@ def _session_file_path(project_dir: str) -> Path:
     return Path(project_dir) / SESSION_FILE
 
 
+def _find_session_file(project_dir: str) -> Path | None:
+    """Find .handoff-session.json in project_dir or any parent directory."""
+    current = Path(project_dir).resolve()
+    for _ in range(20):  # safety limit
+        candidate = current / SESSION_FILE
+        if candidate.exists():
+            return candidate
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return None
+
+
 def _read_session_file(project_dir: str) -> dict | None:
-    """Read the session file, returning None if missing or invalid."""
-    path = _session_file_path(project_dir)
-    if not path.exists():
+    """Read the session file, searching parent directories if needed."""
+    path = _find_session_file(project_dir)
+    if path is None:
         return None
     try:
         return json.loads(path.read_text(encoding="utf-8"))
