@@ -80,6 +80,8 @@ IDLE_PATTERNS = [
     # Shell prompt (agent not yet started)
     "$ ",
     "% ",
+    "\ue0b0",          # Powerline prompt separator
+    "@",               # user@hostname in shell prompts
 ]
 
 
