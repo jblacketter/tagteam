@@ -108,6 +108,12 @@ python -m ai_handoff session start --dir ~/projects/myproject
 python -m ai_handoff watch --mode iterm2
 ```
 
+**Prime each agent** — before starting a cycle, tell each agent to load the workflow so it can respond to the watcher's automated commands:
+
+```
+Read ai-handoff.yaml to see your role, then read .claude/skills/handoff/SKILL.md for the workflow.
+```
+
 **Single phase** — start a review cycle, watcher handles the back-and-forth, pauses when the phase completes:
 
 ```
