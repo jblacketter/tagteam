@@ -68,7 +68,7 @@ body {
   display: flex;
   justify-content: center;
   align-items: flex-end;
-  gap: 60px;
+  gap: 40px;
   pointer-events: none;
   z-index: 2;
 }
@@ -76,6 +76,20 @@ body {
 .banner-char {
   pointer-events: auto;
   transition: transform 0.3s, filter 0.3s;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.char-label {
+  display: block;
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--brass);
+  text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+  margin-top: 2px;
+  pointer-events: none;
 }
 
 .banner-char svg {
@@ -94,14 +108,41 @@ body {
   filter: brightness(1.2);
 }
 
-.banner-mayor.mayor-glow {
-  animation: mayor-pulse 2s ease-in-out infinite;
+.banner-rabbit {
+  cursor: pointer;
+  position: relative;
 }
 
-@keyframes mayor-pulse {
+.banner-rabbit:hover {
+  transform: scale(1.08);
+  filter: brightness(1.2);
+}
+
+.banner-watcher {
+  cursor: pointer;
+  position: relative;
+}
+
+.banner-watcher:hover {
+  transform: scale(1.08);
+  filter: brightness(1.2);
+}
+
+/* Generic character glow — applied to guide user during setup */
+.char-glow {
+  animation: char-glow-pulse 2s ease-in-out infinite;
+}
+
+@keyframes char-glow-pulse {
   0%, 100% { filter: brightness(1) drop-shadow(0 0 0 transparent); }
   50%      { filter: brightness(1.15) drop-shadow(0 0 8px rgba(184, 134, 11, 0.5)); }
 }
+
+/* Legacy mayor-glow uses the same animation */
+.banner-mayor.mayor-glow {
+  animation: char-glow-pulse 2s ease-in-out infinite;
+}
+
 
 .banner-clock {
   display: flex;
@@ -775,7 +816,7 @@ body {
     height: 160px;
   }
   .banner-characters {
-    gap: 30px;
+    gap: 20px;
   }
   .banner-title h1 {
     font-size: 1.3rem;

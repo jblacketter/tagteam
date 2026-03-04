@@ -13,6 +13,7 @@ Usage:
 import json
 import os
 import re
+import subprocess
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse
@@ -143,6 +144,38 @@ def _extract_cycle_state(project_dir: str, cycle_filename: str) -> str:
     return "pending"
 
 
+def _get_watcher_status(project_dir: str) -> dict:
+    """Check if a watcher daemon is running for this project."""
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", f"ai_handoff.*watch.*{project_dir}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        pids = result.stdout.strip().split("\n") if result.stdout.strip() else []
+        if pids and pids[0]:
+            return {"running": True, "pid": int(pids[0])}
+    except (subprocess.TimeoutExpired, ValueError, FileNotFoundError):
+        pass
+    return {"running": False, "pid": None}
+
+
+def _get_session_status(project_dir: str) -> dict:
+    """Check for a tmux session associated with this project."""
+    try:
+        result = subprocess.run(
+            ["tmux", "list-sessions", "-F", "#{session_name}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        sessions = result.stdout.strip().split("\n") if result.stdout.strip() else []
+        # Look for ai-handoff session
+        for s in sessions:
+            if "handoff" in s.lower() or "ai-handoff" in s.lower():
+                return {"active": True, "session": s}
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    return {"active": False, "session": None}
+
+
 def make_handler(project_dir: str):
     """Create a request handler class bound to a specific project directory."""
 
@@ -232,6 +265,14 @@ def make_handler(project_dir: str):
                             "rounds": rounds,
                             "html": format_rounds_html(rounds),
                         })
+
+            elif path == "/api/watcher/status":
+                status = _get_watcher_status(project_dir)
+                self._send_json(status)
+
+            elif path == "/api/session/status":
+                status = _get_session_status(project_dir)
+                self._send_json(status)
 
             elif path == "/api/dialogue":
                 state = read_state(project_dir)

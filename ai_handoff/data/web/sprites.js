@@ -34,6 +34,18 @@ var Sprites = (function() {
   const R_APRB  = '#3498db';
   const R_BOOT  = '#8B7355';
 
+  // Watcher (deputy/ranger)
+  const W_HAT   = '#4a3828';
+  const W_BRIM  = '#5a4838';
+  const W_SKIN  = '#e8c86e';
+  const W_EYE   = '#1a1a1a';
+  const W_NOSE  = '#d4a04a';
+  const W_VEST  = '#2d5a3a';
+  const W_SHIRT = '#e8dcc8';
+  const W_STAR  = '#b8860b';
+  const W_PANT  = '#3a2a1a';
+  const W_BOOT  = '#1a1a1a';
+
   // Clock
   const C_FRAME = '#8B7355';
   const C_FACE  = '#e8dcc8';
@@ -150,6 +162,40 @@ var Sprites = (function() {
     ];
   }
 
+  // --- Watcher pixel map (12w x 18h) ---
+  function watcherPixels(state) {
+    const hat = W_HAT, brim = W_BRIM, skin = W_SKIN, eye = W_EYE;
+    const nose = W_NOSE, shirt = W_SHIRT, pant = W_PANT, boot = W_BOOT;
+
+    var vestC = W_VEST, starC = W_STAR;
+    if (state === 'approved') {
+      vestC = '#27ae60'; starC = '#2ecc71';
+    } else if (state === 'escalated') {
+      vestC = '#c0392b'; starC = '#e74c3c';
+    }
+
+    return [
+      [_,_,_,hat,hat,hat,hat,hat,hat,_,_,_],
+      [_,_,hat,hat,hat,hat,hat,hat,hat,hat,_,_],
+      [_,brim,brim,brim,brim,brim,brim,brim,brim,brim,brim,_],
+      [_,_,_,skin,skin,skin,skin,skin,skin,_,_,_],
+      [_,_,skin,eye,skin,skin,skin,skin,eye,skin,_,_],
+      [_,_,skin,skin,skin,nose,nose,skin,skin,skin,_,_],
+      [_,_,skin,skin,skin,skin,skin,skin,skin,skin,_,_],
+      [_,_,_,skin,skin,skin,skin,skin,skin,_,_,_],
+      [_,_,vestC,vestC,shirt,shirt,shirt,shirt,vestC,vestC,_,_],
+      [_,_,vestC,vestC,shirt,starC,starC,shirt,vestC,vestC,_,_],
+      [_,_,vestC,vestC,shirt,shirt,shirt,shirt,vestC,vestC,_,_],
+      [_,_,vestC,vestC,vestC,vestC,vestC,vestC,vestC,vestC,_,_],
+      [_,_,_,pant,pant,pant,pant,pant,pant,_,_,_],
+      [_,_,_,pant,pant,pant,pant,pant,pant,_,_,_],
+      [_,_,_,pant,pant,_,_,pant,pant,_,_,_],
+      [_,_,_,pant,pant,_,_,pant,pant,_,_,_],
+      [_,_,boot,boot,boot,_,_,boot,boot,boot,_,_],
+      [_,boot,boot,boot,boot,_,_,boot,boot,boot,boot,_],
+    ];
+  }
+
   // --- Clock pixel map (8w x 14h) ---
   function clockPixels(state) {
     const frame = C_FRAME, face = C_FACE, hand = C_HAND;
@@ -254,6 +300,21 @@ var Sprites = (function() {
     ];
   }
 
+  function watcherPortraitPixels() {
+    return [
+      [_,W_HAT,W_HAT,W_HAT,W_HAT,W_HAT,W_HAT,_],
+      [W_BRIM,W_BRIM,W_BRIM,W_BRIM,W_BRIM,W_BRIM,W_BRIM,W_BRIM],
+      [_,W_SKIN,W_SKIN,W_SKIN,W_SKIN,W_SKIN,W_SKIN,_],
+      [_,W_EYE,W_SKIN,W_SKIN,W_SKIN,W_SKIN,W_EYE,_],
+      [_,W_SKIN,W_SKIN,W_NOSE,W_NOSE,W_SKIN,W_SKIN,_],
+      [_,_,W_SKIN,W_SKIN,W_SKIN,W_SKIN,_,_],
+      [_,W_VEST,W_SHIRT,W_SHIRT,W_SHIRT,W_SHIRT,W_VEST,_],
+      [_,W_VEST,W_SHIRT,W_STAR,W_STAR,W_SHIRT,W_VEST,_],
+      [_,W_VEST,W_VEST,W_VEST,W_VEST,W_VEST,W_VEST,_],
+      [_,W_BOOT,W_BOOT,_,_,W_BOOT,W_BOOT,_],
+    ];
+  }
+
   // --- Public renderers ---
 
   function renderMayor(state) {
@@ -262,6 +323,10 @@ var Sprites = (function() {
 
   function renderRabbit(state) {
     return pixelsToSVG(rabbitPixels(state), 4, 'rabbit-sprite', 'character-sprite rabbit-sprite-svg');
+  }
+
+  function renderWatcher(state) {
+    return pixelsToSVG(watcherPixels(state), 4, 'watcher-sprite', 'character-sprite watcher-sprite-svg');
   }
 
   function renderClock(state) {
@@ -281,8 +346,11 @@ var Sprites = (function() {
   }
 
   function renderPortrait(speaker) {
-    if (speaker === 'rabbit' || speaker === 'Rabbit') {
+    if (speaker === 'rabbit' || speaker === 'Rabbit' || speaker === 'bartender' || speaker === 'Bartender') {
       return pixelsToSVG(rabbitPortraitPixels(), 6, '', 'portrait-svg');
+    }
+    if (speaker === 'watcher' || speaker === 'Watcher') {
+      return pixelsToSVG(watcherPortraitPixels(), 6, '', 'portrait-svg');
     }
     // Default to mayor
     return pixelsToSVG(mayorPortraitPixels(), 6, '', 'portrait-svg');
@@ -298,6 +366,7 @@ var Sprites = (function() {
   return {
     renderMayor: renderMayor,
     renderRabbit: renderRabbit,
+    renderWatcher: renderWatcher,
     renderClock: renderClock,
     renderPendulum: renderPendulum,
     renderCuckoo: renderCuckoo,

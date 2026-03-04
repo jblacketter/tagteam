@@ -4,6 +4,7 @@
   // --- DOM refs ---
   var bannerMayor    = document.getElementById('banner-mayor');
   var bannerRabbit   = document.getElementById('banner-rabbit');
+  var bannerWatcher  = document.getElementById('banner-watcher');
   var clockBody      = document.getElementById('clock-body');
   var pendulumWrap   = document.getElementById('pendulum-wrap');
   var cuckooWrap     = document.getElementById('cuckoo-wrap');
@@ -67,6 +68,39 @@
   var dialogueCtrl = null;
   var bannerRendered = false;
 
+  // Multi-character setup state (persisted to localStorage)
+  var setupState = {
+    step: null,       // null | 'mayor' | 'bartender' | 'watcher' | 'complete'
+    leadName: null,
+    reviewerName: null,
+    wantsTmux: false,
+  };
+
+  var SETUP_STORAGE_KEY = 'ai-handoff-setup';
+
+  function persistSetupState() {
+    try { localStorage.setItem(SETUP_STORAGE_KEY, JSON.stringify(setupState)); } catch (e) {}
+  }
+
+  function restoreSetupState() {
+    try {
+      var saved = localStorage.getItem(SETUP_STORAGE_KEY);
+      if (saved) {
+        var parsed = JSON.parse(saved);
+        if (parsed && parsed.step && parsed.step !== 'complete') {
+          setupState = parsed;
+          return true;
+        }
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  function clearSetupState() {
+    setupState = { step: null, leadName: null, reviewerName: null, wantsTmux: false };
+    try { localStorage.removeItem(SETUP_STORAGE_KEY); } catch (e) {}
+  }
+
   // --- Initialize dialogue controller ---
   dialogueCtrl = new Conversation.DialogueController(dialoguePanel);
 
@@ -90,6 +124,24 @@
     bannerMayor.classList.add('mayor-glow');
   }
 
+  // --- Character glow management ---
+  function setCharGlow(charName) {
+    // Remove all glows
+    bannerMayor.classList.remove('mayor-glow', 'char-glow');
+    bannerRabbit.classList.remove('char-glow');
+    if (bannerWatcher) bannerWatcher.classList.remove('char-glow');
+    // Add glow to target
+    if (charName === 'mayor') bannerMayor.classList.add('char-glow');
+    else if (charName === 'rabbit' || charName === 'bartender') bannerRabbit.classList.add('char-glow');
+    else if (charName === 'watcher' && bannerWatcher) bannerWatcher.classList.add('char-glow');
+  }
+
+  function clearAllGlows() {
+    bannerMayor.classList.remove('mayor-glow', 'char-glow');
+    bannerRabbit.classList.remove('char-glow');
+    if (bannerWatcher) bannerWatcher.classList.remove('char-glow');
+  }
+
   function updateBannerCharacters(status) {
     var state = '';
     if (status === 'working') state = 'working';
@@ -99,6 +151,7 @@
 
     bannerMayor.innerHTML = Sprites.renderMayor(state);
     bannerRabbit.innerHTML = Sprites.renderRabbit(state);
+    if (bannerWatcher) bannerWatcher.innerHTML = Sprites.renderWatcher(state);
     clockBody.innerHTML = Sprites.renderClock(state);
 
     // Pendulum animation state
@@ -163,11 +216,15 @@
     // Phase map
     show(phaseMapPanel, mode !== 'welcome');
 
-    // Mayor glow
-    if (mode === 'welcome') {
-      bannerMayor.classList.add('mayor-glow');
+    // Character glow for setup guidance
+    if (mode === 'welcome' || (setupState.step && setupState.step !== 'complete')) {
+      if (!setupState.step) {
+        // Initial state — glow Mayor to attract click
+        setCharGlow('mayor');
+      }
+      // During setup flow, glow is managed by click handlers
     } else {
-      bannerMayor.classList.remove('mayor-glow');
+      clearAllGlows();
     }
   }
 
@@ -176,21 +233,40 @@
     el.classList.toggle('hidden', !visible);
   }
 
-  // --- Mayor click ---
+  // --- Character click handlers ---
+
   function onMayorClick() {
     if (dialogueCtrl.visible) {
       dialogueCtrl.hide();
       return;
     }
 
+    // During setup flow, redirect to the right character
+    if (setupState.step === 'bartender') {
+      dialogueCtrl.playLines([{ speaker: 'mayor', text: "Go talk to the Bartender \u2014 they're waiting for you!" }]);
+      return;
+    }
+    if (setupState.step === 'watcher') {
+      // Watcher step is optional — skip it and proceed to idle
+      clearSetupState();
+      // Fall through to idle mode below
+    }
+
     var mode = getMode();
 
     if (mode === 'welcome') {
-      // Play setup intro via dialogue
-      dialogueCtrl.playScript(Conversation.SETUP_INTRO, function(inputs) {
-        var lead = inputs.setup_lead || 'claude';
-        var reviewer = inputs.setup_reviewer || 'codex';
-        submitSetupFromDialogue(lead, reviewer);
+      // Multi-character setup flow — Mayor's part
+      setupState.step = 'mayor';
+      clearAllGlows();
+      dialogueCtrl.playScript(Conversation.SETUP_FLOW_MAYOR, function(inputs) {
+        setupState.leadName = inputs.sf_mayor_lead || 'Claude';
+        setupState.step = 'bartender';
+        persistSetupState();
+        setCharGlow('bartender');
+        // Handoff message — state is already set so clicking Bartender will work
+        dialogueCtrl.playLines([
+          { speaker: 'mayor', text: "Great! Now go click on the Bartender \u2014 they handle the review side of things." },
+        ]);
       });
     } else if (mode === 'idle') {
       var idleScript = [
@@ -229,23 +305,158 @@
       ];
 
       dialogueCtrl.playScript(idleScript, function(inputs, lastNodeId) {
-        // Only open phase form if they chose "Start new phase"
         if (lastNodeId === 'start_phase') {
           activeForm = 'phase';
           updateVisibility();
         }
       });
     } else if (mode === 'active') {
-      var activeScript = [
+      dialogueCtrl.playScript([{
+        id: 'active_info',
+        speaker: 'mayor',
+        type: 'dialogue',
+        text: getMayorActiveText(),
+        next: null,
+      }]);
+    }
+  }
+
+  function onRabbitClick() {
+    if (dialogueCtrl.visible) {
+      dialogueCtrl.hide();
+      // During setup, if it's the bartender's turn, fall through to start bartender flow
+      if (setupState.step !== 'bartender') return;
+    }
+
+    // Check setup flow state first (mode may be 'idle' after config save)
+    if (setupState.step === 'bartender') {
+      clearAllGlows();
+      dialogueCtrl.playScript(Conversation.SETUP_FLOW_BARTENDER, function(inputs) {
+        setupState.reviewerName = inputs.sf_bart_reviewer || 'Codex';
+        setupState.step = 'watcher';
+        persistSetupState();
+        // Save config silently (don't interrupt setup flow with "all set" dialogue)
+        saveConfigSilent(setupState.leadName, setupState.reviewerName);
+        setCharGlow('watcher');
+        // Handoff message — state is already set so clicking Watcher will work
+        dialogueCtrl.playLines([
+          { speaker: 'rabbit', text: "All set on my end! Go talk to the Watcher if you want automated monitoring, or click the Mayor to get started." },
+        ]);
+      });
+      return;
+    }
+
+    var mode = getMode();
+
+    if (mode === 'welcome') {
+      dialogueCtrl.playLines([
+        { speaker: 'rabbit', text: "Talk to the Mayor first \u2014 they'll get you started!" },
+      ]);
+    } else if (mode === 'idle') {
+      var idleScript = [
         {
-          id: 'active_info',
-          speaker: 'mayor',
+          id: 'bart_idle',
+          speaker: 'rabbit',
+          type: 'choice',
+          text: getRabbitIdleText(),
+          choices: [
+            { label: 'Review history', next: 'bart_history' },
+            { label: 'How reviews work', next: 'bart_explain' },
+            { label: 'Never mind', next: null },
+          ],
+        },
+        {
+          id: 'bart_history',
+          speaker: 'rabbit',
           type: 'dialogue',
-          text: getMayorActiveText(),
+          text: currentState.phase
+            ? "Last phase was \"" + currentState.phase + "\" \u2014 " + (currentState.result === 'approved' ? 'approved!' : 'status: ' + (currentState.status || 'unknown')) + ". Check the cycle viewer below for details."
+            : "No review history yet. Start a phase and I'll track every round.",
+          next: null,
+        },
+        {
+          id: 'bart_explain',
+          speaker: 'rabbit',
+          type: 'dialogue',
+          text: "The Lead submits work, I help track the review. The Reviewer gives feedback or approves. If they can't agree after 5 rounds, it escalates to you \u2014 the arbiter.",
           next: null,
         },
       ];
-      dialogueCtrl.playScript(activeScript);
+      dialogueCtrl.playScript(idleScript);
+    } else if (mode === 'active') {
+      dialogueCtrl.playScript([{
+        id: 'bart_active',
+        speaker: 'rabbit',
+        type: 'dialogue',
+        text: getRabbitActiveText(),
+        next: null,
+      }]);
+    }
+  }
+
+  function onWatcherClick() {
+    if (dialogueCtrl.visible) {
+      dialogueCtrl.hide();
+      // During setup, if it's the watcher's turn, fall through to start watcher flow
+      if (setupState.step !== 'watcher') return;
+    }
+
+    // Check setup flow state first (mode may be 'idle' after config save)
+    if (setupState.step === 'watcher') {
+      clearAllGlows();
+      dialogueCtrl.playScript(Conversation.SETUP_FLOW_WATCHER, function(inputs, lastNodeId) {
+        setupState.wantsTmux = (lastNodeId === 'sf_watch_tmux');
+        setupState.step = 'complete';
+        clearSetupState();
+        // Guide user to start their first phase
+        setCharGlow('mayor');
+      });
+      return;
+    }
+
+    var mode = getMode();
+
+    if (mode === 'welcome') {
+      dialogueCtrl.playLines([
+        { speaker: 'watcher', text: "Talk to the Mayor first \u2014 they'll introduce us properly." },
+      ]);
+    } else if (mode === 'idle') {
+      var idleScript = [
+        {
+          id: 'watch_idle',
+          speaker: 'watcher',
+          type: 'choice',
+          text: "What can I do for you, partner?",
+          choices: [
+            { label: 'Watcher status', next: 'watch_status' },
+            { label: 'Start session', next: 'watch_session' },
+            { label: 'Never mind', next: null },
+          ],
+        },
+        {
+          id: 'watch_status',
+          speaker: 'watcher',
+          type: 'dialogue',
+          text: "Checking watcher daemon status...",
+          next: null,
+        },
+        {
+          id: 'watch_session',
+          speaker: 'watcher',
+          type: 'dialogue',
+          text: "To start a tmux session, run: python -m ai_handoff session start",
+          next: null,
+        },
+      ];
+
+      dialogueCtrl.playScript(idleScript, function(inputs, lastNodeId) {
+        if (lastNodeId === 'watch_status') {
+          fetchWatcherAndSessionStatus();
+        }
+      });
+    } else if (mode === 'active') {
+      // Fetch live daemon + session status for active mode
+      fetchWatcherAndSessionStatus();
     }
   }
 
@@ -276,9 +487,95 @@
     return "The saloon is busy.";
   }
 
+  function getRabbitIdleText() {
+    var status = currentState.status;
+    var result = currentState.result;
+    if (status === 'done' && result === 'approved') {
+      return "That last review went well! Anything else?";
+    }
+    return "No active reviews right now. What can I help with?";
+  }
+
+  function getRabbitActiveText() {
+    var status = currentState.status;
+    var turn = currentState.turn;
+    var round = currentState.round || 1;
+    if (status === 'escalated') {
+      return "Round " + round + " got escalated. The arbiter needs to make the call.";
+    }
+    return "We're on round " + round + ". " + (turn === 'reviewer' ? "Reviewer's up next." : "Waiting on the Lead.");
+  }
+
+  function getWatcherActiveText() {
+    var turn = currentState.turn;
+    var status = currentState.status;
+    if (status === 'ready') {
+      return "It's " + agentName(turn) + "'s turn. I'm watching for their response.";
+    }
+    if (status === 'escalated') {
+      return "Cycle is escalated. Agents are standing down until the arbiter decides.";
+    }
+    return "Monitoring the handoff. All looks normal.";
+  }
+
+  // --- Watcher API helpers ---
+  function fetchWatcherAndSessionStatus() {
+    Promise.all([
+      fetch('/api/watcher/status').then(function(r) { return r.json(); }),
+      fetch('/api/session/status').then(function(r) { return r.json(); }),
+    ]).then(function(results) {
+      var watcher = results[0];
+      var session = results[1];
+      var lines = [];
+      lines.push({
+        speaker: 'watcher',
+        text: watcher.running
+          ? "Watcher daemon is running (PID: " + watcher.pid + ")."
+          : "Watcher daemon is not running.",
+      });
+      lines.push({
+        speaker: 'watcher',
+        text: session.active
+          ? 'tmux session "' + session.session + '" is active.'
+          : "No tmux session detected. Run: python -m ai_handoff session start",
+      });
+      dialogueCtrl.playLines(lines);
+    }).catch(function() {
+      dialogueCtrl.playLines([{ speaker: 'watcher', text: "Couldn't reach the monitoring APIs." }]);
+    });
+  }
+
   bannerMayor.addEventListener('click', onMayorClick);
+  bannerRabbit.addEventListener('click', onRabbitClick);
+  if (bannerWatcher) bannerWatcher.addEventListener('click', onWatcherClick);
 
   // --- Setup ---
+
+  // Silent config save — used during multi-character setup flow to avoid
+  // interrupting the guided sequence with "all set" dialogue.
+  async function saveConfigSilent(lead, reviewer) {
+    try {
+      var r = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lead: lead, reviewer: reviewer }),
+      });
+      if (r.ok) {
+        agentConfig = await r.json();
+      } else if (r.status === 409) {
+        // Config exists — overwrite silently during setup flow
+        var r2 = await fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lead: lead, reviewer: reviewer, overwrite: true }),
+        });
+        if (r2.ok) agentConfig = await r2.json();
+      }
+    } catch (e) {
+      console.error('Failed to save config silently:', e);
+    }
+  }
+
   async function submitSetupFromDialogue(lead, reviewer) {
     try {
       var r = await fetch('/api/config', {
@@ -792,11 +1089,39 @@
     updateVisibility();
     loadPhaseMap();
 
-    // Auto-play intro if welcome mode
-    if (getMode() === 'welcome') {
+    // Always attempt to restore setup state first, then decide what to do
+    var hasRestoredSetup = restoreSetupState();
+    var mode = getMode();
+    var inSetupFlow = hasRestoredSetup && setupState.step && setupState.step !== 'complete';
+
+    if (inSetupFlow) {
+      // Resume mid-flow: glow the character the user needs to click next
+      if (setupState.step === 'bartender') {
+        setCharGlow('bartender');
+      } else if (setupState.step === 'watcher') {
+        setCharGlow('watcher');
+      } else if (setupState.step === 'mayor') {
+        setCharGlow('mayor');
+      }
+    } else if (mode === 'welcome') {
+      // Fresh start — auto-play Mayor intro
       setTimeout(function() {
-        dialogueCtrl.playScript(Conversation.INTRO);
+        setupState.step = 'mayor';
+        persistSetupState();
+        dialogueCtrl.playScript(Conversation.SETUP_FLOW_MAYOR, function(inputs) {
+          setupState.leadName = inputs.sf_mayor_lead || 'Claude';
+          setupState.step = 'bartender';
+          persistSetupState();
+          setCharGlow('bartender');
+          // Handoff message — state is already set so clicking Bartender will work
+          dialogueCtrl.playLines([
+            { speaker: 'mayor', text: "Great! Now go click on the Bartender \u2014 they handle the review side of things." },
+          ]);
+        });
       }, 500);
+    } else {
+      // Not in setup — clear any stale state
+      clearSetupState();
     }
   }
 

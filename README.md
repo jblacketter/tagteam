@@ -157,22 +157,32 @@ python -m ai_handoff state reset                       # Clear state file
 
 ### 3. The Saloon (Web Dashboard)
 
-A graphical interface for setup, monitoring, and controlling handoff cycles. The Mayor character guides you through setup and provides contextual help.
+A graphical interface for setup, monitoring, and controlling handoff cycles. Three clickable characters — the Mayor, the Bartender, and the Watcher — each handle a different domain and guide you through configuration.
 
-> **Status:** The dashboard is functional but still evolving — some features are in progress.
-
-**Start it:**
+**Setup:**
 
 ```bash
+# 1. Copy framework files (skills, templates, docs structure)
+python -m ai_handoff setup ~/projects/myproject
+
+# 2. Start the dashboard
 python -m ai_handoff serve --dir ~/projects/myproject
 # Open http://localhost:8080 (use --port 3000 for a different port)
 ```
 
 **What it does:**
 
-- **Welcome mode** (no config yet) — Mayor guides you through creating `ai-handoff.yaml`
-- **Idle mode** (config exists, no active handoff) — start new phases, see status, view timeline of past activity
-- **Active mode** (handoff in progress) — full arbiter controls with live-updating timeline and cycle viewer
+- **Welcome mode** (no config yet) — guided three-character setup: Mayor asks for your Lead agent name, Bartender asks for your Reviewer, and the Watcher offers automated monitoring. Characters glow to guide you through the sequence.
+- **Idle mode** (config exists, no active handoff) — click any character: Mayor starts phases, Bartender shows review history, Watcher reports daemon/session status.
+- **Active mode** (handoff in progress) — full arbiter controls with live-updating timeline and cycle viewer. Characters react to state changes.
+
+**The characters:**
+
+| Character | Domain | Click to... |
+| --- | --- | --- |
+| Mayor | Project overview, phases | Start phases, explain workflow |
+| Bartender | Reviews, feedback | Review history, round tracking |
+| Watcher | Monitoring, automation | Daemon status, tmux session info |
 
 **Arbiter controls:**
 
@@ -183,7 +193,7 @@ python -m ai_handoff serve --dir ~/projects/myproject
 | Escalate | Flag for human intervention |
 | Abort | Cancel the current cycle |
 
-The saloon scene reflects state visually: clock turns blue when working, characters turn green on approval, red on escalation.
+The saloon scene reflects state visually: clock turns blue when working, characters turn green on approval, red on escalation. Setup progress persists in your browser — close and reopen to resume where you left off.
 
 There is also a **terminal UI** version with ASCII art, sound effects, and a dialogue system:
 

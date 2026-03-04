@@ -446,6 +446,74 @@ var Conversation = (function() {
     },
   ];
 
+  // --- Multi-character setup flow scripts ---
+  // Each character has their own script segment, triggered by clicking them.
+
+  var SETUP_FLOW_MAYOR = [
+    {
+      id: 'sf_mayor_welcome',
+      speaker: 'mayor',
+      type: 'dialogue',
+      text: "Welcome to the Handoff Saloon! I'm the Mayor \u2014 I oversee the whole operation. Let me introduce you to the crew.",
+      next: 'sf_mayor_lead',
+    },
+    {
+      id: 'sf_mayor_lead',
+      speaker: 'mayor',
+      type: 'input',
+      prompt: "First things first \u2014 what's the name of your Lead agent? That's the one who does the main work.",
+      placeholder: 'e.g. Claude',
+      default: 'Claude',
+      next: null,
+    },
+  ];
+
+  var SETUP_FLOW_BARTENDER = [
+    {
+      id: 'sf_bart_welcome',
+      speaker: 'rabbit',
+      type: 'dialogue',
+      text: "Hey there! I'm the Bartender. I keep the reviews flowing and make sure nothing slips through the cracks.",
+      next: 'sf_bart_reviewer',
+    },
+    {
+      id: 'sf_bart_reviewer',
+      speaker: 'rabbit',
+      type: 'input',
+      prompt: "What's the name of your Reviewer agent? That's the one who checks the Lead's work.",
+      placeholder: 'e.g. Codex',
+      default: 'Codex',
+      next: null,
+    },
+  ];
+
+  var SETUP_FLOW_WATCHER = [
+    {
+      id: 'sf_watch_choice',
+      speaker: 'watcher',
+      type: 'choice',
+      text: "Howdy, I'm the Watcher. I can monitor your agents and auto-send handoffs via tmux. Want me to set that up?",
+      choices: [
+        { label: 'Set up tmux session', next: 'sf_watch_tmux' },
+        { label: "I'll run agents manually", next: 'sf_watch_manual' },
+      ],
+    },
+    {
+      id: 'sf_watch_tmux',
+      speaker: 'watcher',
+      type: 'dialogue',
+      text: "Got it. You can launch the tmux session anytime from this dashboard or via the CLI. Click the Mayor to start your first phase!",
+      next: null,
+    },
+    {
+      id: 'sf_watch_manual',
+      speaker: 'watcher',
+      type: 'dialogue',
+      text: "No problem. Click the Mayor when you're ready to start your first phase. I'll be here if you need me.",
+      next: null,
+    },
+  ];
+
 
   // =========================================================================
   // Transition Templates — ported from conversations/transitions.py
@@ -502,6 +570,14 @@ var Conversation = (function() {
     ESCALATION_CHOICE_DEFER: [
       "Decision deferred. Let's let the agents work it out another round.",
       "Punting this one. Another round should sort things out.",
+    ],
+    WATCHER_MONITORING: [
+      "Both agents are online. I'm keeping watch.",
+      "All quiet on the frontier. Agents are standing by.",
+    ],
+    WATCHER_TURN_CHANGE: [
+      "Heads up \u2014 it's {agent}'s turn now. Sending them the signal.",
+      "Turn change detected. {agent} is up.",
     ],
   };
 
@@ -582,6 +658,9 @@ var Conversation = (function() {
     DialogueController: DialogueController,
     INTRO: INTRO,
     SETUP_INTRO: SETUP_INTRO,
+    SETUP_FLOW_MAYOR: SETUP_FLOW_MAYOR,
+    SETUP_FLOW_BARTENDER: SETUP_FLOW_BARTENDER,
+    SETUP_FLOW_WATCHER: SETUP_FLOW_WATCHER,
     TRANSITIONS: TRANSITIONS,
     pickTransition: pickTransition,
     buildStateDialogue: buildStateDialogue,

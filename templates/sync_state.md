@@ -2,8 +2,8 @@
 
 ## Current State
 - **Phase:** [name] - [status]
-- **Lead:** [Lead agent name from ai-handoff.yaml]
-- **Reviewer:** [Reviewer agent name from ai-handoff.yaml]
+- **Lead:** Claude
+- **Reviewer:** Codex
 
 ## Active Context
 [Summary of what is being worked on]

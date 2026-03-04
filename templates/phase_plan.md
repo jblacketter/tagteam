@@ -9,8 +9,8 @@
 - [ ] Complete
 
 ## Roles
-- Lead: [from ai-handoff.yaml]
-- Reviewer: [from ai-handoff.yaml]
+- Lead: Claude
+- Reviewer: Codex
 - Arbiter: Human
 
 ## Summary

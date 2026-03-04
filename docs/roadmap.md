@@ -101,6 +101,28 @@ AI Handoff Framework - A collaboration framework enabling structured, multi-phas
   - Web dashboard: escalation choice buttons, phase map, structured rounds
   - 39 new unit tests across 3 test files (parser, state_watcher, review_dialogue)
 
+### Phase 10: Web Dashboard Redesign
+- **Status:** Complete
+- **Description:** Redesign from ASCII art to pixel art sprites with modern responsive layout, RPG dialogue system with typewriter effects, and JavaScript conversation engine
+- **Key Deliverables:**
+  - SVG pixel art sprites (Mayor, Rabbit, Clock, Saloon backdrop) via `sprites.js`
+  - JavaScript dialogue engine with typewriter effect, portraits, conversation trees
+  - Full-width banner + responsive card grid layout
+  - CSS animations: pendulum swing, cuckoo pop-out, mayor glow pulse
+  - Character reactions to state changes (color shifts)
+
+### Phase 11: The Saloon — Interactive Character-Driven Setup & Monitoring
+- **Status:** Planning
+- **Description:** Transform the dashboard into a full saloon experience with three independently clickable characters (Mayor, Bartender, Watcher). First-time setup becomes a guided multi-character conversation. The new Watcher character provides agent monitoring and daemon control.
+- **Key Deliverables:**
+  - New Watcher character (pixel art sprite + portrait + dialogue)
+  - All three characters independently clickable with domain-specific menus
+  - Guided multi-character setup flow (Mayor → Bartender → Watcher)
+  - Character glow system to guide users between characters
+  - Watcher monitoring API (daemon status, tmux session control, log tails)
+  - Setup state persistence (resume mid-flow)
+- **Phase Plan:** `docs/phases/saloon-interactive-setup.md`
+
 ## Decision Log
 See `docs/decision_log.md`
 
