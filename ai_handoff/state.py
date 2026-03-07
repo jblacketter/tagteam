@@ -44,9 +44,18 @@ def write_state(state: dict, project_dir: str = ".") -> None:
     tmp_path.rename(path)
 
 
-def update_state(updates: dict, project_dir: str = ".") -> dict:
-    """Read current state, record history, apply updates, write back."""
+def update_state(updates: dict, project_dir: str = ".",
+                 expected_seq: int | None = None) -> dict | None:
+    """Read current state, record history, apply updates, write back.
+
+    If expected_seq is provided, only write if the current sequence number
+    matches. Returns None if the write was skipped due to staleness.
+    """
     state = read_state(project_dir) or {}
+
+    current_seq = state.get("seq", 0)
+    if expected_seq is not None and current_seq != expected_seq:
+        return None  # State has moved on
 
     if "history" not in state:
         state["history"] = []
@@ -63,6 +72,7 @@ def update_state(updates: dict, project_dir: str = ".") -> dict:
     # Keep history bounded
     state["history"] = state["history"][-20:]
 
+    state["seq"] = current_seq + 1
     state.update(updates)
     write_state(state, project_dir)
     return state

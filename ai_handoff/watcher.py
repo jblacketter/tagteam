@@ -269,6 +269,9 @@ def _try_roadmap_advance(state: dict, project_dir: str = ".") -> dict | None:
 
     Called when status is "done" and result is "approved".
     Returns the new state if advanced, or None if no advance needed.
+
+    Includes a staleness guard: re-reads state before writing to ensure
+    the lead hasn't already advanced past this transition.
     """
     run_mode = state.get("run_mode", "single-phase")
     if run_mode != "full-roadmap":
@@ -289,31 +292,58 @@ def _try_roadmap_advance(state: dict, project_dir: str = ".") -> dict | None:
     completed = roadmap.get("completed", [])
 
     if current_type == "plan":
-        # Plan approved → hand to lead to implement and create impl cycle.
-        # Lead must run `/handoff start [phase] impl` to create cycle docs
-        # and submit for review — we do NOT skip to reviewer directly.
+        # Plan approved → hand to lead to implement.
+        # STALENESS GUARD: If the state has already moved to type=impl,
+        # the lead already started the impl cycle — skip this transition.
+        fresh = read_state(project_dir)
+        if fresh and fresh.get("type") == "impl":
+            _log("   SKIP: plan→impl advance already happened (type is impl)")
+            return None
+        if fresh and fresh.get("status") == "ready" and fresh.get("turn") == "reviewer":
+            _log("   SKIP: lead already submitted for review")
+            return None
+
         phase = state.get("phase", "?")
+        seq = state.get("seq", 0)
         updates = {
             "turn": "lead",
             "status": "ready",
             "result": None,
             "command": f"/handoff start {phase} impl",
         }
-        new_state = update_state(updates, project_dir)
+        new_state = update_state(updates, project_dir, expected_seq=seq)
+        if new_state is None:
+            _log("   SKIP: state changed since approval detected (seq mismatch)")
+            return None
         _log(f"   AUTO-ADVANCE: plan approved → lead implements"
              f" (phase: {phase})")
         return new_state
 
     if current_type == "impl":
-        # Impl approved → advance to next phase or complete
+        # Impl approved → advance to next phase or complete.
         current_phase = state.get("phase")
+
+        # STALENESS GUARD: If state already shows a different phase,
+        # the lead already started the next phase — skip.
+        fresh = read_state(project_dir)
+        if fresh:
+            fresh_phase = fresh.get("phase")
+            if fresh_phase and fresh_phase != current_phase:
+                _log(f"   SKIP: impl advance already happened"
+                     f" (phase moved to {fresh_phase})")
+                return None
+            if (fresh.get("status") == "ready"
+                    and fresh.get("turn") == "reviewer"
+                    and fresh.get("type") == "plan"):
+                _log("   SKIP: lead already submitted next phase for review")
+                return None
+
         if current_phase and current_phase not in completed:
             completed = completed + [current_phase]
 
+        seq = state.get("seq", 0)
+
         if idx + 1 < len(queue):
-            # More phases remain — hand to lead to create the next
-            # plan cycle. Lead must run `/handoff start [next-phase]`
-            # to create plan docs before reviewer sees anything.
             next_idx = idx + 1
             next_phase = queue[next_idx]
             roadmap_update = {
@@ -332,7 +362,10 @@ def _try_roadmap_advance(state: dict, project_dir: str = ".") -> dict | None:
                 "roadmap": roadmap_update,
                 "command": f"/handoff start {next_phase}",
             }
-            new_state = update_state(updates, project_dir)
+            new_state = update_state(updates, project_dir, expected_seq=seq)
+            if new_state is None:
+                _log("   SKIP: state changed since approval detected (seq mismatch)")
+                return None
             _log(f"   AUTO-ADVANCE: impl approved → lead starts next phase"
                  f" ({next_phase})")
             return new_state
@@ -349,7 +382,10 @@ def _try_roadmap_advance(state: dict, project_dir: str = ".") -> dict | None:
                 "result": "roadmap-complete",
                 "roadmap": roadmap_update,
             }
-            new_state = update_state(updates, project_dir)
+            new_state = update_state(updates, project_dir, expected_seq=seq)
+            if new_state is None:
+                _log("   SKIP: state changed since approval detected (seq mismatch)")
+                return None
             _log("   ROADMAP COMPLETE: all phases finished!")
             return new_state
 

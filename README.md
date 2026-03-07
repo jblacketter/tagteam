@@ -26,6 +26,7 @@ Then set up your project:
 ```bash
 cd ~/projects/myproject
 python -m ai_handoff setup .
+
 python -m ai_handoff init      # prompts for agent names and roles
 ```
 
@@ -79,12 +80,13 @@ Reviewer: /handoff                    → reviews implementation
 
 **Commands:**
 
-| Command | Purpose | Who |
-| --- | --- | --- |
-| `/handoff` | Auto-detects role + state, does the right thing | Both |
-| `/handoff start [phase]` | Begin a new phase (plan + review cycle) | Lead |
-| `/handoff start [phase] impl` | Begin implementation review for a phase | Lead |
-| `/handoff status` | Orientation, status check, drift reset | Both |
+
+| Command                       | Purpose                                         | Who  |
+| ----------------------------- | ----------------------------------------------- | ---- |
+| `/handoff`                    | Auto-detects role + state, does the right thing | Both |
+| `/handoff start [phase]`      | Begin a new phase (plan + review cycle)         | Lead |
+| `/handoff start [phase] impl` | Begin implementation review for a phase         | Lead |
+| `/handoff status`             | Orientation, status check, drift reset          | Both |
 
 ---
 
@@ -178,20 +180,22 @@ python -m ai_handoff serve --dir ~/projects/myproject
 
 **The characters:**
 
-| Character | Domain | Click to... |
-| --- | --- | --- |
-| Mayor | Project overview, phases | Start phases, explain workflow |
-| Bartender | Reviews, feedback | Review history, round tracking |
-| Watcher | Monitoring, automation | Daemon status, tmux session info |
+
+| Character | Domain                   | Click to...                      |
+| --------- | ------------------------ | -------------------------------- |
+| Mayor     | Project overview, phases | Start phases, explain workflow   |
+| Bartender | Reviews, feedback        | Review history, round tracking   |
+| Watcher   | Monitoring, automation   | Daemon status, tmux session info |
 
 **Arbiter controls:**
 
-| Button | Action |
-| --- | --- |
-| Approve | Mark the current handoff as approved |
-| Req Changes | Bump the round and switch turn |
-| Escalate | Flag for human intervention |
-| Abort | Cancel the current cycle |
+
+| Button      | Action                               |
+| ----------- | ------------------------------------ |
+| Approve     | Mark the current handoff as approved |
+| Req Changes | Bump the round and switch turn       |
+| Escalate    | Flag for human intervention          |
+| Abort       | Cancel the current cycle             |
 
 The saloon scene reflects state visually: clock turns blue when working, characters turn green on approval, red on escalation. Setup progress persists in your browser — close and reopen to resume where you left off.
 
