@@ -7,6 +7,7 @@ whose turn it is and what command the next agent should run.
 
 import json
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,6 +17,34 @@ STATE_TMP = ".handoff-state.tmp"
 VALID_STATUSES = {"ready", "working", "done", "escalated", "aborted"}
 VALID_TURNS = {"lead", "reviewer"}
 VALID_RUN_MODES = {"single-phase", "full-roadmap"}
+
+
+def normalize_phase_key(phase: str) -> str:
+    """Normalize phase name to slug format for roadmap operations.
+
+    Extracts the slug portion from 'phase-N-slug' format.
+    Returns input unchanged if it doesn't match the pattern.
+
+    This ensures consistent comparison and storage in roadmap queues,
+    which use short slug format.
+
+    Examples:
+        'phase-9-security-compliance-automation' -> 'security-compliance-automation'
+        'security-compliance-automation' -> 'security-compliance-automation'
+        'custom-phase' -> 'custom-phase'
+
+    Args:
+        phase: Phase name in any format
+
+    Returns:
+        Normalized slug for roadmap operations
+    """
+    if not phase:
+        return phase
+    match = re.match(r'^phase-\d+-(.+)$', phase)
+    if match:
+        return match.group(1)
+    return phase
 
 
 def get_state_path(project_dir: str = ".") -> Path:

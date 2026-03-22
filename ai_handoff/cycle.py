@@ -172,7 +172,7 @@ def _update_handoff_state(phase: str, cycle_type: str, action: str,
     Normalizes state to prevent stale completion metadata from
     previous cycles from persisting.
     """
-    from ai_handoff.state import update_state, read_state
+    from ai_handoff.state import update_state, read_state, normalize_phase_key
 
     transition = dict(_STATE_TRANSITIONS[action])
 
@@ -214,10 +214,14 @@ def _update_handoff_state(phase: str, cycle_type: str, action: str,
                 current_roadmap_phase = roadmap["queue"][idx]
 
         # Preserve roadmap state only if this phase matches the current roadmap phase
-        if is_roadmap_mode and current_roadmap_phase == phase:
-            updates["roadmap"] = roadmap
-            updates["run_mode"] = "full-roadmap"
-            should_preserve_roadmap = True
+        # Normalize both sides since queue may store slugs while phase param may be full name
+        if is_roadmap_mode and current_roadmap_phase:
+            phase_normalized = normalize_phase_key(phase)
+            roadmap_phase_normalized = normalize_phase_key(current_roadmap_phase)
+            if phase_normalized == roadmap_phase_normalized:
+                updates["roadmap"] = roadmap
+                updates["run_mode"] = "full-roadmap"
+                should_preserve_roadmap = True
 
     if not should_preserve_roadmap:
         # Clear stale roadmap context when starting a new single-phase cycle

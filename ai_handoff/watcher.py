@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ai_handoff.config import read_config, get_agent_names
-from ai_handoff.state import read_state, update_state, get_state_path
+from ai_handoff.state import read_state, update_state, get_state_path, normalize_phase_key
 
 
 def notify_macos(title: str, message: str) -> None:
@@ -328,18 +328,29 @@ def _try_roadmap_advance(state: dict, project_dir: str = ".") -> dict | None:
         fresh = read_state(project_dir)
         if fresh:
             fresh_phase = fresh.get("phase")
-            if fresh_phase and fresh_phase != current_phase:
-                _log(f"   SKIP: impl advance already happened"
-                     f" (phase moved to {fresh_phase})")
-                return None
+            if fresh_phase and current_phase:
+                # Normalize both sides to avoid false positives when formats differ
+                if normalize_phase_key(fresh_phase) != normalize_phase_key(current_phase):
+                    _log(f"   SKIP: impl advance already happened"
+                         f" (phase moved to {fresh_phase})")
+                    return None
             if (fresh.get("status") == "ready"
                     and fresh.get("turn") == "reviewer"
                     and fresh.get("type") == "plan"):
                 _log("   SKIP: lead already submitted next phase for review")
                 return None
 
-        if current_phase and current_phase not in completed:
-            completed = completed + [current_phase]
+        # Normalize existing completed list to clean up any corruption from previous runs
+        # (state["phase"] might be full phase-N-slug format from cycle commands)
+        completed_normalized = [normalize_phase_key(p) for p in completed]
+
+        if current_phase:
+            phase_slug = normalize_phase_key(current_phase)
+            if phase_slug not in completed_normalized:
+                completed = completed_normalized + [phase_slug]
+            else:
+                # Already completed, but update to normalized list anyway to fix corruption
+                completed = completed_normalized
 
         seq = state.get("seq", 0)
 
