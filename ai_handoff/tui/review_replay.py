@@ -6,7 +6,8 @@ exchange, suitable for playback via the existing ConversationEngine.
 
 from __future__ import annotations
 
-from ai_handoff.tui.handoff_reader import extract_all_rounds, find_cycle_doc
+from ai_handoff.parser import read_cycle_rounds
+from ai_handoff.tui.handoff_reader import find_cycle_doc
 from ai_handoff.tui.review_dialogue import strip_markdown, _chunk_text
 
 
@@ -19,11 +20,12 @@ def build_review_replay(phase: str, step_type: str, project_dir: str | None = No
 
     Returns None if no cycle doc exists or parsing fails.
     """
-    cycle_path = find_cycle_doc(phase, step_type, project_dir=project_dir or ".")
+    pdir = project_dir or "."
+    cycle_path = find_cycle_doc(phase, step_type, project_dir=pdir)
     if cycle_path is None:
         return None
 
-    rounds = extract_all_rounds(cycle_path)
+    rounds = read_cycle_rounds(phase, step_type, pdir)
     if not rounds:
         return None
 

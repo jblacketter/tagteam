@@ -187,4 +187,6 @@ def _get_round_data(state: HandoffState, project_dir: str | None = None) -> dict
     cycle_path = find_cycle_doc(state.phase, state.step_type, project_dir=project_dir or ".")
     if cycle_path is None:
         return None
-    return extract_last_round(cycle_path)
+    pdir = project_dir or "."
+    return extract_last_round(cycle_path, phase=state.phase,
+                              step_type=state.step_type, project_dir=pdir)

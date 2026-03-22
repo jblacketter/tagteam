@@ -1,11 +1,16 @@
-"""Shared cycle document parser — extracts structured data from handoff cycle markdown.
+"""Shared cycle document parser — extracts structured data from handoff cycles.
 
 Used by both the TUI (handoff_reader.py) and the web dashboard (server.py)
 to parse cycle documents into structured round data.
+
+Supports two formats:
+  - JSONL + JSON status (new): docs/handoffs/{phase}_{type}_rounds.jsonl
+  - Markdown (legacy): docs/handoffs/{phase}_{type}_cycle.md
 """
 
 from __future__ import annotations
 
+import json
 import re
 from html import escape
 from pathlib import Path
@@ -134,4 +139,102 @@ def _extract_summary(text: str) -> str | None:
         if stripped == "_awaiting response_":
             continue
         return stripped
+    return None
+
+
+def _content_summary(content: str) -> str | None:
+    """Extract a summary from JSONL round content (first substantive line)."""
+    if not content:
+        return None
+    for line in content.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("**"):
+            continue
+        if stripped.startswith("#"):
+            continue
+        if stripped.startswith("-"):
+            continue
+        return stripped
+    # Fall back to first non-empty line
+    for line in content.split("\n"):
+        stripped = line.strip()
+        if stripped:
+            return stripped
+    return None
+
+
+def parse_jsonl_rounds(jsonl_path: Path) -> list[dict] | None:
+    """Parse JSONL round entries into the same structure as extract_all_rounds().
+
+    Returns a list of dicts with keys: round, lead_text, reviewer_text,
+    lead_summary, reviewer_summary, action, lead_action
+    """
+    if not jsonl_path.exists():
+        return None
+
+    entries = []
+    for line in jsonl_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line:
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+
+    if not entries:
+        return None
+
+    # Group by round number
+    by_round: dict[int, dict] = {}
+    for e in entries:
+        r = e.get("round", 0)
+        if r not in by_round:
+            by_round[r] = {"lead": None, "reviewer": None}
+        by_round[r][e.get("role", "lead")] = e
+
+    rounds = []
+    for round_num in sorted(by_round.keys()):
+        pair = by_round[round_num]
+        lead_entry = pair.get("lead")
+        reviewer_entry = pair.get("reviewer")
+
+        lead_text = lead_entry["content"] if lead_entry else None
+        reviewer_text = reviewer_entry["content"] if reviewer_entry else None
+        lead_action = lead_entry["action"] if lead_entry else None
+        action = reviewer_entry["action"] if reviewer_entry else None
+
+        rounds.append({
+            "round": round_num,
+            "lead_text": lead_text,
+            "reviewer_text": reviewer_text,
+            "lead_summary": _content_summary(lead_text) if lead_text else None,
+            "reviewer_summary": _content_summary(reviewer_text) if reviewer_text else None,
+            "lead_action": lead_action,
+            "action": action,
+        })
+
+    return rounds if rounds else None
+
+
+def read_cycle_rounds(phase: str, cycle_type: str,
+                      project_dir: str = ".") -> list[dict] | None:
+    """Dispatcher: reads rounds from JSONL first, falls back to markdown.
+
+    Single entry point for all round reading. Returns the same structure
+    regardless of underlying format.
+    """
+    handoffs = Path(project_dir) / "docs" / "handoffs"
+
+    # Check JSONL first
+    jsonl_path = handoffs / f"{phase}_{cycle_type}_rounds.jsonl"
+    if jsonl_path.exists():
+        return parse_jsonl_rounds(jsonl_path)
+
+    # Fall back to legacy markdown
+    md_path = handoffs / f"{phase}_{cycle_type}_cycle.md"
+    if md_path.exists():
+        return extract_all_rounds(md_path)
+
     return None

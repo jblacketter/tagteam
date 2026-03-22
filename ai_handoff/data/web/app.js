@@ -866,7 +866,7 @@
       files.forEach(function(f) {
         var opt = document.createElement('option');
         opt.value = f;
-        opt.textContent = f.replace(/_/g, ' ').replace('.md', '');
+        opt.textContent = f.replace(/_/g, ' ').replace('.md', '').replace('_cycle', '');
         cycleSelect.appendChild(opt);
       });
       autoSelectCycle();
@@ -875,7 +875,7 @@
 
   function autoSelectCycle() {
     if (!currentState.phase || !currentState.type) return;
-    var target = currentState.phase + '_' + currentState.type + '_cycle.md';
+    var target = currentState.phase + '_' + currentState.type;
     for (var i = 0; i < cycleSelect.options.length; i++) {
       if (cycleSelect.options[i].value === target) {
         cycleSelect.selectedIndex = i;

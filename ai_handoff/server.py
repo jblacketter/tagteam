@@ -19,7 +19,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from ai_handoff.config import read_config as _read_config_file, get_agent_names
-from ai_handoff.parser import extract_all_rounds, format_rounds_html
+from ai_handoff.cycle import list_cycles, read_status as read_cycle_status, render_cycle
+from ai_handoff.parser import extract_all_rounds, format_rounds_html, read_cycle_rounds
 from ai_handoff.state import read_state, update_state
 
 
@@ -90,25 +91,38 @@ def _read_doc(project_dir: str, subdir: str, filename: str) -> str | None:
 def _get_phases(project_dir: str) -> list[dict]:
     """Build structured phase list with status from cycle documents."""
     phase_files = _list_dir_md(project_dir, "phases")
-    handoff_files = _list_dir_md(project_dir, "handoffs")
     current_state = read_state(project_dir) or {}
+
+    # Build a lookup of cycles by phase
+    all_cycles = list_cycles(project_dir)
+    cycle_lookup: dict[str, dict] = {}  # phase_name -> {plan: cycle, impl: cycle}
+    for c in all_cycles:
+        phase = c["phase"]
+        if phase not in cycle_lookup:
+            cycle_lookup[phase] = {}
+        cycle_lookup[phase][c["type"]] = c
 
     phases = []
     for pf in phase_files:
         phase_name = pf.rsplit(".", 1)[0]  # strip .md
-        # Find matching cycle docs
-        plan_cycle = f"{phase_name}_plan_cycle.md"
-        impl_cycle = f"{phase_name}_impl_cycle.md"
-        has_plan = plan_cycle in handoff_files
-        has_impl = impl_cycle in handoff_files
+        phase_cycles = cycle_lookup.get(phase_name, {})
+        has_impl = "impl" in phase_cycles
+        has_plan = "plan" in phase_cycles
 
-        # Determine type and status from cycle docs
         step_type = "impl" if has_impl else "plan" if has_plan else ""
-        cycle_file = impl_cycle if has_impl else plan_cycle if has_plan else None
-
         status = "pending"
-        if cycle_file:
-            status = _extract_cycle_state(project_dir, cycle_file)
+
+        # Get status from the most relevant cycle
+        if has_impl or has_plan:
+            c = phase_cycles.get("impl") or phase_cycles.get("plan")
+            if c["format"] == "jsonl":
+                cs = read_cycle_status(c["phase"], c["type"], project_dir)
+                if cs:
+                    state_val = cs.get("state", "pending")
+                    status = "done" if state_val == "approved" else state_val
+            else:
+                cycle_file = f"{c['phase']}_{c['type']}_cycle.md"
+                status = _extract_cycle_state(project_dir, cycle_file)
 
         # Override with current active state if this is the active phase
         if current_state.get("phase") == phase_name:
@@ -234,37 +248,54 @@ def make_handler(project_dir: str):
                 self._send_json(config or {})
 
             elif path == "/api/cycles":
-                files = _list_dir_md(project_dir, "handoffs")
-                self._send_json(files)
+                cycles = list_cycles(project_dir)
+                self._send_json([c["id"] for c in cycles])
 
             elif path.startswith("/api/cycle/"):
-                filename = path[len("/api/cycle/"):]
-                content = _read_doc(project_dir, "handoffs", filename)
-                if content is None:
-                    self._send_404(f"Cycle doc not found: {filename}")
+                cycle_id = path[len("/api/cycle/"):]
+                # Try JSONL-backed render first
+                parts = cycle_id.rsplit("_", 1)
+                rendered = None
+                if len(parts) == 2:
+                    phase, cycle_type = parts
+                    rendered = render_cycle(phase, cycle_type, project_dir)
+                if rendered:
+                    self._send_text(rendered)
                 else:
-                    self._send_text(content)
+                    # Fall back to legacy .md (try with and without .md suffix)
+                    filename = cycle_id if cycle_id.endswith(".md") else cycle_id + "_cycle.md"
+                    content = _read_doc(project_dir, "handoffs", filename)
+                    if content is None:
+                        self._send_404(f"Cycle not found: {cycle_id}")
+                    else:
+                        self._send_text(content)
 
             elif path == "/api/phases":
                 phases = _get_phases(project_dir)
                 self._send_json(phases)
 
             elif path.startswith("/api/rounds/"):
-                filename = path[len("/api/rounds/"):]
-                safe = Path(filename).name
-                cycle_path = Path(project_dir) / "docs" / "handoffs" / safe
-                if not cycle_path.is_file():
-                    self._send_404(f"Cycle doc not found: {filename}")
+                cycle_id = path[len("/api/rounds/"):]
+                # Try format dispatcher (handles JSONL and legacy .md)
+                rounds = None
+                parts = cycle_id.rsplit("_", 1)
+                if len(parts) == 2:
+                    phase, cycle_type = parts
+                    rounds = read_cycle_rounds(phase, cycle_type, project_dir)
+                if rounds is None:
+                    # Try legacy filename directly
+                    filename = cycle_id if cycle_id.endswith(".md") else cycle_id + "_cycle.md"
+                    safe = Path(filename).name
+                    cycle_path = Path(project_dir) / "docs" / "handoffs" / safe
+                    if cycle_path.is_file():
+                        rounds = extract_all_rounds(cycle_path)
+                if rounds is None:
+                    self._send_json({"rounds": [], "html": ""})
                 else:
-                    rounds = extract_all_rounds(cycle_path)
-                    if rounds is None:
-                        self._send_json([])
-                    else:
-                        # Return structured JSON and pre-rendered HTML
-                        self._send_json({
-                            "rounds": rounds,
-                            "html": format_rounds_html(rounds),
-                        })
+                    self._send_json({
+                        "rounds": rounds,
+                        "html": format_rounds_html(rounds),
+                    })
 
             elif path == "/api/watcher/status":
                 status = _get_watcher_status(project_dir)

@@ -196,7 +196,9 @@ class SaloonApp(App):
         cycle_path = find_cycle_doc(state.phase, state.step_type, project_dir=self.project_dir or ".")
         if cycle_path is None:
             return None
-        result = extract_last_round(cycle_path)
+        pdir = self.project_dir or "."
+        result = extract_last_round(cycle_path, phase=state.phase,
+                                    step_type=state.step_type, project_dir=pdir)
         if result:
             return result.get("action")
         return None

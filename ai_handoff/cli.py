@@ -212,6 +212,7 @@ Commands:
   migrate       Migrate legacy projects to use ai-handoff.yaml
   watch         Start the watcher daemon for automated orchestration
   roadmap       Query roadmap phases and build execution queue
+  cycle         Manage cycle documents (init, add, status, rounds, render)
   state         View or update the orchestration state file
   session       Manage orchestration session (start/kill)
   serve         Start the web dashboard server
@@ -263,6 +264,9 @@ def main() -> int:
     elif command == "roadmap":
         from ai_handoff.roadmap import roadmap_command
         return roadmap_command(sys.argv[2:])
+    elif command == "cycle":
+        from ai_handoff.cycle import cycle_command
+        return cycle_command(sys.argv[2:])
     elif command == "state":
         from ai_handoff.state import state_command
         return state_command(sys.argv[2:])

@@ -1,11 +1,15 @@
 """Tests for the shared cycle document parser."""
 
+import json
 import tempfile
 from pathlib import Path
 
 import pytest
 
-from ai_handoff.parser import extract_all_rounds, format_rounds_html, _extract_summary
+from ai_handoff.parser import (
+    extract_all_rounds, format_rounds_html, _extract_summary,
+    parse_jsonl_rounds, read_cycle_rounds,
+)
 
 
 SAMPLE_CYCLE = """\
@@ -243,3 +247,96 @@ class TestFormatRoundsHtml:
         html = format_rounds_html(rounds)
         assert "<script>" not in html
         assert "&lt;script&gt;" in html
+
+
+class TestParseJsonlRounds:
+    def test_parses_two_entries(self, tmp_path):
+        jsonl = tmp_path / "test_rounds.jsonl"
+        entries = [
+            {"round": 1, "role": "lead", "action": "SUBMIT_FOR_REVIEW",
+             "content": "Initial submission.", "ts": "2026-01-01T00:00:00Z"},
+            {"round": 1, "role": "reviewer", "action": "APPROVE",
+             "content": "Looks good.", "ts": "2026-01-01T01:00:00Z"},
+        ]
+        jsonl.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
+
+        rounds = parse_jsonl_rounds(jsonl)
+        assert rounds is not None
+        assert len(rounds) == 1
+        assert rounds[0]["round"] == 1
+        assert rounds[0]["lead_action"] == "SUBMIT_FOR_REVIEW"
+        assert rounds[0]["action"] == "APPROVE"
+        assert rounds[0]["lead_text"] == "Initial submission."
+        assert rounds[0]["reviewer_text"] == "Looks good."
+
+    def test_multiple_rounds(self, tmp_path):
+        jsonl = tmp_path / "test_rounds.jsonl"
+        entries = [
+            {"round": 1, "role": "lead", "action": "SUBMIT_FOR_REVIEW", "content": "v1", "ts": "t1"},
+            {"round": 1, "role": "reviewer", "action": "REQUEST_CHANGES", "content": "fix", "ts": "t2"},
+            {"round": 2, "role": "lead", "action": "SUBMIT_FOR_REVIEW", "content": "v2", "ts": "t3"},
+            {"round": 2, "role": "reviewer", "action": "APPROVE", "content": "ok", "ts": "t4"},
+        ]
+        jsonl.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
+
+        rounds = parse_jsonl_rounds(jsonl)
+        assert len(rounds) == 2
+        assert rounds[0]["round"] == 1
+        assert rounds[1]["round"] == 2
+        assert rounds[1]["action"] == "APPROVE"
+
+    def test_returns_none_for_missing_file(self, tmp_path):
+        assert parse_jsonl_rounds(tmp_path / "missing.jsonl") is None
+
+    def test_returns_none_for_empty_file(self, tmp_path):
+        jsonl = tmp_path / "empty.jsonl"
+        jsonl.write_text("")
+        assert parse_jsonl_rounds(jsonl) is None
+
+    def test_skips_malformed_lines(self, tmp_path):
+        jsonl = tmp_path / "test_rounds.jsonl"
+        jsonl.write_text(
+            '{"round":1,"role":"lead","action":"SUBMIT_FOR_REVIEW","content":"ok","ts":"t"}\n'
+            'not json\n'
+            '{"round":1,"role":"reviewer","action":"APPROVE","content":"yes","ts":"t"}\n'
+        )
+        rounds = parse_jsonl_rounds(jsonl)
+        assert rounds is not None
+        assert len(rounds) == 1
+
+
+class TestReadCycleRounds:
+    def test_prefers_jsonl_over_markdown(self, tmp_path):
+        handoffs = tmp_path / "docs" / "handoffs"
+        handoffs.mkdir(parents=True)
+
+        # Create JSONL version
+        jsonl = handoffs / "test_plan_rounds.jsonl"
+        jsonl.write_text(json.dumps({
+            "round": 1, "role": "lead", "action": "SUBMIT_FOR_REVIEW",
+            "content": "JSONL content", "ts": "t"
+        }) + "\n")
+
+        # Create legacy markdown version
+        md = handoffs / "test_plan_cycle.md"
+        md.write_text("## Round 1\n### Lead\n**Action: SUBMIT_FOR_REVIEW**\nMD content\n")
+
+        rounds = read_cycle_rounds("test", "plan", str(tmp_path))
+        assert rounds is not None
+        assert rounds[0]["lead_text"] == "JSONL content"
+
+    def test_falls_back_to_markdown(self, tmp_path):
+        handoffs = tmp_path / "docs" / "handoffs"
+        handoffs.mkdir(parents=True)
+
+        md = handoffs / "test_plan_cycle.md"
+        md.write_text("## Round 1\n### Lead\n**Action: SUBMIT_FOR_REVIEW**\nMD content\n### Reviewer\n_awaiting response_\n")
+
+        rounds = read_cycle_rounds("test", "plan", str(tmp_path))
+        assert rounds is not None
+        assert rounds[0]["lead_action"] == "SUBMIT_FOR_REVIEW"
+
+    def test_returns_none_for_missing(self, tmp_path):
+        handoffs = tmp_path / "docs" / "handoffs"
+        handoffs.mkdir(parents=True)
+        assert read_cycle_rounds("missing", "plan", str(tmp_path)) is None
