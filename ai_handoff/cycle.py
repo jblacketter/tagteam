@@ -168,8 +168,11 @@ def _update_handoff_state(phase: str, cycle_type: str, action: str,
 
     Handles round-5 auto-escalation: REQUEST_CHANGES at round 5
     escalates to human arbiter instead of handing back to lead.
+
+    Normalizes state to prevent stale completion metadata from
+    previous cycles from persisting.
     """
-    from ai_handoff.state import update_state
+    from ai_handoff.state import update_state, read_state
 
     transition = dict(_STATE_TRANSITIONS[action])
 
@@ -185,7 +188,45 @@ def _update_handoff_state(phase: str, cycle_type: str, action: str,
         "command": _STATE_COMMAND,
     }
     updates.update(transition)
-    update_state(updates, project_dir)
+
+    # Explicitly clear stale completion state for in-progress transitions
+    # to prevent result="approved" or result="roadmap-complete" from previous
+    # cycles from persisting when a new cycle begins.
+    if action in ("SUBMIT_FOR_REVIEW", "REQUEST_CHANGES"):
+        if round_num < 5:  # Only clear if not auto-escalating
+            updates["result"] = None
+
+    # Normalize run_mode and roadmap context based on current state.
+    # When starting a new cycle, check if we're continuing an active roadmap
+    # or starting fresh.
+    current_state = read_state(project_dir)
+    should_preserve_roadmap = False
+    clear_keys = []
+
+    if current_state and "roadmap" in current_state and "run_mode" in current_state:
+        # Preserve roadmap context only if this cycle matches the active roadmap phase
+        roadmap = current_state["roadmap"]
+        is_roadmap_mode = current_state.get("run_mode") == "full-roadmap"
+        current_roadmap_phase = None
+        if is_roadmap_mode and roadmap.get("queue"):
+            idx = roadmap.get("current_index", 0)
+            if 0 <= idx < len(roadmap["queue"]):
+                current_roadmap_phase = roadmap["queue"][idx]
+
+        # Preserve roadmap state only if this phase matches the current roadmap phase
+        if is_roadmap_mode and current_roadmap_phase == phase:
+            updates["roadmap"] = roadmap
+            updates["run_mode"] = "full-roadmap"
+            should_preserve_roadmap = True
+
+    if not should_preserve_roadmap:
+        # Clear stale roadmap context when starting a new single-phase cycle
+        # or when the phase doesn't match the active roadmap.
+        updates["run_mode"] = "single-phase"
+        if current_state and "roadmap" in current_state:
+            clear_keys.append("roadmap")
+
+    update_state(updates, project_dir, clear_keys=clear_keys or None)
 
 
 def read_status(phase: str, cycle_type: str, project_dir: str = ".") -> dict | None:

@@ -45,11 +45,15 @@ def write_state(state: dict, project_dir: str = ".") -> None:
 
 
 def update_state(updates: dict, project_dir: str = ".",
-                 expected_seq: int | None = None) -> dict | None:
+                 expected_seq: int | None = None,
+                 clear_keys: list[str] | None = None) -> dict | None:
     """Read current state, record history, apply updates, write back.
 
     If expected_seq is provided, only write if the current sequence number
     matches. Returns None if the write was skipped due to staleness.
+
+    If clear_keys is provided, those keys will be deleted from the state
+    before applying updates.
     """
     state = read_state(project_dir) or {}
 
@@ -71,6 +75,11 @@ def update_state(updates: dict, project_dir: str = ".",
 
     # Keep history bounded
     state["history"] = state["history"][-20:]
+
+    # Clear specified keys before applying updates
+    if clear_keys:
+        for key in clear_keys:
+            state.pop(key, None)
 
     state["seq"] = current_seq + 1
     state.update(updates)

@@ -264,6 +264,166 @@ class TestUpdatedByStateIntegration:
         assert cycle_status["ready_for"] == "human"
 
 
+class TestStaleStateClearing:
+    """Regression tests for stale state overlay bug (2026-03-22).
+
+    When transitioning between cycles, stale completion state like
+    result="approved" or roadmap metadata from previous cycles should
+    be cleared, not carried forward via shallow overlay.
+    """
+
+    def test_submit_for_review_clears_stale_result(self, project):
+        """SUBMIT_FOR_REVIEW should clear stale result from previous cycle."""
+        from ai_handoff.state import read_state, write_state
+
+        # Create a synthetic completed state with result="roadmap-complete"
+        write_state({
+            "phase": "old-phase",
+            "type": "plan",
+            "turn": "lead",
+            "status": "done",
+            "result": "roadmap-complete",
+            "round": 3,
+        }, project)
+
+        # Start a new cycle and submit for review
+        init_cycle("new-phase", "plan", "A", "B", "New plan.", project,
+                   updated_by="A")
+
+        # Verify stale result is cleared
+        state = read_state(project)
+        assert state["phase"] == "new-phase"
+        assert state["turn"] == "reviewer"
+        assert state["status"] == "ready"
+        assert state.get("result") is None  # Should be explicitly cleared
+
+    def test_request_changes_clears_stale_result(self, project):
+        """REQUEST_CHANGES should clear stale completion state."""
+        from ai_handoff.state import read_state, write_state
+
+        # Create a synthetic completed state
+        write_state({
+            "phase": "completed-phase",
+            "type": "impl",
+            "status": "done",
+            "result": "approved",
+            "round": 2,
+        }, project)
+
+        # Start new cycle and have reviewer request changes
+        init_cycle("active-phase", "impl", "A", "B", "Implementation.", project,
+                   updated_by="A")
+        add_round("active-phase", "impl", "reviewer", "REQUEST_CHANGES", 1,
+                  "Needs fixes.", project, updated_by="B")
+
+        # Verify stale result is cleared
+        state = read_state(project)
+        assert state["phase"] == "active-phase"
+        assert state["turn"] == "lead"
+        assert state["status"] == "ready"
+        assert state.get("result") is None  # Should be explicitly cleared
+
+    def test_roadmap_preserved_during_active_roadmap_transitions(self, project):
+        """Roadmap context should be preserved when cycling within active roadmap."""
+        from ai_handoff.state import read_state, write_state
+
+        # Create a state with active roadmap where phase-2 is the current phase
+        roadmap = {
+            "queue": ["phase-1", "phase-2", "phase-3"],
+            "current_index": 1,  # phase-2 is at index 1
+            "completed": ["phase-1"],
+            "pause_reason": None,
+        }
+        write_state({
+            "phase": "phase-2",
+            "type": "plan",
+            "turn": "reviewer",
+            "status": "ready",
+            "round": 1,
+            "run_mode": "full-roadmap",
+            "roadmap": roadmap,
+        }, project)
+
+        # Reviewer requests changes for phase-2
+        add_round("phase-2", "plan", "reviewer", "REQUEST_CHANGES", 1,
+                  "Fix this.", project, updated_by="B")
+
+        # Verify roadmap is preserved because phase-2 matches current roadmap phase
+        state = read_state(project)
+        assert state["roadmap"] == roadmap
+        assert state["run_mode"] == "full-roadmap"
+        assert state.get("result") is None  # But result should be cleared
+
+    def test_single_phase_cycle_clears_stale_roadmap(self, project):
+        """Starting a new single-phase cycle should clear stale roadmap context."""
+        from ai_handoff.state import read_state, write_state
+
+        # Create a completed full-roadmap state
+        write_state({
+            "phase": "old-phase-c",
+            "type": "impl",
+            "status": "done",
+            "result": "roadmap-complete",
+            "round": 1,
+            "run_mode": "full-roadmap",
+            "roadmap": {
+                "queue": ["old-phase-a", "old-phase-b", "old-phase-c"],
+                "current_index": 2,
+                "completed": ["old-phase-a", "old-phase-b", "old-phase-c"],
+                "pause_reason": None,
+            },
+        }, project)
+
+        # Start a brand new single-phase impl cycle for a different phase
+        init_cycle("new-unrelated-phase", "impl", "A", "B",
+                   "New implementation.", project, updated_by="A")
+
+        # Verify stale roadmap context is cleared
+        state = read_state(project)
+        assert state["phase"] == "new-unrelated-phase"
+        assert state["type"] == "impl"
+        assert state["run_mode"] == "single-phase"
+        assert "roadmap" not in state  # Roadmap should be completely removed
+        assert state.get("result") is None  # Result should be cleared
+
+    def test_roadmap_watcher_cannot_advance_after_single_phase_approval(self, project):
+        """After approving a single-phase cycle, watcher should not auto-advance stale roadmap."""
+        from ai_handoff.state import read_state, write_state
+
+        # Create a completed full-roadmap state with stale queue
+        write_state({
+            "phase": "old-b",
+            "type": "impl",
+            "status": "done",
+            "result": "approved",
+            "round": 1,
+            "run_mode": "full-roadmap",
+            "roadmap": {
+                "queue": ["old-a", "old-b", "old-c"],
+                "current_index": 1,
+                "completed": ["old-a", "old-b"],
+                "pause_reason": None,
+            },
+        }, project)
+
+        # Start a new single-phase cycle for a completely different phase
+        init_cycle("fresh-phase", "impl", "A", "B",
+                   "Fresh implementation.", project, updated_by="A")
+
+        # Approve the fresh cycle
+        add_round("fresh-phase", "impl", "reviewer", "APPROVE", 1,
+                  "LGTM.", project, updated_by="B")
+
+        # Verify the state shows approval for fresh-phase, not old-c
+        state = read_state(project)
+        assert state["phase"] == "fresh-phase"
+        assert state["status"] == "done"
+        assert state["result"] == "approved"
+        assert state["run_mode"] == "single-phase"
+        assert "roadmap" not in state  # No stale roadmap to advance
+
+
+
 LEGACY_CYCLE_MD = """\
 # Plan Review Cycle: legacy-phase
 
