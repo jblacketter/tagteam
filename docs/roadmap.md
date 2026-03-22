@@ -112,7 +112,7 @@ AI Handoff Framework - A collaboration framework enabling structured, multi-phas
   - Character reactions to state changes (color shifts)
 
 ### Phase 11: The Saloon — Interactive Character-Driven Setup & Monitoring
-- **Status:** Planning
+- **Status:** Complete
 - **Description:** Transform the dashboard into a full saloon experience with three independently clickable characters (Mayor, Bartender, Watcher). First-time setup becomes a guided multi-character conversation. The new Watcher character provides agent monitoring and daemon control.
 - **Key Deliverables:**
   - New Watcher character (pixel art sprite + portrait + dialogue)
@@ -122,6 +122,29 @@ AI Handoff Framework - A collaboration framework enabling structured, multi-phas
   - Watcher monitoring API (daemon status, tmux session control, log tails)
   - Setup state persistence (resume mid-flow)
 - **Phase Plan:** `docs/phases/saloon-interactive-setup.md`
+
+### Phase 12: Cycle Storage & CLI (Performance)
+- **Status:** Complete
+- **Description:** Replace markdown-based cycle documents with append-only JSONL rounds + JSON status files, updated via CLI commands. Eliminates repeated read/modify/write of markdown from the active handoff loop.
+- **Key Deliverables:**
+  - `ai_handoff/cycle.py` module (JSONL/JSON storage, CLI commands, centralized discovery)
+  - CLI commands: `cycle init`, `cycle add`, `cycle status`, `cycle rounds`, `cycle render`
+  - Format dispatcher in `parser.py` (JSONL first, legacy markdown fallback)
+  - All consumers updated: `server.py`, `app.js`, `handoff_reader.py`, `review_replay.py`
+  - SKILL.md updated to use CLI commands instead of manual file edits
+  - Synthesized markdown view via `cycle render` for human readability
+  - 56 unit tests across `test_cycle.py` and `test_parser.py`
+- **Phase Plan:** `docs/phases/cycle-storage-cli.md`
+
+### Phase 13: Unified State Command (Performance)
+- **Status:** Complete
+- **Description:** Merge `cycle add` and `state set` into a single command via `--updated-by` flag, cutting agent tool calls per handoff turn from 2 to 1.
+- **Key Deliverables:**
+  - `--updated-by` flag on `cycle init` and `cycle add` — auto-updates `handoff-state.json`
+  - `_STATE_TRANSITIONS` table and `_update_handoff_state()` helper in `cycle.py`
+  - Round-5 auto-escalation preserved in unified command path
+  - SKILL.md updated to single-command flow for all agent actions
+  - Regression test for round-5 escalation behavior
 
 ## Decision Log
 See `docs/decision_log.md`
