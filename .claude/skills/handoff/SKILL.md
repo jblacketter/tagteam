@@ -63,23 +63,21 @@ If there is no state file, show: `Phase: — | Type: — | Round: — | Turn: �
 #### As Lead (your turn)
 1. Read the reviewer's latest feedback: `python -m ai_handoff cycle rounds --phase [phase] --type [plan|impl]`
 2. Address the feedback: update the plan or implementation files
-3. Add your round entry via CLI: `python -m ai_handoff cycle add --phase [phase] --type [plan|impl] --role lead --action SUBMIT_FOR_REVIEW --round [N+1] --content "summary of changes"`
-4. Run: `python -m ai_handoff state set --turn reviewer --status ready --command "Read .claude/skills/handoff/SKILL.md and handoff-state.json, then act on your turn" --phase [phase] --round [N+1] --updated-by [your-agent-name]`
+3. Add your round and update state in one command: `python -m ai_handoff cycle add --phase [phase] --type [plan|impl] --role lead --action SUBMIT_FOR_REVIEW --round [N+1] --updated-by [your-agent-name] --content "summary of changes"`
 
 #### As Reviewer (your turn)
 1. Read the lead's submission: `python -m ai_handoff cycle rounds --phase [phase] --type [plan|impl]`
 2. Review the referenced plan/implementation files
-3. Choose ONE action and add your round entry via CLI:
-   - **APPROVE:** `python -m ai_handoff cycle add --phase [phase] --type [plan|impl] --role reviewer --action APPROVE --round [N] --content "Approved."` then run: `python -m ai_handoff state set --status done --result approved --updated-by [your-agent-name]`
-   - **REQUEST_CHANGES:** For detailed feedback, use stdin with a heredoc:
+3. Choose ONE action (all commands update both cycle and state in one call):
+   - **APPROVE:** `python -m ai_handoff cycle add --phase [phase] --type [plan|impl] --role reviewer --action APPROVE --round [N] --updated-by [your-agent-name] --content "Approved."`
+   - **REQUEST_CHANGES:** For detailed feedback, use stdin with a heredoc. At round 5, the system auto-escalates to the human arbiter instead of handing back to lead.
      ```
-     python -m ai_handoff cycle add --phase [phase] --type [plan|impl] --role reviewer --action REQUEST_CHANGES --round [N] <<'EOF'
+     python -m ai_handoff cycle add --phase [phase] --type [plan|impl] --role reviewer --action REQUEST_CHANGES --round [N] --updated-by [your-agent-name] <<'EOF'
      Your detailed feedback here. Backticks, quotes, and special chars are safe.
      EOF
      ```
-     If round 5: also run `python -m ai_handoff state set --status escalated --updated-by [your-agent-name]`. Otherwise: run `python -m ai_handoff state set --turn lead --status ready --command "Read .claude/skills/handoff/SKILL.md and handoff-state.json, then act on your turn" --phase [phase] --round [round] --updated-by [your-agent-name]`
-   - **ESCALATE:** `python -m ai_handoff cycle add --phase [phase] --type [plan|impl] --role reviewer --action ESCALATE --round [N] --content "Reason."` then run: `python -m ai_handoff state set --status escalated --updated-by [your-agent-name]`
-   - **NEED_HUMAN:** `python -m ai_handoff cycle add --phase [phase] --type [plan|impl] --role reviewer --action NEED_HUMAN --round [N] --content "Question for human."` then run: `python -m ai_handoff state set --status escalated --updated-by [your-agent-name]`
+   - **ESCALATE:** `python -m ai_handoff cycle add --phase [phase] --type [plan|impl] --role reviewer --action ESCALATE --round [N] --updated-by [your-agent-name] --content "Reason."`
+   - **NEED_HUMAN:** `python -m ai_handoff cycle add --phase [phase] --type [plan|impl] --role reviewer --action NEED_HUMAN --round [N] --updated-by [your-agent-name] --content "Question for human."`
 
 **Step 4 — CRITICAL: You MUST end every `/handoff` response with this exact box:**
 
@@ -99,10 +97,9 @@ Replace `[agent name]` with the next agent's name. For completed/escalated/needs
 
 1. Read `ai-handoff.yaml` to confirm you are the lead
 2. Create or verify the phase plan at `docs/phases/[phase].md` (Summary, Scope, Technical Approach, Files, Success Criteria)
-3. Create the cycle via CLI: `python -m ai_handoff cycle init --phase [phase] --type [plan|impl] --lead [lead-name] --reviewer [reviewer-name] --content "summary of initial submission"`
-4. Run: `python -m ai_handoff state set --turn reviewer --status ready --command "Read .claude/skills/handoff/SKILL.md and handoff-state.json, then act on your turn" --phase [phase] --type [plan|impl] --round 1 --updated-by [your-agent-name]`
-5. Begin your response with the status banner (showing the newly created state).
-6. End with the NEXT COMMAND box.
+3. Create the cycle and update state in one command: `python -m ai_handoff cycle init --phase [phase] --type [plan|impl] --lead [lead-name] --reviewer [reviewer-name] --updated-by [your-agent-name] --content "summary of initial submission"`
+4. Begin your response with the status banner (showing the newly created state).
+5. End with the NEXT COMMAND box.
 
 ---
 

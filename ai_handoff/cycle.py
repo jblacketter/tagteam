@@ -22,7 +22,7 @@ VALID_ACTIONS = {
 VALID_ROLES = {"lead", "reviewer"}
 VALID_TYPES = {"plan", "impl"}
 
-# Status transitions keyed by action
+# Status transitions keyed by action (cycle status.json)
 _TRANSITIONS = {
     "SUBMIT_FOR_REVIEW": {"state": "in-progress", "ready_for": "reviewer"},
     "REQUEST_CHANGES":   {"state": "in-progress", "ready_for": "lead"},
@@ -30,6 +30,17 @@ _TRANSITIONS = {
     "ESCALATE":          {"state": "escalated",   "ready_for": "human"},
     "NEED_HUMAN":        {"state": "needs-human",  "ready_for": "human"},
 }
+
+# Handoff state transitions keyed by action (handoff-state.json)
+_STATE_TRANSITIONS = {
+    "SUBMIT_FOR_REVIEW": {"turn": "reviewer", "status": "ready"},
+    "REQUEST_CHANGES":   {"turn": "lead",     "status": "ready"},
+    "APPROVE":           {"status": "done",   "result": "approved"},
+    "ESCALATE":          {"status": "escalated"},
+    "NEED_HUMAN":        {"status": "escalated"},
+}
+
+_STATE_COMMAND = "Read .claude/skills/handoff/SKILL.md and handoff-state.json, then act on your turn"
 
 
 def _handoffs_dir(project_dir: str) -> Path:
@@ -47,10 +58,12 @@ def _rounds_path(phase: str, cycle_type: str, project_dir: str) -> Path:
 # --- Core functions ---
 
 def init_cycle(phase: str, cycle_type: str, lead: str, reviewer: str,
-               content: str, project_dir: str = ".") -> dict:
+               content: str, project_dir: str = ".",
+               updated_by: str | None = None) -> dict:
     """Create a new cycle atomically with the lead's first submission.
 
     Writes both status JSON and the first JSONL round entry together.
+    If updated_by is provided, also updates handoff-state.json.
     """
     handoffs = _handoffs_dir(project_dir)
     handoffs.mkdir(parents=True, exist_ok=True)
@@ -82,13 +95,22 @@ def init_cycle(phase: str, cycle_type: str, lead: str, reviewer: str,
     rp.write_text(json.dumps(entry) + "\n", encoding="utf-8")
     sp.write_text(json.dumps(status, indent=2) + "\n", encoding="utf-8")
 
+    # Optionally update handoff-state.json
+    if updated_by:
+        _update_handoff_state(
+            phase, cycle_type, "SUBMIT_FOR_REVIEW", 1,
+            updated_by, project_dir,
+        )
+
     return status
 
 
 def add_round(phase: str, cycle_type: str, role: str, action: str,
-              round_num: int, content: str, project_dir: str = ".") -> dict:
+              round_num: int, content: str, project_dir: str = ".",
+              updated_by: str | None = None) -> dict:
     """Append a round entry to the JSONL log and update status.
 
+    If updated_by is provided, also updates handoff-state.json.
     Returns the updated status dict.
     """
     if action not in VALID_ACTIONS:
@@ -116,6 +138,12 @@ def add_round(phase: str, cycle_type: str, role: str, action: str,
     transition = _TRANSITIONS[action]
     status["state"] = transition["state"]
     status["ready_for"] = transition["ready_for"]
+
+    # Round 5 REQUEST_CHANGES auto-escalates
+    if action == "REQUEST_CHANGES" and round_num >= 5:
+        status["state"] = "escalated"
+        status["ready_for"] = "human"
+
     # Only advance round when caller provides a higher value
     if round_num > status.get("round", 0):
         status["round"] = round_num
@@ -123,7 +151,41 @@ def add_round(phase: str, cycle_type: str, role: str, action: str,
     sp = _status_path(phase, cycle_type, project_dir)
     sp.write_text(json.dumps(status, indent=2) + "\n", encoding="utf-8")
 
+    # Optionally update handoff-state.json
+    if updated_by:
+        _update_handoff_state(
+            phase, cycle_type, action, round_num,
+            updated_by, project_dir,
+        )
+
     return status
+
+
+def _update_handoff_state(phase: str, cycle_type: str, action: str,
+                          round_num: int, updated_by: str,
+                          project_dir: str = ".") -> None:
+    """Update handoff-state.json based on cycle action.
+
+    Handles round-5 auto-escalation: REQUEST_CHANGES at round 5
+    escalates to human arbiter instead of handing back to lead.
+    """
+    from ai_handoff.state import update_state
+
+    transition = dict(_STATE_TRANSITIONS[action])
+
+    # Round 5 REQUEST_CHANGES auto-escalates
+    if action == "REQUEST_CHANGES" and round_num >= 5:
+        transition = {"status": "escalated"}
+
+    updates = {
+        "phase": phase,
+        "type": cycle_type,
+        "round": round_num,
+        "updated_by": updated_by,
+        "command": _STATE_COMMAND,
+    }
+    updates.update(transition)
+    update_state(updates, project_dir)
 
 
 def read_status(phase: str, cycle_type: str, project_dir: str = ".") -> dict | None:
@@ -301,13 +363,14 @@ def _read_content(parsed: dict[str, str]) -> str:
 
 
 def _cli_init(args: list[str]) -> int:
-    allowed = {"--phase", "--type", "--lead", "--reviewer", "--content"}
+    allowed = {"--phase", "--type", "--lead", "--reviewer", "--content", "--updated-by"}
     parsed = _parse_args(args, allowed)
 
     phase = parsed.get("--phase")
     cycle_type = parsed.get("--type")
     lead = parsed.get("--lead")
     reviewer = parsed.get("--reviewer")
+    updated_by = parsed.get("--updated-by")
 
     if not all([phase, cycle_type, lead, reviewer]):
         print("Required: --phase, --type, --lead, --reviewer")
@@ -317,13 +380,17 @@ def _cli_init(args: list[str]) -> int:
         return 1
 
     content = _read_content(parsed)
-    status = init_cycle(phase, cycle_type, lead, reviewer, content)
-    print(f"Cycle created: {phase}_{cycle_type} (round 1, ready_for: reviewer)")
+    status = init_cycle(phase, cycle_type, lead, reviewer, content,
+                        updated_by=updated_by)
+    msg = f"Cycle created: {phase}_{cycle_type} (round 1, ready_for: reviewer)"
+    if updated_by:
+        msg += " + state updated"
+    print(msg)
     return 0
 
 
 def _cli_add(args: list[str]) -> int:
-    allowed = {"--phase", "--type", "--role", "--action", "--round", "--content"}
+    allowed = {"--phase", "--type", "--role", "--action", "--round", "--content", "--updated-by"}
     parsed = _parse_args(args, allowed)
 
     phase = parsed.get("--phase")
@@ -350,10 +417,15 @@ def _cli_add(args: list[str]) -> int:
         print(f"Round must be an integer, got: {round_str}")
         return 1
 
+    updated_by = parsed.get("--updated-by")
     content = _read_content(parsed)
-    status = add_round(phase, cycle_type, role, action, round_num, content)
-    print(f"Round added: {phase}_{cycle_type} round={status['round']} "
-          f"state={status['state']} ready_for={status.get('ready_for')}")
+    status = add_round(phase, cycle_type, role, action, round_num, content,
+                       updated_by=updated_by)
+    msg = (f"Round added: {phase}_{cycle_type} round={status['round']} "
+           f"state={status['state']} ready_for={status.get('ready_for')}")
+    if updated_by:
+        msg += " + state updated"
+    print(msg)
     return 0
 
 

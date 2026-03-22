@@ -196,6 +196,74 @@ class TestMultiRoundCycle:
         assert "STATE: approved" in md
 
 
+class TestUpdatedByStateIntegration:
+    """--updated-by should update handoff-state.json alongside cycle."""
+
+    def test_init_updates_state(self, project):
+        from ai_handoff.state import read_state
+        init_cycle("p", "plan", "Claude", "Codex", "init", project,
+                   updated_by="Claude")
+        state = read_state(project)
+        assert state is not None
+        assert state["turn"] == "reviewer"
+        assert state["status"] == "ready"
+        assert state["phase"] == "p"
+        assert state["type"] == "plan"
+        assert state["updated_by"] == "Claude"
+
+    def test_add_round_updates_state(self, project):
+        from ai_handoff.state import read_state
+        init_cycle("p", "plan", "A", "B", "init", project, updated_by="A")
+        add_round("p", "plan", "reviewer", "REQUEST_CHANGES", 1, "Fix.",
+                  project, updated_by="B")
+        state = read_state(project)
+        assert state["turn"] == "lead"
+        assert state["status"] == "ready"
+        assert state["updated_by"] == "B"
+
+    def test_approve_updates_state(self, project):
+        from ai_handoff.state import read_state
+        init_cycle("p", "plan", "A", "B", "init", project, updated_by="A")
+        add_round("p", "plan", "reviewer", "APPROVE", 1, "LGTM.",
+                  project, updated_by="B")
+        state = read_state(project)
+        assert state["status"] == "done"
+        assert state["result"] == "approved"
+
+    def test_no_state_update_without_flag(self, project):
+        from ai_handoff.state import read_state
+        init_cycle("p", "plan", "A", "B", "init", project)
+        state = read_state(project)
+        # State file should not have been created/updated by cycle init
+        # (it may exist from prior test state, so check it wasn't updated by us)
+        if state:
+            assert state.get("updated_by") != "A"
+
+    def test_round5_request_changes_auto_escalates(self, project):
+        """Regression: REQUEST_CHANGES at round 5 must escalate, not hand back to lead."""
+        from ai_handoff.state import read_state
+        init_cycle("p", "plan", "A", "B", "init", project, updated_by="A")
+        # Simulate 4 rounds of back-and-forth
+        for r in range(1, 5):
+            add_round("p", "plan", "reviewer", "REQUEST_CHANGES", r, f"Fix {r}.",
+                      project, updated_by="B")
+            add_round("p", "plan", "lead", "SUBMIT_FOR_REVIEW", r + 1, f"v{r+1}.",
+                      project, updated_by="A")
+        # Round 5: REQUEST_CHANGES should auto-escalate
+        add_round("p", "plan", "reviewer", "REQUEST_CHANGES", 5, "Still broken.",
+                  project, updated_by="B")
+
+        # Handoff state should be escalated, not ready/lead
+        state = read_state(project)
+        assert state["status"] == "escalated"
+        assert "turn" not in state or state.get("turn") != "lead"
+
+        # Cycle status should also be escalated
+        cycle_status = read_status("p", "plan", project)
+        assert cycle_status["state"] == "escalated"
+        assert cycle_status["ready_for"] == "human"
+
+
 LEGACY_CYCLE_MD = """\
 # Plan Review Cycle: legacy-phase
 
