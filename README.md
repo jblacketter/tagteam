@@ -79,75 +79,41 @@ python -m ai_handoff watch --mode iterm2 --confirm
 
 ### The Saloon (Web Dashboard)
 
-A graphical interface for setup, monitoring, and controlling handoff cycles. Three clickable characters — the Mayor, the Bartender, and the Watcher — each handle a different domain and guide you through configuration.
+A graphical dashboard for monitoring and controlling handoff cycles:
 
 ```bash
 python -m ai_handoff serve --dir ~/projects/myproject
-# Open http://localhost:8080 (use --port 3000 for a different port)
-```
-
-**Modes:**
-
-- **Welcome mode** (no config yet) — guided three-character setup: Mayor asks for your Lead agent name, Bartender asks for your Reviewer, and the Watcher offers automated monitoring.
-- **Idle mode** (config exists, no active handoff) — click any character to manage phases, review history, or check daemon status.
-- **Active mode** (handoff in progress) — full arbiter controls with live-updating timeline and cycle viewer.
-
-**Terminal UI** — ASCII art version with sound effects and a dialogue system:
-
-```bash
-pip install ai-handoff[tui]
-python -m ai_handoff tui --dir ~/projects/myproject
-python -m ai_handoff tui --sound   # with sound effects
 ```
 
 ## Configuration
 
-The `ai-handoff.yaml` file in your project root defines your agents:
+Agents are defined in `ai-handoff.yaml` (created by `init` or `quickstart`):
 
 ```yaml
 agents:
   lead:
     name: claude
+    command: claude              # optional, defaults to lowercase name
   reviewer:
     name: codex
-```
-
-Re-run `python -m ai_handoff init` to change agents or swap roles.
-
-### Directory Structure
-
-```
-your-project/
-├── ai-handoff.yaml       # Agent configuration
-├── handoff-state.json    # Orchestration state (auto-managed)
-├── .claude/
-│   └── skills/           # Skill definitions
-├── docs/
-│   ├── phases/           # Phase plan documents
-│   ├── handoffs/         # Handoff and feedback documents
-│   ├── escalations/      # Human arbiter decisions
-│   ├── checklists/       # Review checklists
-│   ├── roadmap.md        # Project phases overview
-│   └── decision_log.md   # Decision history
-└── templates/            # Document templates
+    command: codex
 ```
 
 ## CLI Reference
 
 ```bash
+python -m ai_handoff quickstart --dir .                # Setup + init + launch in one command
+python -m ai_handoff session start --dir . --launch    # Create session and auto-start agents
+python -m ai_handoff session kill                      # Destroy session
 python -m ai_handoff init                              # Configure agents interactively
 python -m ai_handoff setup .                           # Copy framework files to project
-python -m ai_handoff serve --dir .                     # Start the web dashboard
-python -m ai_handoff tui --dir .                       # Launch the terminal UI
-python -m ai_handoff watch --mode iterm2               # Start watcher daemon
 python -m ai_handoff state                             # View orchestration state
-python -m ai_handoff roadmap queue                     # List incomplete phases
+python -m ai_handoff state diagnose                    # Diagnose stuck handoffs
+python -m ai_handoff watch --mode iterm2               # Start watcher daemon
 python -m ai_handoff roadmap phases                    # List all phases with status
-python -m ai_handoff session start                     # Create session (default: iTerm2)
-python -m ai_handoff session kill                      # Destroy session
-python -m ai_handoff upgrade                           # Re-run setup on all registered projects
-python -m ai_handoff migrate                           # Migrate legacy projects
-python -m ai_handoff --help                            # Show help
+python -m ai_handoff serve --dir .                     # Start the web dashboard
+python -m ai_handoff upgrade                           # Re-run setup after pip upgrade
+python -m ai_handoff --help                            # Show all commands
 ```
 
 ## License
