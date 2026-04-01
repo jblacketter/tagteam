@@ -35,6 +35,9 @@ Homepage = "https://github.com/jblacketter/ai-handoff"
 Documentation = "https://github.com/jblacketter/ai-handoff#readme"
 Repository = "https://github.com/jblacketter/ai-handoff"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.setuptools]
 packages = ["ai_handoff", "ai_handoff.tui", "ai_handoff.tui.art", "ai_handoff.tui.conversations"]
 include-package-data = true

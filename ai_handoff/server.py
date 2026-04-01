@@ -190,6 +190,36 @@ def _get_session_status(project_dir: str) -> dict:
     return {"active": False, "session": None}
 
 
+_STATE_FIELD_VALIDATORS = {
+    "turn": (str, {"lead", "reviewer"}),
+    "status": (str, {"ready", "working", "done", "escalated", "aborted"}),
+    "command": (str, None),
+    "phase": (str, None),
+    "type": (str, {"plan", "impl"}),
+    "round": (int, None),
+    "result": (str, None),
+    "reason": (str, None),
+    "updated_by": (str, None),
+    "run_mode": (str, {"single-phase", "full-roadmap"}),
+    "roadmap": (dict, None),
+}
+
+
+def _validate_state_post(updates: dict) -> str | None:
+    """Validate state POST payload. Returns error message or None."""
+    for key, value in updates.items():
+        if key not in _STATE_FIELD_VALIDATORS:
+            return f"Unknown field: {key}"
+        expected_type, allowed_values = _STATE_FIELD_VALIDATORS[key]
+        if not isinstance(value, expected_type):
+            return (f"Field '{key}' must be {expected_type.__name__},"
+                    f" got {type(value).__name__}")
+        if allowed_values and value not in allowed_values:
+            return (f"Invalid value for '{key}': {value!r}."
+                    f" Must be one of: {', '.join(sorted(allowed_values))}")
+    return None
+
+
 def make_handler(project_dir: str):
     """Create a request handler class bound to a specific project directory."""
 
@@ -354,6 +384,12 @@ def make_handler(project_dir: str):
 
                 if not isinstance(updates, dict):
                     self._send_json({"error": "Expected JSON object"}, 400)
+                    return
+
+                # Validate fields: names, types, and allowed values
+                err = _validate_state_post(updates)
+                if err:
+                    self._send_json({"error": err}, 400)
                     return
 
                 new_state = update_state(updates, project_dir)

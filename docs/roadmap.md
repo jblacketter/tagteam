@@ -146,6 +146,60 @@ AI Handoff Framework - A collaboration framework enabling structured, multi-phas
   - SKILL.md updated to single-command flow for all agent actions
   - Regression test for round-5 escalation behavior
 
+### Phase 14: Sharing Readiness
+- **Status:** Complete
+- **Description:** Make ai-handoff ready for wider sharing — simplify README (remove manual setup, promote automated), mark Saloon as WIP, improve watcher robustness (seq-based change detection, re-send watchdog, retry loop), add `session start --launch` for auto-starting agents
+- **Key Deliverables:**
+  - README restructured: single automated workflow, one-line manual mention, Saloon marked WIP
+  - `config.py`: `get_launch_commands()` helper, `command` field validation, no-PyYAML fallback
+  - `session.py` / `iterm.py`: `--launch` flag auto-starts agents and watcher
+  - `watcher.py`: seq-based change detection, 5-min re-send watchdog for stuck `ready` states
+  - Tests for new config helpers and launch behavior
+- **Phase Plan:** `docs/phases/sharing-readiness.md`
+
+### Phase 15: Onboarding Polish
+- **Status:** Complete
+- **Description:** Simplify the first-run experience by unifying `init` + `setup` + `session start --launch` into a single streamlined flow. Reduce the number of commands a new user needs to go from install to running their first handoff.
+- **Key Deliverables:**
+  - `quickstart` command: setup + init + session in one command
+  - `ensure_session()` with idempotent behavior (tmux auto-attach, iTerm skip)
+  - `needs_setup()` 3-point check, `run_init()` with TTY guard
+  - README, HELP_TEXT, GETTING_STARTED all updated
+  - 21 new tests
+- **Phase Plan:** `docs/phases/onboarding-polish.md`
+
+### Phase 16: Stale Handoff Diagnostics
+- **Status:** Complete
+- **Description:** Build structured logging and diagnostics for debugging stale handoffs.
+- **Key Deliverables:**
+  - `state diagnose` command with 7 diagnostic checks
+  - Enriched history entries (phase, round, updated_by)
+  - Seq mismatch side-channel logging (`handoff-diagnostics.jsonl`)
+  - `--check-agents` for agent responsiveness via session discovery
+  - History anomaly detection (oscillation, repeated escalations)
+  - 19 new tests
+- **Phase Plan:** `docs/phases/stale-handoff-diagnostics.md`
+
+### Phase 17: Test Coverage & Isolation
+- **Status:** Complete
+- **Description:** Fix pre-existing test failures, add TUI test isolation.
+- **Key Deliverables:**
+  - Fixed `detect_agent_names()` — sorted glob, found-flags prevent overwrite
+  - TUI tests skip gracefully via `pytest.importorskip("textual")`
+  - Added `[tool.pytest.ini_options]` to pyproject.toml
+  - Full suite: 228 passed, 3 skipped, 0 failed
+- **Phase Plan:** `docs/phases/test-coverage-isolation.md`
+
+### Phase 18: Saloon Production Ready
+- **Status:** Complete
+- **Description:** Polish the web dashboard to production quality.
+- **Key Deliverables:**
+  - User-visible error banner for failed API calls (app.js)
+  - Exponential backoff polling (2s → 30s max, auto-recovery)
+  - State POST validation — rejects unknown fields (server.py)
+  - WIP banner removed from README
+- **Phase Plan:** `docs/phases/saloon-production-ready.md`
+
 ## Decision Log
 See `docs/decision_log.md`
 

@@ -4,7 +4,7 @@ import pytest
 from pathlib import Path
 import tempfile
 
-from ai_handoff.config import read_config, validate_config, get_agent_names
+from ai_handoff.config import read_config, validate_config, get_agent_names, get_launch_commands
 
 
 class TestReadConfig:
@@ -203,3 +203,152 @@ class TestGetAgentNames:
         lead, reviewer = get_agent_names(config)
         assert lead is None
         assert reviewer == "Codex"
+
+
+class TestGetLaunchCommands:
+    """Tests for get_launch_commands function."""
+
+    def test_returns_explicit_commands(self):
+        config = {
+            "agents": {
+                "lead": {"name": "Claude", "command": "claude --model opus"},
+                "reviewer": {"name": "Codex", "command": "codex --full-auto"},
+            }
+        }
+        lead_cmd, reviewer_cmd = get_launch_commands(config)
+        assert lead_cmd == "claude --model opus"
+        assert reviewer_cmd == "codex --full-auto"
+
+    def test_falls_back_to_lowercase_name(self):
+        config = {
+            "agents": {
+                "lead": {"name": "Claude"},
+                "reviewer": {"name": "Codex"},
+            }
+        }
+        lead_cmd, reviewer_cmd = get_launch_commands(config)
+        assert lead_cmd == "claude"
+        assert reviewer_cmd == "codex"
+
+    def test_empty_command_falls_back_to_name(self):
+        config = {
+            "agents": {
+                "lead": {"name": "Claude", "command": ""},
+                "reviewer": {"name": "Codex", "command": ""},
+            }
+        }
+        lead_cmd, reviewer_cmd = get_launch_commands(config)
+        assert lead_cmd == "claude"
+        assert reviewer_cmd == "codex"
+
+    def test_missing_agents_uses_defaults(self):
+        lead_cmd, reviewer_cmd = get_launch_commands({})
+        assert lead_cmd == "claude"
+        assert reviewer_cmd == "codex"
+
+    def test_malformed_agent_entry_uses_defaults(self):
+        config = {
+            "agents": {
+                "lead": "not a dict",
+                "reviewer": {"name": "Gemini"},
+            }
+        }
+        lead_cmd, reviewer_cmd = get_launch_commands(config)
+        assert lead_cmd == "claude"
+        assert reviewer_cmd == "gemini"
+
+    def test_mixed_explicit_and_default(self):
+        config = {
+            "agents": {
+                "lead": {"name": "Claude", "command": "claude --dangerously-skip-permissions"},
+                "reviewer": {"name": "Codex"},
+            }
+        }
+        lead_cmd, reviewer_cmd = get_launch_commands(config)
+        assert lead_cmd == "claude --dangerously-skip-permissions"
+        assert reviewer_cmd == "codex"
+
+
+class TestValidateConfigCommand:
+    """Tests for command field validation."""
+
+    def test_valid_command_no_errors(self):
+        config = {
+            "agents": {
+                "lead": {"name": "Claude", "command": "claude"},
+                "reviewer": {"name": "Codex", "command": "codex"},
+            }
+        }
+        errors = validate_config(config)
+        assert errors == []
+
+    def test_empty_command_is_error(self):
+        config = {
+            "agents": {
+                "lead": {"name": "Claude", "command": ""},
+                "reviewer": {"name": "Codex"},
+            }
+        }
+        errors = validate_config(config)
+        assert any("command" in e and "empty" in e for e in errors)
+
+    def test_non_string_command_is_error(self):
+        config = {
+            "agents": {
+                "lead": {"name": "Claude", "command": 42},
+                "reviewer": {"name": "Codex"},
+            }
+        }
+        errors = validate_config(config)
+        assert any("command" in e and "string" in e for e in errors)
+
+    def test_absent_command_is_fine(self):
+        config = {
+            "agents": {
+                "lead": {"name": "Claude"},
+                "reviewer": {"name": "Codex"},
+            }
+        }
+        errors = validate_config(config)
+        assert errors == []
+
+
+class TestFallbackParserCommand:
+    """Tests for no-PyYAML fallback parsing of command fields."""
+
+    def test_fallback_parses_command_fields(self, tmp_path, monkeypatch):
+        # Force fallback parser by pretending yaml is unavailable
+        import ai_handoff.config as config_mod
+        monkeypatch.setattr(config_mod, "HAS_YAML", False)
+
+        config_file = tmp_path / "ai-handoff.yaml"
+        config_file.write_text(
+            "agents:\n"
+            "  lead:\n"
+            "    name: Claude\n"
+            "    command: claude --model opus\n"
+            "  reviewer:\n"
+            "    name: Codex\n"
+            "    command: codex --full-auto\n"
+        )
+        result = read_config(config_file)
+        assert result is not None
+        assert result["agents"]["lead"]["command"] == "claude --model opus"
+        assert result["agents"]["reviewer"]["command"] == "codex --full-auto"
+
+    def test_fallback_without_command_fields(self, tmp_path, monkeypatch):
+        import ai_handoff.config as config_mod
+        monkeypatch.setattr(config_mod, "HAS_YAML", False)
+
+        config_file = tmp_path / "ai-handoff.yaml"
+        config_file.write_text(
+            "agents:\n"
+            "  lead:\n"
+            "    name: Claude\n"
+            "  reviewer:\n"
+            "    name: Codex\n"
+        )
+        result = read_config(config_file)
+        assert result is not None
+        assert "command" not in result["agents"]["lead"]
+        assert "command" not in result["agents"]["reviewer"]

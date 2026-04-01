@@ -938,6 +938,20 @@
     container.classList.remove('hidden');
   }
 
+  // --- Error banner ---
+  var errorBanner = document.createElement('div');
+  errorBanner.id = 'error-banner';
+  errorBanner.style.cssText = 'display:none;position:fixed;top:0;left:0;right:0;padding:8px 16px;background:#c0392b;color:#fff;text-align:center;z-index:9999;font-size:14px;';
+  document.body.prepend(errorBanner);
+
+  function showError(msg) {
+    errorBanner.textContent = msg;
+    errorBanner.style.display = 'block';
+  }
+  function clearError() {
+    errorBanner.style.display = 'none';
+  }
+
   // --- Control actions ---
   async function postState(updates) {
     try {
@@ -946,8 +960,17 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
       });
-      if (r.ok) handleNewState(await r.json());
-    } catch (e) { console.error('Failed to update state:', e); }
+      if (r.ok) {
+        clearError();
+        handleNewState(await r.json());
+      } else {
+        var detail = await r.text().catch(function() { return ''; });
+        showError('Failed to update state: ' + (r.status) + ' ' + (detail || r.statusText));
+      }
+    } catch (e) {
+      showError('Network error: could not reach server.');
+      console.error('Failed to update state:', e);
+    }
   }
 
   btnApprove.addEventListener('click', function() {
@@ -1046,8 +1069,13 @@
     }
   }
 
-  // --- Polling ---
+  // --- Polling with exponential backoff ---
   var pollOk = false;
+  var pollDelay = 2000;
+  var POLL_MIN = 2000;
+  var POLL_MAX = 30000;
+  var pollTimer = null;
+
   async function poll() {
     try {
       var results = await Promise.all([
@@ -1057,17 +1085,35 @@
       var stateR = results[0];
       var configR = results[1];
       if (stateR.ok && configR.ok) {
-        if (!pollOk) { pollOk = true; connDot.className = 'conn-dot ok'; connText.textContent = 'Connected'; }
+        if (!pollOk) {
+          pollOk = true;
+          connDot.className = 'conn-dot ok';
+          connText.textContent = 'Connected';
+          clearError();
+        }
+        pollDelay = POLL_MIN;
         agentConfig = await configR.json();
         handleNewState(await stateR.json());
         loadPhaseMap();
       } else {
-        setDisconnected();
+        setDisconnected('Server error (' + (stateR.status || configR.status) + ')');
       }
-    } catch (e) { setDisconnected(); }
+    } catch (e) {
+      setDisconnected('Reconnecting...');
+    }
+    schedulePoll();
   }
-  function setDisconnected() {
-    pollOk = false; connDot.className = 'conn-dot err'; connText.textContent = 'Disconnected';
+
+  function setDisconnected(msg) {
+    pollOk = false;
+    connDot.className = 'conn-dot err';
+    connText.textContent = msg || 'Disconnected';
+    pollDelay = Math.min(pollDelay * 2, POLL_MAX);
+  }
+
+  function schedulePoll() {
+    if (pollTimer) clearTimeout(pollTimer);
+    pollTimer = setTimeout(poll, pollDelay);
   }
 
   async function init() {
@@ -1126,6 +1172,6 @@
   }
 
   init();
-  setInterval(poll, 2000);
+  schedulePoll();
 
 })();

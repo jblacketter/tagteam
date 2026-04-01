@@ -19,24 +19,30 @@ def detect_agent_names(project_dir: Path) -> tuple[str, str]:
     """
     lead_name = "Claude"  # default
     reviewer_name = "Codex"  # default
+    lead_found = False
+    reviewer_found = False
 
     handoffs_dir = project_dir / "docs" / "handoffs"
     if handoffs_dir.exists():
-        for md_file in handoffs_dir.glob("*.md"):
+        for md_file in sorted(handoffs_dir.glob("*.md")):
             try:
                 content = md_file.read_text(encoding="utf-8")
             except Exception:
                 continue
 
             # Match "**From:** <name> (Lead)" — name can include spaces/punctuation
-            if match := re.search(r"\*\*From:\*\*\s+(.+?)\s+\(Lead\)", content):
-                lead_name = match.group(1).strip()
+            if not lead_found:
+                if match := re.search(r"\*\*From:\*\*\s+(.+?)\s+\(Lead\)", content):
+                    lead_name = match.group(1).strip()
+                    lead_found = True
             # Match "**To:** <name> (Reviewer)"
-            if match := re.search(r"\*\*To:\*\*\s+(.+?)\s+\(Reviewer\)", content):
-                reviewer_name = match.group(1).strip()
+            if not reviewer_found:
+                if match := re.search(r"\*\*To:\*\*\s+(.+?)\s+\(Reviewer\)", content):
+                    reviewer_name = match.group(1).strip()
+                    reviewer_found = True
 
-            if lead_name != "Claude" and reviewer_name != "Codex":
-                break  # Found both
+            if lead_found and reviewer_found:
+                break
 
     return lead_name, reviewer_name
 

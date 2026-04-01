@@ -486,8 +486,11 @@ def watch(
         _log("Confirm mode: will pause before sending commands")
     print(flush=True)
 
+    last_processed_seq = None
     last_processed_at = None
     idle_since = time.time()
+    last_ready_send_time = None  # tracks when we last sent a ready command
+    RESEND_TIMEOUT = 300  # re-send after 5 min if state still ready
 
     try:
         while True:
@@ -497,14 +500,16 @@ def watch(
                 time.sleep(interval)
                 continue
 
+            current_seq = state.get("seq", 0)
             updated_at_raw = state.get("updated_at")
             updated_at = updated_at_raw or "__missing__"
 
             # On first poll: process current state if it's actionable (ready).
             # This ensures a watcher restart mid-cycle picks up the active turn.
-            if last_processed_at is None:
+            if last_processed_seq is None:
                 if state.get("status") != "ready":
                     # Not actionable — just record and wait for changes
+                    last_processed_seq = current_seq
                     last_processed_at = updated_at
                     idle_since = time.time()
                     _log(f"Current state: {state.get('status', '?')}"
@@ -515,8 +520,9 @@ def watch(
                 # State is ready — fall through to process it
                 _log("Picking up active turn from existing state")
 
-            if updated_at == last_processed_at:
-                # Check for stuck agent
+            # Use seq as primary change detector (monotonic, no timestamp collision)
+            if current_seq == last_processed_seq:
+                # Check for stuck agent (working too long)
                 elapsed = time.time() - idle_since
                 if (elapsed > timeout_minutes * 60
                         and state.get("status") == "working"):
@@ -525,10 +531,20 @@ def watch(
                     notify_macos("AI Handoff", f"No activity for {timeout_minutes}m")
                     idle_since = time.time()  # avoid spamming
 
-                time.sleep(interval)
-                continue
+                # Re-send watchdog: if state is still ready and we sent a
+                # command a while ago, the agent may not have received it
+                if (state.get("status") == "ready"
+                        and last_ready_send_time is not None
+                        and time.time() - last_ready_send_time > RESEND_TIMEOUT):
+                    _log("Watchdog: state still 'ready' after 5m — re-sending command")
+                    # Fall through to re-process this state
+                    last_ready_send_time = None  # reset to avoid rapid re-sends
+                else:
+                    time.sleep(interval)
+                    continue
 
-            # New state change detected
+            # New state change detected (or watchdog re-send)
+            last_processed_seq = current_seq
             last_processed_at = updated_at
             idle_since = time.time()
 
@@ -547,6 +563,8 @@ def watch(
                 _log(f">> {agent_name}'s turn"
                      f" (phase: {phase}, round: {round_num})")
 
+                send_success = False
+
                 if mode == "iterm2":
                     if confirm:
                         try:
@@ -554,12 +572,12 @@ def watch(
                                   f" '{command}' to {agent_name}...")
                         except EOFError:
                             break
-                    success = send_iterm_command(
+                    send_success = send_iterm_command(
                         session_id, command,
                         max_retries=max_retries,
                         retry_delay=retry_delay,
                     )
-                    if success:
+                    if send_success:
                         _log(f"   Sent to {agent_name}: {command}")
                     else:
                         _log(f"   FAILED: Could not send to"
@@ -574,13 +592,13 @@ def watch(
                                   f" '{command}' to {pane}...")
                         except EOFError:
                             break
-                    success = send_tmux_keys(
+                    send_success = send_tmux_keys(
                         pane, command,
                         max_retries=max_retries,
                         retry_delay=retry_delay,
                         pre_send_delay=pre_send_delay,
                     )
-                    if success:
+                    if send_success:
                         _log(f"   Sent to {pane}: {command}")
                     else:
                         _log(f"   FAILED: Could not send to"
@@ -589,9 +607,17 @@ def watch(
                                      f"Failed to send to {pane} after retries")
 
                 elif mode == "notify":
+                    send_success = True
                     _log(f"   Command: {command}")
                     notify_macos("AI Handoff",
                                  f"{agent_name}'s turn: {command}")
+
+                # Track send time for watchdog re-send
+                if send_success:
+                    last_ready_send_time = time.time()
+                else:
+                    # Failed send — set time so watchdog will retry later
+                    last_ready_send_time = time.time()
 
             elif current_status == "working":
                 _log(f"   {agent_name} is working...")

@@ -71,11 +71,14 @@ def _write_session_file(project_dir: str, data: dict) -> None:
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
-def create_session(project_dir: str) -> bool:
+def create_session(project_dir: str, launch: bool = False) -> bool:
     """Create an iTerm2 window with 3 named tabs: Lead, Watcher, Reviewer.
 
     Each tab cd's to project_dir. Session IDs are saved to
     .handoff-session.json for the watcher to discover.
+
+    If launch=True, auto-starts agents and watcher using commands from
+    ai-handoff.yaml (falls back to agent name lowercase).
     """
     existing = _read_session_file(project_dir)
     if existing:
@@ -83,12 +86,21 @@ def create_session(project_dir: str) -> bool:
         print("  Kill first:  python -m ai_handoff session kill")
         return False
 
+    # Resolve launch commands if requested
+    lead_cmd = reviewer_cmd = None
+    if launch:
+        from ai_handoff.session import _read_launch_commands
+        cmds = _read_launch_commands(project_dir)
+        if cmds:
+            lead_cmd, reviewer_cmd = cmds
+        else:
+            launch = False  # Config missing — fall back to no-launch
+
     abs_dir = str(Path(project_dir).resolve())
 
-    # AppleScript to create window + 3 tabs, capture session IDs.
-    # Key details:
-    # - `create tab` must be inside `tell current window` to avoid new windows
-    # - `set name` on session sets tab title (shell may append its own suffix)
+    # AppleScript: create window + 3 tabs with cd only.
+    # Launch commands are sent AFTER session file is written to avoid
+    # the watcher starting before .handoff-session.json exists.
     script = (
         'tell application "iTerm2"\n'
         '    activate\n'
@@ -140,11 +152,36 @@ def create_session(project_dir: str) -> bool:
     }
     _write_session_file(project_dir, session_data)
 
-    print("Created iTerm2 session with 3 tabs:")
+    # Send launch commands AFTER session file exists so the watcher
+    # can find .handoff-session.json on startup.
+    # Pass raw commands — write_text_to_session() handles escaping internally.
+    if launch:
+        from ai_handoff.session import PRIME_MESSAGE
+        import time
+
+        write_text_to_session(ids[0], lead_cmd)
+        write_text_to_session(ids[2], reviewer_cmd)
+        # Start watcher last — agents need a moment to initialize
+        watcher_cmd = "python -m ai_handoff watch --mode iterm2"
+        write_text_to_session(ids[1], watcher_cmd)
+        # Auto-prime agents after they boot
+        print("  Waiting for agents to start before priming...")
+        time.sleep(3)
+        write_text_to_session(ids[0], PRIME_MESSAGE)
+        time.sleep(1)
+        write_text_to_session(ids[2], PRIME_MESSAGE)
+
+    launched = " (launched)" if launch else ""
+    print(f"Created iTerm2 session with 3 tabs{launched}:")
     print()
-    print("  Tab 1: Lead     - start Claude Code here")
-    print("  Tab 2: Watcher  - press Enter to start")
-    print("  Tab 3: Reviewer - start Codex here")
+    if launch:
+        print(f"  Tab 1: Lead     - {lead_cmd}")
+        print("  Tab 2: Watcher  - running")
+        print(f"  Tab 3: Reviewer - {reviewer_cmd}")
+    else:
+        print("  Tab 1: Lead     - start your lead agent here")
+        print("  Tab 2: Watcher  - start the watcher here")
+        print("  Tab 3: Reviewer - start your reviewer agent here")
     print()
     print(f"  Session file: {_session_file_path(project_dir)}")
     return True

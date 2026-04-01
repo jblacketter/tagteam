@@ -9,112 +9,40 @@ A collaboration framework for structured AI-to-AI handoffs with human oversight.
 Configure your agents via `ai-handoff.yaml` — use any AI combination (Claude + Codex, Gemini + Claude, etc.).
 
 ## Installation
-
 ```bash
-# From GitHub
 pip install git+https://github.com/jblacketter/ai-handoff.git
-
-# From local source
-pip install -e /path/to/ai-handoff
-
-# With web dashboard support
-pip install -e "/path/to/ai-handoff[tui]"
 ```
 
-Then set up your project:
+## Quick Start
+One command to set up and launch everything:
+```bash
+python -m ai_handoff quickstart --dir ~/projects/myproject
+```
+
+This runs framework setup, agent configuration (interactive), and starts a session with agents and watcher auto-launched.
+
+<details>
+<summary>Advanced: individual setup steps</summary>
 
 ```bash
 cd ~/projects/myproject
-python -m ai_handoff setup .
-
-python -m ai_handoff init      # prompts for agent names and roles
+python -m ai_handoff setup .           # copy framework files
+python -m ai_handoff init              # configure agents interactively
+python -m ai_handoff session start --dir . --launch   # start session
 ```
 
-This creates `ai-handoff.yaml` and copies the `/handoff` skill into `.claude/skills/`.
-
-## Choose Your Workflow
-
-There are three ways to use ai-handoff. Start with Manual to learn the flow, move to Automated when you're confident in your roadmap, or use the Saloon dashboard for a graphical interface.
-
----
-
-### 1. Manual Handoff
-
-Human triggers `/handoff` between agents each turn — you're in the loop for every exchange.
-
-**Best for:** new projects, hands-on oversight, learning the workflow.
-
-**Setup:**
-
-1. Run `python -m ai_handoff init` to create `ai-handoff.yaml`
-2. Tell each agent: *"Read ai-handoff.yaml to see your role, then read .claude/skills/handoff/SKILL.md for the workflow."*
-
-**Usage:**
-
-```
-/handoff start my-phase        # Lead creates plan, starts review cycle
-/handoff                       # Copy-paste to reviewer — reviews and responds
-/handoff                       # Copy-paste to lead — addresses feedback
-                               # Repeat until approved (auto-escalates after 5 rounds)
-/handoff start my-phase impl   # Lead starts implementation review
-/handoff                       # Reviewer reviews implementation
-```
-
-The `/handoff` command auto-detects your role from `ai-handoff.yaml` and the current state from `handoff-state.json`, then acts accordingly. Every response ends with the exact next command to copy-paste.
-
-**Workflow:**
-
-```
-Lead:     /handoff start [phase]     → creates plan + review cycle
-Reviewer: /handoff                   → reviews, APPROVE or REQUEST_CHANGES
-Lead:     /handoff                   → addresses feedback
-Reviewer: /handoff                   → reviews again
-  ↓
-(repeat until approved or round 5 auto-escalation)
-  ↓
-Lead:     /handoff start [phase] impl → starts implementation review
-Reviewer: /handoff                    → reviews implementation
-  ↓
-(approved → next phase)
-```
-
-**Commands:**
-
-
-| Command                       | Purpose                                         | Who  |
-| ----------------------------- | ----------------------------------------------- | ---- |
-| `/handoff`                    | Auto-detects role + state, does the right thing | Both |
-| `/handoff start [phase]`      | Begin a new phase (plan + review cycle)         | Lead |
-| `/handoff start [phase] impl` | Begin implementation review for a phase         | Lead |
-| `/handoff status`             | Orientation, status check, drift reset          | Both |
-
----
-
-### 2. Automated Handoff
-
-A watcher daemon monitors the shared state file and automatically sends `/handoff` to each agent's terminal when it's their turn. No copy-paste needed.
-
-**Best for:** confident in your roadmap, longer-running work, less babysitting.
-
-**Setup:**
+Or create tabs without auto-launching agents:
 
 ```bash
-# 1. Create Lead / Watcher / Reviewer tabs (iTerm2 default)
 python -m ai_handoff session start --dir ~/projects/myproject
-
-# 2. Start your agents in their tabs
-#    Lead tab:     start your lead agent (e.g. claude)
-#    Reviewer tab: start your reviewer agent (e.g. codex)
-
-# 3. In the Watcher tab, start auto-send mode
-python -m ai_handoff watch --mode iterm2
+#   Lead tab:     start your lead agent (e.g. claude)
+#   Reviewer tab: start your reviewer agent (e.g. codex)
+#   Watcher tab:  python -m ai_handoff watch --mode iterm2
 ```
 
-**Prime each agent** — before starting a cycle, tell each agent to load the workflow so it can respond to the watcher's automated commands:
+</details>
 
-```
-Read ai-handoff.yaml to see your role, then read .claude/skills/handoff/SKILL.md for the workflow.
-```
+## Usage
 
 **Single phase** — start a review cycle, watcher handles the back-and-forth, pauses when the phase completes:
 
@@ -129,77 +57,42 @@ Read ai-handoff.yaml to see your role, then read .claude/skills/handoff/SKILL.md
 /handoff start --roadmap api-gateway  # Start from a specific phase
 ```
 
+### Commands
+
+
+| Command                       | Purpose                                         | Who  |
+| ----------------------------- | ----------------------------------------------- | ---- |
+| `/handoff`                    | Auto-detects role + state, does the right thing | Both |
+| `/handoff start [phase]`      | Begin a new phase (plan + review cycle)         | Lead |
+| `/handoff start [phase] impl` | Begin implementation review for a phase         | Lead |
+| `/handoff status`             | Orientation, status check, drift reset          | Both |
+
 **Human-in-the-loop** — add `--confirm` to pause for your approval before each automatic send:
 
 ```bash
 python -m ai_handoff watch --mode iterm2 --confirm
 ```
 
-**Notification-only mode** — prints turn changes and sends desktop notifications without auto-sending. You switch terminals manually:
-
-```bash
-python -m ai_handoff watch --mode notify
-```
-
-**Key commands:**
-
-```bash
-python -m ai_handoff session start --dir .            # Create iTerm2 tabs (default)
-python -m ai_handoff session start --backend tmux      # Create tmux session
-python -m ai_handoff session attach --backend tmux     # Attach to existing tmux session
-python -m ai_handoff session kill                      # Destroy session
-python -m ai_handoff watch --mode iterm2               # Auto-send to iTerm2 tabs
-python -m ai_handoff watch --mode tmux                 # Auto-send to tmux panes
-python -m ai_handoff watch --mode notify               # Desktop notifications only
-python -m ai_handoff state                             # View orchestration state
-python -m ai_handoff state reset                       # Clear state file
-```
+> **Manual mode:** You can also run handoffs without the watcher by pasting `/handoff` command results between agents manually.
 
 ---
 
-### 3. The Saloon (Web Dashboard)
+### The Saloon (Web Dashboard)
 
 A graphical interface for setup, monitoring, and controlling handoff cycles. Three clickable characters — the Mayor, the Bartender, and the Watcher — each handle a different domain and guide you through configuration.
 
-**Setup:**
-
 ```bash
-# 1. Copy framework files (skills, templates, docs structure)
-python -m ai_handoff setup ~/projects/myproject
-
-# 2. Start the dashboard
 python -m ai_handoff serve --dir ~/projects/myproject
 # Open http://localhost:8080 (use --port 3000 for a different port)
 ```
 
-**What it does:**
+**Modes:**
 
-- **Welcome mode** (no config yet) — guided three-character setup: Mayor asks for your Lead agent name, Bartender asks for your Reviewer, and the Watcher offers automated monitoring. Characters glow to guide you through the sequence.
-- **Idle mode** (config exists, no active handoff) — click any character: Mayor starts phases, Bartender shows review history, Watcher reports daemon/session status.
-- **Active mode** (handoff in progress) — full arbiter controls with live-updating timeline and cycle viewer. Characters react to state changes.
+- **Welcome mode** (no config yet) — guided three-character setup: Mayor asks for your Lead agent name, Bartender asks for your Reviewer, and the Watcher offers automated monitoring.
+- **Idle mode** (config exists, no active handoff) — click any character to manage phases, review history, or check daemon status.
+- **Active mode** (handoff in progress) — full arbiter controls with live-updating timeline and cycle viewer.
 
-**The characters:**
-
-
-| Character | Domain                   | Click to...                      |
-| --------- | ------------------------ | -------------------------------- |
-| Mayor     | Project overview, phases | Start phases, explain workflow   |
-| Bartender | Reviews, feedback        | Review history, round tracking   |
-| Watcher   | Monitoring, automation   | Daemon status, tmux session info |
-
-**Arbiter controls:**
-
-
-| Button      | Action                               |
-| ----------- | ------------------------------------ |
-| Approve     | Mark the current handoff as approved |
-| Req Changes | Bump the round and switch turn       |
-| Escalate    | Flag for human intervention          |
-| Abort       | Cancel the current cycle             |
-
-The saloon scene reflects state visually: clock turns blue when working, characters turn green on approval, red on escalation. Setup progress persists in your browser — close and reopen to resume where you left off.
-
-There is also a **terminal UI** version with ASCII art, sound effects, and a dialogue system:
+**Terminal UI** — ASCII art version with sound effects and a dialogue system:
 
 ```bash
 pip install ai-handoff[tui]

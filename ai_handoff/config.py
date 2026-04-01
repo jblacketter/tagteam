@@ -38,18 +38,38 @@ def read_config(config_path: Path | str) -> dict | None:
         # Fallback parsing without PyYAML
         lead_name = None
         reviewer_name = None
+        lead_command = None
+        reviewer_command = None
         lines = content.split('\n')
         for i, line in enumerate(lines):
-            if 'lead:' in line and i + 1 < len(lines):
-                next_line = lines[i + 1]
-                if 'name:' in next_line:
-                    lead_name = next_line.split('name:')[1].strip()
-            elif 'reviewer:' in line and i + 1 < len(lines):
-                next_line = lines[i + 1]
-                if 'name:' in next_line:
-                    reviewer_name = next_line.split('name:')[1].strip()
+            if 'lead:' in line:
+                for j in range(i + 1, min(i + 4, len(lines))):
+                    sub = lines[j]
+                    if 'name:' in sub:
+                        lead_name = sub.split('name:')[1].strip()
+                    elif 'command:' in sub:
+                        lead_command = sub.split('command:')[1].strip()
+                    elif not sub.startswith(' ') and not sub.startswith('\t'):
+                        break
+            elif 'reviewer:' in line:
+                for j in range(i + 1, min(i + 4, len(lines))):
+                    sub = lines[j]
+                    if 'name:' in sub:
+                        reviewer_name = sub.split('name:')[1].strip()
+                    elif 'command:' in sub:
+                        reviewer_command = sub.split('command:')[1].strip()
+                    elif not sub.startswith(' ') and not sub.startswith('\t'):
+                        break
         if lead_name and reviewer_name:
-            return {'agents': {'lead': {'name': lead_name}, 'reviewer': {'name': reviewer_name}}}
+            result = {'agents': {
+                'lead': {'name': lead_name},
+                'reviewer': {'name': reviewer_name},
+            }}
+            if lead_command:
+                result['agents']['lead']['command'] = lead_command
+            if reviewer_command:
+                result['agents']['reviewer']['command'] = reviewer_command
+            return result
     except Exception:
         pass
     return None
@@ -84,6 +104,16 @@ def validate_config(config: dict) -> list[str]:
     if not isinstance(reviewer, dict) or not reviewer.get("name"):
         errors.append("Missing or invalid 'agents.reviewer.name'")
 
+    # Validate command if present
+    for role in ["lead", "reviewer"]:
+        agent = agents.get(role, {})
+        if isinstance(agent, dict):
+            command = agent.get("command")
+            if command is not None and not isinstance(command, str):
+                errors.append(f"'agents.{role}.command' must be a string")
+            elif isinstance(command, str) and not command.strip():
+                errors.append(f"'agents.{role}.command' is empty")
+
     # Validate model_patterns if present
     all_patterns: list[tuple[str, list[str]]] = []
     for role in ["lead", "reviewer"]:
@@ -112,6 +142,28 @@ def validate_config(config: dict) -> list[str]:
                     )
 
     return errors
+
+
+def get_launch_commands(config: dict) -> tuple[str, str]:
+    """Extract launch commands for lead and reviewer agents.
+
+    Uses the optional 'command' field from each agent config,
+    falling back to the lowercase agent name.
+
+    Args:
+        config: Parsed config dict
+
+    Returns:
+        (lead_command, reviewer_command) tuple
+    """
+    agents = config.get("agents", {})
+    lead = agents.get("lead", {}) if isinstance(agents.get("lead"), dict) else {}
+    reviewer = agents.get("reviewer", {}) if isinstance(agents.get("reviewer"), dict) else {}
+
+    lead_cmd = lead.get("command") or (lead.get("name") or "claude").lower()
+    reviewer_cmd = reviewer.get("command") or (reviewer.get("name") or "codex").lower()
+
+    return lead_cmd, reviewer_cmd
 
 
 def get_agent_names(config: dict) -> tuple[str | None, str | None]:

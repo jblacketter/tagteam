@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, call
 
 import pytest
 
@@ -14,6 +14,7 @@ from ai_handoff.iterm import (
     get_session_contents,
     session_id_is_valid,
     iterm_is_running,
+    create_session,
 )
 from ai_handoff.watcher import _check_idle_patterns
 
@@ -122,6 +123,78 @@ class TestOsascriptCalls:
 
         mock_osascript.return_value = "false"
         assert iterm_is_running() is False
+
+
+class TestCreateSessionLaunch:
+    """Tests for create_session with --launch flag."""
+
+    @patch("ai_handoff.iterm.write_text_to_session")
+    @patch("ai_handoff.iterm._osascript")
+    def test_launch_sends_raw_commands_after_session_file(
+        self, mock_osascript, mock_write_text, tmp_path
+    ):
+        """Launch commands must be sent after session file exists,
+        and must NOT be double-escaped (regression test)."""
+        mock_osascript.return_value = "lead-id,watcher-id,reviewer-id"
+        mock_write_text.return_value = True
+
+        # Write config with quoted command args
+        config_file = tmp_path / "ai-handoff.yaml"
+        config_file.write_text(
+            "agents:\n"
+            "  lead:\n"
+            "    name: Claude\n"
+            '    command: claude --model "opus"\n'
+            "  reviewer:\n"
+            "    name: Codex\n"
+            '    command: codex --approval-mode "full-auto"\n'
+        )
+
+        result = create_session(str(tmp_path), launch=True)
+        assert result is True
+
+        # Session file must exist before write_text calls
+        session_file = tmp_path / ".handoff-session.json"
+        assert session_file.exists()
+
+        # Verify raw commands were passed (no pre-escaping)
+        # 5 calls: lead launch, reviewer launch, watcher launch, lead prime, reviewer prime
+        calls = mock_write_text.call_args_list
+        assert len(calls) == 5
+
+        # Lead gets raw command with quotes intact
+        assert calls[0] == call("lead-id", 'claude --model "opus"')
+        # Reviewer gets raw command with quotes intact
+        assert calls[1] == call("reviewer-id", 'codex --approval-mode "full-auto"')
+        # Watcher
+        assert calls[2] == call(
+            "watcher-id", "python -m ai_handoff watch --mode iterm2"
+        )
+        # Auto-prime messages sent to lead and reviewer
+        from ai_handoff.session import PRIME_MESSAGE
+        assert calls[3] == call("lead-id", PRIME_MESSAGE)
+        assert calls[4] == call("reviewer-id", PRIME_MESSAGE)
+
+    @patch("ai_handoff.iterm.write_text_to_session")
+    @patch("ai_handoff.iterm._osascript")
+    def test_launch_false_does_not_send_commands(
+        self, mock_osascript, mock_write_text, tmp_path
+    ):
+        mock_osascript.return_value = "lead-id,watcher-id,reviewer-id"
+
+        result = create_session(str(tmp_path), launch=False)
+        assert result is True
+        mock_write_text.assert_not_called()
+
+    @patch("ai_handoff.iterm._osascript")
+    def test_launch_without_config_falls_back(self, mock_osascript, tmp_path):
+        """If ai-handoff.yaml is missing, launch degrades to no-launch."""
+        mock_osascript.return_value = "lead-id,watcher-id,reviewer-id"
+
+        result = create_session(str(tmp_path), launch=True)
+        assert result is True
+        # Session created but no launch commands sent (only the creation script)
+        assert mock_osascript.call_count == 1
 
 
 class TestCheckIdlePatterns:

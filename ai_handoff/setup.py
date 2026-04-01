@@ -27,6 +27,42 @@ def get_data_dir() -> Path:
     return Path(__file__).parent / "data"
 
 
+def needs_setup(project_dir: str = ".") -> bool:
+    """Check if framework setup is needed.
+
+    Setup is considered complete when all of these exist:
+    - .claude/skills/handoff/SKILL.md (skill directory)
+    - templates/ directory with at least one .md file
+    - docs/checklists/ directory with at least one .md file
+
+    Intentionally excludes project-specific docs (roadmap, decision_log,
+    workflows) which may be edited or removed by users.
+    """
+    target = Path(project_dir)
+
+    skill = target / ".claude" / "skills" / "handoff" / "SKILL.md"
+    if not skill.exists():
+        return True
+
+    templates = target / "templates"
+    if not templates.exists() or not any(templates.glob("*.md")):
+        return True
+
+    checklists = target / "docs" / "checklists"
+    if not checklists.exists() or not any(checklists.glob("*.md")):
+        return True
+
+    return False
+
+
+def run_setup(project_dir: str = ".") -> None:
+    """Idempotent setup wrapper. Skips if setup is already complete."""
+    if not needs_setup(project_dir):
+        print("Framework files already present — skipping setup.")
+        return
+    main(project_dir)
+
+
 def main(target_dir: str = ".") -> None:
     """
     Copy framework files to the target project directory.
@@ -172,9 +208,9 @@ def main(target_dir: str = ".") -> None:
     print("Setup complete!")
     print()
     print("Next steps:")
-    print("  1. Run 'python -m ai_handoff init' to configure your agents")
-    print("  2. Tell your AI: 'Read ai-handoff.yaml to see your role, then read .claude/skills/handoff/SKILL.md'")
-    print("  3. Then ask your AI to run /handoff status or /handoff start [phase]")
+    print("  Quick start:  python -m ai_handoff quickstart --dir .")
+    print("  Or manually:  python -m ai_handoff init")
+    print("                python -m ai_handoff session start --dir . --launch")
 
 
 def cli():

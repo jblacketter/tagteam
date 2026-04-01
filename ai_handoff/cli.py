@@ -30,16 +30,13 @@ agents:
 GETTING_STARTED = """
 Getting Started
 ===============
-Tell your AI agent:
+Start a session with agents and watcher:
 
-  "Read ai-handoff.yaml to see your role, then read .claude/skills/ for the workflow."
+  python -m ai_handoff session start --dir . --launch
 
-Workflow:
-  1. Lead creates phase plans (/handoff-plan create [phase])
-  2. Lead creates handoffs for review (/handoff-handoff plan [phase])
-  3. Reviewer reviews and provides feedback (/handoff-review plan [phase])
-  4. Lead addresses feedback or proceeds to implementation
-  5. Repeat for implementation review
+Or use quickstart (runs setup + init + session in one command):
+
+  python -m ai_handoff quickstart --dir .
 """
 
 
@@ -80,6 +77,36 @@ def write_config(target_dir: str, lead_name: str, reviewer_name: str) -> Path:
     )
     config_path.write_text(config_content, encoding="utf-8")
     return config_path
+
+
+def needs_init(project_dir: str = ".") -> bool:
+    """Check if agent configuration is needed."""
+    return not (Path(project_dir) / "ai-handoff.yaml").exists()
+
+
+def run_init(project_dir: str = ".") -> bool:
+    """Run interactive init if config is missing. Requires TTY.
+
+    Returns True if init succeeded or was skipped (already configured).
+    Returns False if init could not run (non-TTY).
+    """
+    if not needs_init(project_dir):
+        print("Agent configuration already exists — skipping init.")
+        return True
+
+    if not sys.stdin.isatty():
+        print("Error: No ai-handoff.yaml found and stdin is not interactive.")
+        print("  Run 'python -m ai_handoff init' interactively first.")
+        return False
+
+    import os
+    original_dir = os.getcwd()
+    try:
+        os.chdir(project_dir)
+        init_command()
+    finally:
+        os.chdir(original_dir)
+    return True
 
 
 def init_command() -> int:
@@ -162,6 +189,63 @@ def setup_command(target_dir: str = ".") -> int:
     return 0
 
 
+def quickstart_command(args: list[str]) -> int:
+    """Run setup + init + session start in one command."""
+    from ai_handoff.setup import run_setup
+    from ai_handoff.session import ensure_session
+
+    # Parse args
+    project_dir = "."
+    backend = "iterm2"
+    i = 0
+    while i < len(args):
+        if args[i] == "--dir" and i + 1 < len(args):
+            project_dir = args[i + 1]
+            i += 2
+        elif args[i] == "--backend" and i + 1 < len(args):
+            backend = args[i + 1]
+            i += 2
+        else:
+            i += 1
+
+    if backend not in ("iterm2", "tmux"):
+        print(f"Invalid backend: {backend}. Use 'iterm2' or 'tmux'.")
+        return 1
+
+    project_dir = str(Path(project_dir).resolve())
+
+    print("AI Handoff — Quick Start")
+    print("========================")
+    print(f"Project: {project_dir}")
+    print()
+
+    # Step 1: Setup
+    print("[1/3] Framework setup...")
+    run_setup(project_dir)
+    print()
+
+    # Step 2: Init
+    print("[2/3] Agent configuration...")
+    if not run_init(project_dir):
+        return 1
+    print()
+
+    # Step 3: Session
+    print("[3/3] Starting session...")
+    outcome = ensure_session(project_dir, backend, launch=True)
+    if outcome == "error":
+        return 1
+
+    print()
+    if outcome == "created":
+        print("Ready! Tell each agent:")
+        print('  "Read ai-handoff.yaml to see your role, then read .claude/skills/handoff/SKILL.md"')
+    elif outcome == "exists":
+        print("Session already running. Switch to it to continue.")
+
+    return 0
+
+
 def upgrade_command() -> int:
     """Re-run setup on all registered projects."""
     from ai_handoff.registry import get_registered_projects
@@ -206,39 +290,29 @@ AI Handoff Framework
 
 Usage: python -m ai_handoff <command>
 
+Quick start:
+  python -m ai_handoff quickstart --dir ~/projects/myproject
+
+  This runs setup, agent configuration, and session start in one command.
+
 Commands:
+  quickstart    Setup + init + session start in one command
   init          Create ai-handoff.yaml configuration interactively
   setup [dir]   Copy framework files to a project directory
-  migrate       Migrate legacy projects to use ai-handoff.yaml
+  session       Manage orchestration session (start/kill/attach)
   watch         Start the watcher daemon for automated orchestration
+  state         View or update the orchestration state file
   roadmap       Query roadmap phases and build execution queue
   cycle         Manage cycle documents (init, add, status, rounds, render)
-  state         View or update the orchestration state file
-  session       Manage orchestration session (start/kill)
   serve         Start the web dashboard server
   tui           Launch the Handoff Saloon terminal UI
+  migrate       Migrate legacy projects to use ai-handoff.yaml
   upgrade       Re-run setup on all registered projects (after pip upgrade)
 
-Workflow:
-  1. Run 'python -m ai_handoff setup' to copy framework files
-  2. Run 'python -m ai_handoff init' to configure your agents
-  3. Start your AI with the getting started prompt
-
-Automated orchestration (iTerm2):
-  1. Run 'python -m ai_handoff session start --dir ~/projects/myproject'
-  2. Start Claude Code in the Lead tab, Codex in the Reviewer tab
-  3. Press Enter in the Watcher tab to begin monitoring
-
-  Use --backend tmux for legacy tmux-based orchestration.
-
-Dashboard:
-  Run 'python -m ai_handoff serve --dir ~/projects/myproject' to open
-  the Handoff Saloon dashboard at http://localhost:8080
-  For a new project, the Mayor will guide you through setup.
-
-Terminal UI:
-  Run 'python -m ai_handoff tui --dir ~/projects/myproject' to open
-  the Handoff Saloon in your terminal (requires: pip install ai-handoff[tui])
+Advanced setup (individual steps):
+  python -m ai_handoff setup ~/projects/myproject
+  python -m ai_handoff init
+  python -m ai_handoff session start --dir ~/projects/myproject --launch
 """
 
 
@@ -250,7 +324,9 @@ def main() -> int:
 
     command = sys.argv[1].lower()
 
-    if command == "init":
+    if command == "quickstart":
+        return quickstart_command(sys.argv[2:])
+    elif command == "init":
         return init_command()
     elif command == "setup":
         target = sys.argv[2] if len(sys.argv) > 2 else "."

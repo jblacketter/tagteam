@@ -2,6 +2,8 @@
 
 import pytest
 
+pytest.importorskip("textual", reason="textual not installed; run `pip install ai-handoff[tui]`")
+
 from ai_handoff.tui.review_dialogue import strip_markdown, _chunk_text
 
 
