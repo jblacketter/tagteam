@@ -211,6 +211,9 @@ def main(target_dir: str = ".") -> None:
     print("  Quick start:  python -m ai_handoff quickstart --dir .")
     print("  Or manually:  python -m ai_handoff init")
     print("                python -m ai_handoff session start --dir . --launch")
+    print("  Windows/manual fallback:")
+    print("                python -m ai_handoff session start --dir . --backend manual")
+    print("                python -m ai_handoff watch --mode notify")
 
 
 def cli():

@@ -1,63 +1,126 @@
 """
 Session management for handoff orchestration.
 
-Supports two backends:
-- iterm2 (default): Creates iTerm2 tabs via AppleScript
-- tmux: Creates tmux session with named panes (legacy)
+Supports three backends:
+- iterm2: Creates iTerm2 tabs via AppleScript on macOS
+- tmux: Creates a tmux session with named panes
+- manual: Prints the commands for a manual multi-terminal workflow
 """
 
+from __future__ import annotations
+
+import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 SESSION_NAME = "ai-handoff"
-PRIME_MESSAGE = ("Read ai-handoff.yaml to see your role, then read"
-                 " .claude/skills/handoff/SKILL.md for the workflow.")
+SUPPORTED_BACKENDS = ("iterm2", "tmux", "manual")
+PRIME_MESSAGE = (
+    "Read ai-handoff.yaml to see your role, then read"
+    " .claude/skills/handoff/SKILL.md for the workflow."
+)
 
 
-# --- tmux backend ---
+def _backend_choices_text() -> str:
+    return "'iterm2', 'tmux', or 'manual'"
+
 
 def _tmux(*args: str, check: bool = True) -> subprocess.CompletedProcess:
     """Run a tmux command."""
     return subprocess.run(
         ["tmux", *args],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
         check=check,
     )
 
 
+def _iterm2_supported() -> bool:
+    return sys.platform == "darwin" and shutil.which("osascript") is not None
+
+
+def _tmux_supported() -> bool:
+    return shutil.which("tmux") is not None
+
+
+def default_backend() -> str:
+    """Choose the best available session backend for this machine."""
+    if _iterm2_supported():
+        return "iterm2"
+    if _tmux_supported():
+        return "tmux"
+    return "manual"
+
+
 def session_exists() -> bool:
-    result = _tmux("has-session", "-t", SESSION_NAME, check=False)
+    """Return True when the default tmux session exists."""
+    try:
+        result = _tmux("has-session", "-t", SESSION_NAME, check=False)
+    except FileNotFoundError:
+        return False
     return result.returncode == 0
+
+
+def _print_invalid_backend(backend: str) -> None:
+    print(f"Invalid backend: {backend}. Use {_backend_choices_text()}.")
+
+
+def _print_backend_unavailable(backend: str) -> None:
+    if backend == "iterm2":
+        if sys.platform != "darwin":
+            print("iTerm2 session management is only available on macOS.")
+        else:
+            print("iTerm2 session management requires AppleScript and iTerm2.")
+        print("  Use '--backend manual' for the manual workflow.")
+        if _tmux_supported():
+            print("  Or use '--backend tmux' if you prefer tmux.")
+        return
+
+    if backend == "tmux":
+        print("tmux session management is not available on this platform.")
+        print("  Use '--backend manual' for manual coordination.")
+        if sys.platform.startswith("win"):
+            print("  For full automation on Windows today, run under WSL with tmux.")
+        else:
+            print("  Or install tmux and retry.")
+
+
+def _validate_backend(backend: str) -> bool:
+    if backend not in SUPPORTED_BACKENDS:
+        _print_invalid_backend(backend)
+        return False
+
+    if backend == "iterm2" and not _iterm2_supported():
+        _print_backend_unavailable("iterm2")
+        return False
+
+    if backend == "tmux" and not _tmux_supported():
+        _print_backend_unavailable("tmux")
+        return False
+
+    return True
 
 
 def _read_launch_commands(project_dir: str | None) -> tuple[str, str] | None:
     """Read launch commands from ai-handoff.yaml via centralized config."""
     try:
-        from ai_handoff.config import read_config, get_launch_commands
+        from ai_handoff.config import get_launch_commands, read_config
     except ImportError:
         return None
+
     config_path = Path(project_dir or ".") / "ai-handoff.yaml"
     config = read_config(config_path)
     if not config:
-        print("Warning: ai-handoff.yaml not found — skipping auto-launch.")
+        print("Warning: ai-handoff.yaml not found; skipping auto-launch.")
         print("  Run 'python -m ai_handoff init' to create it.")
         return None
     return get_launch_commands(config)
 
 
 def create_tmux_session(project_dir: str | None = None, launch: bool = False) -> bool:
-    """Create tmux session with lead, watcher, and reviewer panes.
-
-    Layout (3 equal columns):
-        ┌──────────┬──────────┬──────────┐
-        │ 0: lead  │ 1: watch │ 2: review│
-        └──────────┴──────────┴──────────┘
-
-    Enables mouse mode so you can click to switch panes
-    (TUI agents capture Ctrl-b, making keyboard navigation unreliable).
-    """
+    """Create a tmux session with lead, watcher, and reviewer panes."""
     if session_exists():
         print(f"Session '{SESSION_NAME}' already exists.")
         print(f"  Attach: tmux attach -t {SESSION_NAME}")
@@ -67,146 +130,162 @@ def create_tmux_session(project_dir: str | None = None, launch: bool = False) ->
     start_dir = project_dir or "."
 
     try:
-        # Create session with lead pane (pane 0)
-        _tmux("new-session", "-d", "-s", SESSION_NAME, "-n", "handoff",
-              "-c", start_dir)
-
-        # Split right for watcher (pane 1)
-        _tmux("split-window", "-h", "-t", f"{SESSION_NAME}:0.0",
-              "-c", start_dir)
-
-        # Split right again for reviewer (pane 2)
-        _tmux("split-window", "-h", "-t", f"{SESSION_NAME}:0.1",
-              "-c", start_dir)
-
-        # Even out the columns
+        _tmux("new-session", "-d", "-s", SESSION_NAME, "-n", "handoff", "-c", start_dir)
+        _tmux("split-window", "-h", "-t", f"{SESSION_NAME}:0.0", "-c", start_dir)
+        _tmux("split-window", "-h", "-t", f"{SESSION_NAME}:0.1", "-c", start_dir)
         _tmux("select-layout", "-t", f"{SESSION_NAME}:0", "even-horizontal")
 
-        # Label panes
         _tmux("select-pane", "-t", f"{SESSION_NAME}:0.0", "-T", "CLAUDE (Lead)")
         _tmux("select-pane", "-t", f"{SESSION_NAME}:0.1", "-T", "WATCHER")
         _tmux("select-pane", "-t", f"{SESSION_NAME}:0.2", "-T", "CODEX (Reviewer)")
 
-        # Show pane titles in borders
         _tmux("set-option", "-t", SESSION_NAME, "pane-border-status", "top")
-        _tmux("set-option", "-t", SESSION_NAME, "pane-border-format",
-              " #{pane_title} ")
-
-        # Enable mouse mode — click to switch panes
-        # (TUI agents like Claude Code/Codex capture Ctrl-b)
+        _tmux("set-option", "-t", SESSION_NAME, "pane-border-format", " #{pane_title} ")
         _tmux("set-option", "-t", SESSION_NAME, "mouse", "on")
 
+        cmds = None
         if launch:
             cmds = _read_launch_commands(project_dir)
             if cmds:
                 lead_cmd, reviewer_cmd = cmds
-                # Launch lead agent
-                _tmux("send-keys", "-t", f"{SESSION_NAME}:0.0",
-                      lead_cmd, "Enter")
-                # Launch watcher
-                _tmux("send-keys", "-t", f"{SESSION_NAME}:0.1",
-                      "python -m ai_handoff watch --mode tmux", "Enter")
-                # Launch reviewer agent
-                _tmux("send-keys", "-t", f"{SESSION_NAME}:0.2",
-                      reviewer_cmd, "Enter")
-                # Auto-prime agents after they boot
+                _tmux("send-keys", "-t", f"{SESSION_NAME}:0.0", lead_cmd, "Enter")
+                _tmux(
+                    "send-keys",
+                    "-t",
+                    f"{SESSION_NAME}:0.1",
+                    "python -m ai_handoff watch --mode tmux",
+                    "Enter",
+                )
+                _tmux("send-keys", "-t", f"{SESSION_NAME}:0.2", reviewer_cmd, "Enter")
                 print("  Waiting for agents to start before priming...")
                 time.sleep(3)
-                _tmux("send-keys", "-t", f"{SESSION_NAME}:0.0",
-                      PRIME_MESSAGE, "Enter")
+                _tmux("send-keys", "-t", f"{SESSION_NAME}:0.0", PRIME_MESSAGE, "Enter")
                 time.sleep(1)
-                _tmux("send-keys", "-t", f"{SESSION_NAME}:0.2",
-                      PRIME_MESSAGE, "Enter")
+                _tmux("send-keys", "-t", f"{SESSION_NAME}:0.2", PRIME_MESSAGE, "Enter")
             else:
-                # Fallback: pre-type watcher command without executing
-                _tmux("send-keys", "-t", f"{SESSION_NAME}:0.1",
-                      "python -m ai_handoff watch --mode tmux", "")
+                _tmux(
+                    "send-keys",
+                    "-t",
+                    f"{SESSION_NAME}:0.1",
+                    "python -m ai_handoff watch --mode tmux",
+                    "",
+                )
         else:
-            # Pre-type the watcher command (don't auto-start)
-            _tmux("send-keys", "-t", f"{SESSION_NAME}:0.1",
-                  "python -m ai_handoff watch --mode tmux", "")
+            _tmux(
+                "send-keys",
+                "-t",
+                f"{SESSION_NAME}:0.1",
+                "python -m ai_handoff watch --mode tmux",
+                "",
+            )
 
-        # Select the lead pane
         _tmux("select-pane", "-t", f"{SESSION_NAME}:0.0")
 
         launched = " (launched)" if launch else ""
         print(f"Created tmux session '{SESSION_NAME}'{launched}")
         print()
         if launch and cmds:
-            print(f"  Pane 0 (left):   Lead agent   - {lead_cmd}")
+            print(f"  Pane 0 (left):   Lead agent   - {cmds[0]}")
             print("  Pane 1 (center): Watcher      - running")
-            print(f"  Pane 2 (right):  Reviewer     - {reviewer_cmd}")
+            print(f"  Pane 2 (right):  Reviewer     - {cmds[1]}")
         else:
             print("  Pane 0 (left):   Lead agent   - start your lead agent here")
             print("  Pane 1 (center): Watcher      - press Enter to start")
             print("  Pane 2 (right):  Reviewer     - start your reviewer agent here")
         print()
-        print("  Mouse mode is ON — click a pane to switch to it")
+        print("  Mouse mode is ON; click a pane to switch to it")
         print()
         print(f"  Attach: tmux attach -t {SESSION_NAME}")
         return True
 
     except FileNotFoundError:
-        print("Error: tmux is not installed.")
-        print("  Install: brew install tmux")
+        _print_backend_unavailable("tmux")
         return False
-    except subprocess.CalledProcessError as e:
-        print(f"Error creating session: {e.stderr.strip()}")
+    except subprocess.CalledProcessError as exc:
+        print(f"Error creating session: {exc.stderr.strip()}")
         return False
 
 
-# Keep old name as alias for backward compatibility
-create_session = create_tmux_session
+def create_manual_session(project_dir: str | None = None, launch: bool = False) -> bool:
+    """Print instructions for a manual multi-terminal workflow."""
+    start_dir = str(Path(project_dir or ".").resolve())
+    cmds = _read_launch_commands(project_dir) if launch else None
+
+    print("Manual session backend selected.")
+    print(f"  Project: {start_dir}")
+    if launch:
+        print("  Auto-launch is not available for the manual backend.")
+    print()
+    print("Open three terminals in this project directory and run:")
+
+    if cmds:
+        lead_cmd, reviewer_cmd = cmds
+        print(f"  Lead terminal:     {lead_cmd}")
+        print("  Watcher terminal:  python -m ai_handoff watch --mode notify")
+        print(f"  Reviewer terminal: {reviewer_cmd}")
+        print()
+        print("Then send both agents this priming message:")
+        print(f'  "{PRIME_MESSAGE}"')
+    else:
+        print("  Lead terminal:     start your lead agent")
+        print("  Watcher terminal:  python -m ai_handoff watch --mode notify")
+        print("  Reviewer terminal: start your reviewer agent")
+
+    print()
+    print("The watcher will log turn changes and the command to run next.")
+    print("For automated terminal orchestration, use macOS + iTerm2 or tmux on PATH.")
+    if sys.platform.startswith("win"):
+        print("On Windows today, WSL + tmux is the supported automation path.")
+    return True
 
 
-# --- ensure_session: idempotent session creation ---
 
 def ensure_session(
     project_dir: str,
-    backend: str = "iterm2",
+    backend: str | None = None,
     launch: bool = False,
 ) -> str:
-    """Create or reuse a session. Returns outcome string.
-
-    Returns one of:
-      "created"  — new session created (and launched if launch=True)
-      "exists"   — session already exists
-      "error"    — session creation failed
-    """
-    if backend not in ("iterm2", "tmux"):
-        print(f"Invalid backend: {backend}. Use 'iterm2' or 'tmux'.")
+    """Create or reuse a session. Returns one of: created, exists, manual, error."""
+    backend = backend or default_backend()
+    if not _validate_backend(backend):
         return "error"
+
+    if backend == "manual":
+        ok = create_manual_session(project_dir=project_dir, launch=launch)
+        return "manual" if ok else "error"
 
     if backend == "tmux":
         if session_exists():
-            print(f"Session '{SESSION_NAME}' already exists — attaching.")
+            print(f"Session '{SESSION_NAME}' already exists; attaching.")
             subprocess.run(["tmux", "attach", "-t", SESSION_NAME])
             return "exists"
         ok = create_tmux_session(project_dir=project_dir, launch=launch)
         return "created" if ok else "error"
 
-    else:  # iterm2
-        from ai_handoff.iterm import _read_session_file, create_session as create_iterm_session
-        existing = _read_session_file(project_dir)
-        if existing:
-            print("iTerm2 session already exists — skipping session creation.")
-            return "exists"
-        ok = create_iterm_session(project_dir, launch=launch)
-        return "created" if ok else "error"
+    from ai_handoff.iterm import _read_session_file, create_session as create_iterm_session
+
+    existing = _read_session_file(project_dir)
+    if existing:
+        print("iTerm2 session already exists; skipping session creation.")
+        return "exists"
+
+    ok = create_iterm_session(project_dir, launch=launch)
+    return "created" if ok else "error"
 
 
-# --- CLI entry point ---
-
-def _parse_backend(args: list[str]) -> tuple[str, list[str]]:
+def _parse_backend(args: list[str]) -> tuple[str | None, list[str]]:
     """Extract --backend flag from args, return (backend, remaining_args)."""
-    backend = "iterm2"
+    backend = None
     remaining = []
     i = 0
     while i < len(args):
-        if args[i] == "--backend" and i + 1 < len(args):
+        if args[i] == "--backend":
+            if i + 1 >= len(args):
+                print("--backend requires a value.")
+                sys.exit(1)
             backend = args[i + 1]
-            if backend not in ("iterm2", "tmux"):
-                print(f"Invalid backend: {backend}. Use 'iterm2' or 'tmux'.")
+            if backend not in SUPPORTED_BACKENDS:
+                _print_invalid_backend(backend)
                 sys.exit(1)
             i += 2
         else:
@@ -221,14 +300,17 @@ def session_command(args: list[str]) -> int:
         print("Usage: python -m ai_handoff session <command> [options]")
         print()
         print("Commands:")
-        print("  start   Create session with lead/reviewer/watcher tabs (default: iTerm2)")
-        print("  kill    Kill the session")
-        print("  attach  Attach to existing tmux session (tmux backend only)")
+        print("  start   Create or describe an orchestration session")
+        print("  kill    Kill the managed tmux/iTerm2 session")
+        print("  attach  Attach to an existing tmux session")
         print()
         print("Options:")
-        print("  --backend iterm2|tmux  Backend to use (default: iterm2)")
-        print("  --dir PATH            Project directory")
-        print("  --launch              Auto-start agents and watcher (reads ai-handoff.yaml)")
+        print(
+            "  --backend iterm2|tmux|manual  Backend to use"
+            " (default: auto-detect)"
+        )
+        print("  --dir PATH                    Project directory")
+        print("  --launch                      Auto-start agents when supported")
         return 1
 
     backend, remaining = _parse_backend(args)
@@ -248,13 +330,15 @@ def session_command(args: list[str]) -> int:
             else:
                 i += 1
 
-        # Auto-run setup+init if --launch and prerequisites missing
         if launch:
             resolved_dir = project_dir or "."
             from ai_handoff.setup import needs_setup, run_setup
+
             if needs_setup(resolved_dir):
                 run_setup(resolved_dir)
+
             from ai_handoff.cli import needs_init, run_init
+
             if needs_init(resolved_dir):
                 if not run_init(resolved_dir):
                     print("Continuing without --launch (no config).")
@@ -263,10 +347,17 @@ def session_command(args: list[str]) -> int:
         outcome = ensure_session(project_dir or ".", backend, launch=launch)
         return 0 if outcome != "error" else 1
 
+    effective_backend = backend or default_backend()
+
     if subcmd == "attach":
-        if backend == "iterm2":
+        if effective_backend == "iterm2":
             print("The 'attach' command is not needed for iTerm2 (tabs are already visible).")
             return 0
+        if effective_backend == "manual":
+            print("The manual backend does not manage terminal sessions to attach to.")
+            return 0
+        if not _validate_backend(effective_backend):
+            return 1
         if not session_exists():
             print(f"No session '{SESSION_NAME}' found. Run 'session start' first.")
             return 1
@@ -274,18 +365,26 @@ def session_command(args: list[str]) -> int:
         return 0
 
     if subcmd == "kill":
-        if backend == "iterm2":
+        if effective_backend == "iterm2":
             from ai_handoff.iterm import kill_session
+
             project_dir = None
-            if len(remaining) > 1 and remaining[1] == "--dir" and len(remaining) > 2:
+            if len(remaining) > 2 and remaining[1] == "--dir":
                 project_dir = remaining[2]
             kill_session(project_dir or ".")
-        else:
-            if not session_exists():
-                print(f"No session '{SESSION_NAME}' found.")
-                return 0
-            _tmux("kill-session", "-t", SESSION_NAME)
-            print(f"Session '{SESSION_NAME}' killed.")
+            return 0
+
+        if effective_backend == "manual":
+            print("The manual backend does not create managed sessions to kill.")
+            return 0
+
+        if not _validate_backend(effective_backend):
+            return 1
+        if not session_exists():
+            print(f"No session '{SESSION_NAME}' found.")
+            return 0
+        _tmux("kill-session", "-t", SESSION_NAME)
+        print(f"Session '{SESSION_NAME}' killed.")
         return 0
 
     print(f"Unknown session subcommand: {subcmd}")

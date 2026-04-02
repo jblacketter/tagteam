@@ -1,9 +1,6 @@
 """Tests for quickstart command and onboarding helpers."""
 
-from pathlib import Path
-from unittest.mock import patch, MagicMock
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from ai_handoff.setup import needs_setup, run_setup
 from ai_handoff.cli import needs_init, run_init, quickstart_command
@@ -133,6 +130,15 @@ class TestQuickstart:
         result = quickstart_command(["--dir", str(tmp_path)])
         assert result == 0
 
+    @patch("ai_handoff.session.ensure_session", return_value="manual")
+    @patch("ai_handoff.cli.run_init", return_value=True)
+    @patch("ai_handoff.setup.run_setup")
+    def test_manual_session_returns_success(
+        self, mock_setup, mock_init, mock_session, tmp_path
+    ):
+        result = quickstart_command(["--dir", str(tmp_path)])
+        assert result == 0
+
     @patch("ai_handoff.session.ensure_session", return_value="error")
     @patch("ai_handoff.cli.run_init", return_value=True)
     @patch("ai_handoff.setup.run_setup")
@@ -156,9 +162,12 @@ class TestQuickstart:
 # --- ensure_session tests ---
 
 class TestEnsureSession:
+    @patch("ai_handoff.session._tmux_supported", return_value=True)
     @patch("ai_handoff.session.subprocess")
     @patch("ai_handoff.session.session_exists", return_value=True)
-    def test_existing_tmux_attaches_and_returns_exists(self, mock_exists, mock_subprocess):
+    def test_existing_tmux_attaches_and_returns_exists(
+        self, mock_exists, mock_subprocess, mock_tmux_supported
+    ):
         from ai_handoff.session import ensure_session
         result = ensure_session(".", "tmux", launch=False)
         assert result == "exists"
@@ -167,23 +176,50 @@ class TestEnsureSession:
         call_args = mock_subprocess.run.call_args[0][0]
         assert "attach" in call_args
 
+    @patch("ai_handoff.session._tmux_supported", return_value=True)
     @patch("ai_handoff.session.create_tmux_session", return_value=True)
     @patch("ai_handoff.session.session_exists", return_value=False)
-    def test_new_tmux_returns_created(self, mock_exists, mock_create):
+    def test_new_tmux_returns_created(self, mock_exists, mock_create, mock_tmux_supported):
         from ai_handoff.session import ensure_session
         result = ensure_session(".", "tmux", launch=False)
         assert result == "created"
 
+    @patch("ai_handoff.session._iterm2_supported", return_value=True)
     @patch("ai_handoff.iterm._read_session_file", return_value={"tabs": {}})
-    def test_existing_iterm_returns_exists(self, mock_read):
+    def test_existing_iterm_returns_exists(self, mock_read, mock_iterm_supported):
         from ai_handoff.session import ensure_session
         result = ensure_session(".", "iterm2", launch=False)
         assert result == "exists"
+
+    @patch("ai_handoff.session.create_manual_session", return_value=True)
+    def test_manual_backend_returns_manual(self, mock_manual):
+        from ai_handoff.session import ensure_session
+        result = ensure_session(".", "manual", launch=False)
+        assert result == "manual"
 
     def test_invalid_backend_returns_error(self):
         from ai_handoff.session import ensure_session
         result = ensure_session(".", "invalid", launch=False)
         assert result == "error"
+
+    @patch("ai_handoff.session.shutil.which", return_value=None)
+    def test_unavailable_tmux_returns_error(self, mock_which):
+        from ai_handoff.session import ensure_session
+        result = ensure_session(".", "tmux", launch=False)
+        assert result == "error"
+
+
+class TestSessionBackendDetection:
+    @patch("ai_handoff.session.sys.platform", "win32")
+    @patch("ai_handoff.session.shutil.which", return_value=None)
+    def test_default_backend_falls_back_to_manual(self, mock_which):
+        from ai_handoff.session import default_backend
+        assert default_backend() == "manual"
+
+    @patch("ai_handoff.session._tmux", side_effect=FileNotFoundError)
+    def test_session_exists_returns_false_without_tmux(self, mock_tmux):
+        from ai_handoff.session import session_exists
+        assert session_exists() is False
 
 
 class TestQuickstartValidation:

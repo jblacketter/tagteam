@@ -103,7 +103,7 @@ def write_state(state: dict, project_dir: str | None = None) -> None:
     state["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     tmp_path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
-    tmp_path.rename(path)
+    tmp_path.replace(path)
 
 
 def update_state(updates: dict, project_dir: str | None = None,
