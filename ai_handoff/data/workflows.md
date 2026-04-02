@@ -183,9 +183,9 @@ Use `/handoff-cycle` to reduce manual copy-paste during multi-round reviews. Ins
 │              ▼                                                  │
 │      Lead: /handoff-cycle [phase]  ─► address feedback          │
 │              │                                                  │
-│              └──► (repeat until approved or round 5)            │
+│              └──► (repeat until approved or stale)              │
 │                                                                 │
-│   Round 5 + REQUEST_CHANGES ─► Auto-escalate to human           │
+│   5+ stale rounds (no progress) ─► Auto-escalate to human       │
 └─────────────────────────────────────────────────────────────────┘
 ```
 

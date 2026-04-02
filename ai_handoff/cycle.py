@@ -22,6 +22,10 @@ VALID_ACTIONS = {
 VALID_ROLES = {"lead", "reviewer"}
 VALID_TYPES = {"plan", "impl"}
 
+# Auto-escalate after this many consecutive rounds with no progress
+# (lead re-submitting identical content = stuck, not converging)
+STALE_ROUND_LIMIT = 5
+
 # Status transitions keyed by action (cycle status.json)
 _TRANSITIONS = {
     "SUBMIT_FOR_REVIEW": {"state": "in-progress", "ready_for": "reviewer"},
@@ -56,6 +60,37 @@ def _rounds_path(phase: str, cycle_type: str, project_dir: str) -> Path:
 
 
 # --- Core functions ---
+
+def _count_stale_rounds(phase: str, cycle_type: str, project_dir: str) -> int:
+    """Count consecutive recent rounds with no progress.
+
+    Progress means the lead's SUBMIT_FOR_REVIEW content changed from
+    their previous submission.  If the lead keeps re-submitting identical
+    content, those rounds are "stale" — the cycle is stuck, not converging.
+
+    Returns the number of consecutive stale rounds (from most recent backward).
+    """
+    rounds = read_rounds(phase, cycle_type, project_dir)
+
+    # Extract lead submissions in order
+    submissions = [
+        r["content"] for r in rounds
+        if r["role"] == "lead" and r["action"] == "SUBMIT_FOR_REVIEW"
+    ]
+
+    if len(submissions) < 2:
+        return 0
+
+    # Count consecutive identical submissions from the end
+    stale = 0
+    for i in range(len(submissions) - 1, 0, -1):
+        if submissions[i] == submissions[i - 1]:
+            stale += 1
+        else:
+            break
+
+    return stale
+
 
 def init_cycle(phase: str, cycle_type: str, lead: str, reviewer: str,
                content: str, project_dir: str = ".",
@@ -139,10 +174,15 @@ def add_round(phase: str, cycle_type: str, role: str, action: str,
     status["state"] = transition["state"]
     status["ready_for"] = transition["ready_for"]
 
-    # Round 5 REQUEST_CHANGES auto-escalates
-    if action == "REQUEST_CHANGES" and round_num >= 5:
-        status["state"] = "escalated"
-        status["ready_for"] = "human"
+    # Auto-escalate only when the cycle is stuck (no progress),
+    # not merely because it reached a certain round number.
+    auto_escalate = False
+    if action == "REQUEST_CHANGES":
+        stale = _count_stale_rounds(phase, cycle_type, project_dir)
+        if stale >= STALE_ROUND_LIMIT:
+            auto_escalate = True
+            status["state"] = "escalated"
+            status["ready_for"] = "human"
 
     # Only advance round when caller provides a higher value
     if round_num > status.get("round", 0):
@@ -156,6 +196,7 @@ def add_round(phase: str, cycle_type: str, role: str, action: str,
         _update_handoff_state(
             phase, cycle_type, action, round_num,
             updated_by, project_dir,
+            auto_escalate=auto_escalate,
         )
 
     return status
@@ -163,11 +204,13 @@ def add_round(phase: str, cycle_type: str, role: str, action: str,
 
 def _update_handoff_state(phase: str, cycle_type: str, action: str,
                           round_num: int, updated_by: str,
-                          project_dir: str = ".") -> None:
+                          project_dir: str = ".",
+                          auto_escalate: bool = False) -> None:
     """Update handoff-state.json based on cycle action.
 
-    Handles round-5 auto-escalation: REQUEST_CHANGES at round 5
-    escalates to human arbiter instead of handing back to lead.
+    When auto_escalate is True, REQUEST_CHANGES escalates to human
+    arbiter instead of handing back to lead (triggered by stale-round
+    detection in add_round).
 
     Normalizes state to prevent stale completion metadata from
     previous cycles from persisting.
@@ -176,8 +219,8 @@ def _update_handoff_state(phase: str, cycle_type: str, action: str,
 
     transition = dict(_STATE_TRANSITIONS[action])
 
-    # Round 5 REQUEST_CHANGES auto-escalates
-    if action == "REQUEST_CHANGES" and round_num >= 5:
+    # Stale-round auto-escalation (passed from add_round)
+    if auto_escalate:
         transition = {"status": "escalated"}
 
     updates = {
@@ -193,7 +236,7 @@ def _update_handoff_state(phase: str, cycle_type: str, action: str,
     # to prevent result="approved" or result="roadmap-complete" from previous
     # cycles from persisting when a new cycle begins.
     if action in ("SUBMIT_FOR_REVIEW", "REQUEST_CHANGES"):
-        if round_num < 5:  # Only clear if not auto-escalating
+        if not auto_escalate:
             updates["result"] = None
 
     # Normalize run_mode and roadmap context based on current state.

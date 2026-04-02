@@ -70,7 +70,7 @@ If there is no state file, show: `Phase: — | Type: — | Round: — | Turn: �
 2. Review the referenced plan/implementation files
 3. Choose ONE action (all commands update both cycle and state in one call):
    - **APPROVE:** `python -m ai_handoff cycle add --phase [phase] --type [plan|impl] --role reviewer --action APPROVE --round [N] --updated-by [your-agent-name] --content "Approved."`
-   - **REQUEST_CHANGES:** For detailed feedback, use stdin with a heredoc. At round 5, the system auto-escalates to the human arbiter instead of handing back to lead.
+   - **REQUEST_CHANGES:** For detailed feedback, use stdin with a heredoc. The system auto-escalates to the human arbiter when it detects 5+ consecutive stale rounds (lead re-submitting identical content with no progress).
      ```
      python -m ai_handoff cycle add --phase [phase] --type [plan|impl] --role reviewer --action REQUEST_CHANGES --round [N] --updated-by [your-agent-name] <<'EOF'
      Your detailed feedback here. Backticks, quotes, and special chars are safe.

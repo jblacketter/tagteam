@@ -239,29 +239,51 @@ class TestUpdatedByStateIntegration:
         if state:
             assert state.get("updated_by") != "A"
 
-    def test_round5_request_changes_auto_escalates(self, project):
-        """Regression: REQUEST_CHANGES at round 5 must escalate, not hand back to lead."""
+    def test_round5_with_progress_does_not_escalate(self, project):
+        """Cycles with progress (changing content) should NOT auto-escalate at round 5."""
         from ai_handoff.state import read_state
         init_cycle("p", "plan", "A", "B", "init", project, updated_by="A")
-        # Simulate 4 rounds of back-and-forth
+        # Simulate 4 rounds — each lead submission has different content (progress)
         for r in range(1, 5):
             add_round("p", "plan", "reviewer", "REQUEST_CHANGES", r, f"Fix {r}.",
                       project, updated_by="B")
             add_round("p", "plan", "lead", "SUBMIT_FOR_REVIEW", r + 1, f"v{r+1}.",
                       project, updated_by="A")
-        # Round 5: REQUEST_CHANGES should auto-escalate
-        add_round("p", "plan", "reviewer", "REQUEST_CHANGES", 5, "Still broken.",
-                  project, updated_by="B")
+        # Round 5: REQUEST_CHANGES should NOT auto-escalate (content changed each time)
+        status = add_round("p", "plan", "reviewer", "REQUEST_CHANGES", 5,
+                           "One more thing.", project, updated_by="B")
 
-        # Handoff state should be escalated, not ready/lead
+        # Cycle should still be in-progress, not escalated
+        assert status["state"] == "in-progress"
+        assert status["ready_for"] == "lead"
+
+        state = read_state(project)
+        assert state["status"] == "ready"
+        assert state["turn"] == "lead"
+
+    def test_stale_rounds_auto_escalate(self, project):
+        """Cycles with no progress (identical submissions) SHOULD auto-escalate."""
+        from ai_handoff.state import read_state
+        init_cycle("p", "plan", "A", "B", "same content", project, updated_by="A")
+        # Simulate rounds where the lead keeps submitting identical content
+        for r in range(1, 6):
+            add_round("p", "plan", "reviewer", "REQUEST_CHANGES", r, f"Fix {r}.",
+                      project, updated_by="B")
+            add_round("p", "plan", "lead", "SUBMIT_FOR_REVIEW", r + 1,
+                      "same content",  # identical every time = no progress
+                      project, updated_by="A")
+        # Round 6: REQUEST_CHANGES should auto-escalate (5 stale submissions)
+        status = add_round("p", "plan", "reviewer", "REQUEST_CHANGES", 6,
+                           "Still the same.", project, updated_by="B")
+
+        # Handoff state should be escalated
         state = read_state(project)
         assert state["status"] == "escalated"
         assert "turn" not in state or state.get("turn") != "lead"
 
         # Cycle status should also be escalated
-        cycle_status = read_status("p", "plan", project)
-        assert cycle_status["state"] == "escalated"
-        assert cycle_status["ready_for"] == "human"
+        assert status["state"] == "escalated"
+        assert status["ready_for"] == "human"
 
 
 class TestStaleStateClearing:
