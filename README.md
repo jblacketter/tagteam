@@ -48,12 +48,12 @@ For the least risky Windows flow today:
 
 ```bash
 # Quickstart auto-detects manual backend on Windows
-python -m ai_handoff quickstart --dir .
+python -m ai_handoff quickstart
 
 # Or do each step yourself:
-python -m ai_handoff setup .
+python -m ai_handoff setup
 python -m ai_handoff init
-python -m ai_handoff session start --dir . --backend manual
+python -m ai_handoff session start --backend manual
 python -m ai_handoff watch --mode notify
 ```
 
@@ -95,21 +95,21 @@ python -m ai_handoff watch --mode notify --confirm
 
 ```bash
 cd ~/projects/myproject
-python -m ai_handoff setup .
+python -m ai_handoff setup
 python -m ai_handoff init
-python -m ai_handoff session start --dir . --launch
+python -m ai_handoff session start
 ```
 
 To force the manual backend:
 
 ```bash
-python -m ai_handoff session start --dir . --backend manual
+python -m ai_handoff session start --backend manual
 ```
 
 To create the terminals without auto-launching agents:
 
 ```bash
-python -m ai_handoff session start --dir ~/projects/myproject
+python -m ai_handoff session start --no-launch
 ```
 
 ## The Saloon
@@ -137,9 +137,9 @@ agents:
 ## CLI Reference
 
 ```bash
-python -m ai_handoff quickstart --dir .                  # Setup + init + session start
-python -m ai_handoff session start --dir . --launch      # Auto-detect backend and launch if supported
-python -m ai_handoff session start --dir . --backend manual
+python -m ai_handoff quickstart                          # Setup + init + session start
+python -m ai_handoff session start                       # Auto-detect backend and launch agents
+python -m ai_handoff session start --backend manual
 python -m ai_handoff session kill
 python -m ai_handoff init
 python -m ai_handoff setup .

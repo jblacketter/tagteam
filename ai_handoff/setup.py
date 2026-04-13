@@ -208,11 +208,11 @@ def main(target_dir: str = ".") -> None:
     print("Setup complete!")
     print()
     print("Next steps:")
-    print("  Quick start:  python -m ai_handoff quickstart --dir .")
+    print("  Quick start:  python -m ai_handoff quickstart")
     print("  Or manually:  python -m ai_handoff init")
-    print("                python -m ai_handoff session start --dir . --launch")
+    print("                python -m ai_handoff session start")
     print("  Windows/manual fallback:")
-    print("                python -m ai_handoff session start --dir . --backend manual")
+    print("                python -m ai_handoff session start --backend manual")
     print("                python -m ai_handoff watch --mode notify")
 
 

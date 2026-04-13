@@ -24,7 +24,7 @@ VALID_TYPES = {"plan", "impl"}
 
 # Auto-escalate after this many consecutive rounds with no progress
 # (lead re-submitting identical content = stuck, not converging)
-STALE_ROUND_LIMIT = 5
+STALE_ROUND_LIMIT = 10
 
 # Status transitions keyed by action (cycle status.json)
 _TRANSITIONS = {

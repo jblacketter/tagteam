@@ -32,18 +32,18 @@ agents:
 GETTING_STARTED = """
 Getting Started
 ===============
-Start a session with agents and watcher:
+Start a session with agents and watcher (run from project root):
 
-  python -m ai_handoff session start --dir . --launch
+  python -m ai_handoff session start
 
 If you are on Windows or another unsupported platform, use the manual backend:
 
-  python -m ai_handoff session start --dir . --backend manual
+  python -m ai_handoff session start --backend manual
   python -m ai_handoff watch --mode notify
 
 Or use quickstart (runs setup + init + session with backend auto-detection):
 
-  python -m ai_handoff quickstart --dir .
+  python -m ai_handoff quickstart
 """
 
 
@@ -278,8 +278,8 @@ AI Handoff Framework
 
 Usage: python -m ai_handoff <command>
 
-Quick start:
-  python -m ai_handoff quickstart --dir ~/projects/myproject
+Quick start (from project root):
+  python -m ai_handoff quickstart
 
   This runs setup, agent configuration, and session start in one command.
   The session backend is auto-detected unless you pass --backend.
@@ -298,13 +298,13 @@ Commands:
   migrate       Migrate legacy projects to use ai-handoff.yaml
   upgrade       Re-run setup on all registered projects (after pip upgrade)
 
-Advanced setup (individual steps):
-  python -m ai_handoff setup ~/projects/myproject
+Advanced setup (individual steps, from project root):
+  python -m ai_handoff setup
   python -m ai_handoff init
-  python -m ai_handoff session start --dir ~/projects/myproject --launch
+  python -m ai_handoff session start
 
 Manual workflow fallback:
-  python -m ai_handoff session start --dir ~/projects/myproject --backend manual
+  python -m ai_handoff session start --backend manual
   python -m ai_handoff watch --mode notify
 """
 

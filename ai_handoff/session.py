@@ -309,8 +309,8 @@ def session_command(args: list[str]) -> int:
             "  --backend iterm2|tmux|manual  Backend to use"
             " (default: auto-detect)"
         )
-        print("  --dir PATH                    Project directory")
-        print("  --launch                      Auto-start agents when supported")
+        print("  --dir PATH                    Project directory (default: .)")
+        print("  --no-launch                   Skip auto-starting agents")
         return 1
 
     backend, remaining = _parse_backend(args)
@@ -318,14 +318,16 @@ def session_command(args: list[str]) -> int:
 
     if subcmd == "start":
         project_dir = None
-        launch = False
+        launch = True
         i = 1
         while i < len(remaining):
             if remaining[i] == "--dir" and i + 1 < len(remaining):
                 project_dir = remaining[i + 1]
                 i += 2
             elif remaining[i] == "--launch":
-                launch = True
+                i += 1
+            elif remaining[i] == "--no-launch":
+                launch = False
                 i += 1
             else:
                 i += 1
