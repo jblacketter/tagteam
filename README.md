@@ -17,10 +17,11 @@ pip install git+https://github.com/jblacketter/ai-handoff.git
 ## Quick Start
 
 ```bash
-python -m ai_handoff quickstart --dir ~/projects/myproject
+cd ~/projects/myproject
+python -m ai_handoff quickstart
 ```
 
-This runs framework setup, agent configuration, and session startup.
+This runs framework setup, agent configuration, and session startup (with agents auto-launched) against the current directory. Pass `--dir <path>` to target a different project, or `--backend <name>` to override backend detection.
 
 Session backend selection is automatic:
 
@@ -139,10 +140,11 @@ agents:
 ```bash
 python -m ai_handoff quickstart                          # Setup + init + session start
 python -m ai_handoff session start                       # Auto-detect backend and launch agents
-python -m ai_handoff session start --backend manual
+python -m ai_handoff session start --backend manual   # Force manual backend
+python -m ai_handoff session start --no-launch          # Create terminals but skip agent launch
 python -m ai_handoff session kill
 python -m ai_handoff init
-python -m ai_handoff setup .
+python -m ai_handoff setup
 python -m ai_handoff state
 python -m ai_handoff state diagnose
 python -m ai_handoff watch --mode notify

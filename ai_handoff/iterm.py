@@ -82,9 +82,17 @@ def create_session(project_dir: str, launch: bool = False) -> bool:
     """
     existing = _read_session_file(project_dir)
     if existing:
-        print(f"Session file already exists: {_session_file_path(project_dir)}")
-        print("  Kill first:  python -m ai_handoff session kill")
-        return False
+        if _any_session_alive(existing):
+            print(f"Session file already exists: {_session_file_path(project_dir)}")
+            print("  Kill first:  python -m ai_handoff session kill")
+            return False
+        stale_path = _find_session_file(project_dir) or _session_file_path(project_dir)
+        print(f"Stale session file found (no live iTerm2 tabs): {stale_path}")
+        print("  Removing and creating a fresh session.")
+        try:
+            stale_path.unlink()
+        except OSError:
+            pass
 
     # Resolve launch commands if requested
     lead_cmd = reviewer_cmd = None
@@ -244,6 +252,23 @@ def get_session_contents(session_id: str, last_n_lines: int = 5) -> str:
         return "\n".join(lines[-last_n_lines:])
     except Exception:
         return ""
+
+
+def _any_session_alive(session_data: dict) -> bool:
+    """Return True if at least one tab's session ID is still a live iTerm2 tab.
+
+    Used to distinguish a real live session from a stale .handoff-session.json
+    (e.g. one restored by `git checkout` or left behind after iTerm2 quit).
+    If iTerm2 itself isn't running, the session is definitely not alive.
+    """
+    if not iterm_is_running():
+        return False
+    tabs = (session_data or {}).get("tabs", {})
+    for info in tabs.values():
+        sid = info.get("session_id") if isinstance(info, dict) else None
+        if sid and session_id_is_valid(sid):
+            return True
+    return False
 
 
 def session_id_is_valid(session_id: str) -> bool:

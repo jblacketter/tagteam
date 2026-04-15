@@ -262,12 +262,26 @@ def ensure_session(
         ok = create_tmux_session(project_dir=project_dir, launch=launch)
         return "created" if ok else "error"
 
-    from ai_handoff.iterm import _read_session_file, create_session as create_iterm_session
+    from ai_handoff.iterm import (
+        _any_session_alive,
+        _find_session_file,
+        _read_session_file,
+        _session_file_path,
+        create_session as create_iterm_session,
+    )
 
     existing = _read_session_file(project_dir)
     if existing:
-        print("iTerm2 session already exists; skipping session creation.")
-        return "exists"
+        if _any_session_alive(existing):
+            print("iTerm2 session already exists; skipping session creation.")
+            return "exists"
+        stale_path = _find_session_file(project_dir) or _session_file_path(project_dir)
+        print(f"Stale iTerm2 session file (no live tabs): {stale_path}")
+        print("  Removing and creating a fresh session.")
+        try:
+            stale_path.unlink()
+        except OSError:
+            pass
 
     ok = create_iterm_session(project_dir, launch=launch)
     return "created" if ok else "error"
