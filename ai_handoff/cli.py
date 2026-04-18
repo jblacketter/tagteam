@@ -29,21 +29,38 @@ agents:
     name: {reviewer_name}
 """
 
+HANDOFF_EXPLAINER = """
+How the handoff works:
+
+  Lead (one AI agent) plans each phase and implements the approved plan.
+  Reviewer (a second AI agent) reviews both the plan and the implementation.
+  Arbiter (you, the human) breaks ties and approves phases.
+
+Work progresses phase-by-phase. Each phase is listed in docs/roadmap.md and
+goes through two review cycles: plan, then implementation. If the two agents
+can't make progress in 10 rounds, control escalates to the human arbiter.
+
+State is tracked in handoff-state.json (current turn) and
+docs/handoffs/<phase>_<type>_rounds.jsonl plus <phase>_<type>_status.json
+(per-cycle rounds). Either agent can pick up where the other left off at
+any time.
+"""
+
 GETTING_STARTED = """
 Getting Started
 ===============
 Start a session with agents and watcher (run from project root):
 
-  python -m ai_handoff session start
+  ai-handoff session start
 
 If you are on Windows or another unsupported platform, use the manual backend:
 
-  python -m ai_handoff session start --backend manual
-  python -m ai_handoff watch --mode notify
+  ai-handoff session start --backend manual
+  ai-handoff watch --mode notify
 
 Or use quickstart (runs setup + init + session with backend auto-detection):
 
-  python -m ai_handoff quickstart
+  ai-handoff quickstart
 """
 
 
@@ -83,15 +100,19 @@ def needs_init(project_dir: str = ".") -> bool:
     return not (Path(project_dir) / "ai-handoff.yaml").exists()
 
 
-def run_init(project_dir: str = ".") -> bool:
-    """Run interactive init if config is missing. Requires TTY."""
+def run_init(project_dir: str = ".", show_explainer: bool = False) -> bool:
+    """Run interactive init if config is missing. Requires TTY.
+
+    show_explainer=False by default so callers like quickstart can print the
+    explainer themselves exactly once. Standalone CLI dispatch passes True.
+    """
     if not needs_init(project_dir):
         print("Agent configuration already exists; skipping init.")
         return True
 
     if not sys.stdin.isatty():
         print("Error: No ai-handoff.yaml found and stdin is not interactive.")
-        print("  Run 'python -m ai_handoff init' interactively first.")
+        print("  Run 'ai-handoff init' interactively first.")
         return False
 
     import os
@@ -99,14 +120,18 @@ def run_init(project_dir: str = ".") -> bool:
     original_dir = os.getcwd()
     try:
         os.chdir(project_dir)
-        init_command()
+        init_command(show_explainer=show_explainer)
     finally:
         os.chdir(original_dir)
     return True
 
 
-def init_command() -> int:
-    """Interactive init command to create ai-handoff.yaml."""
+def init_command(show_explainer: bool = True) -> int:
+    """Interactive init command to create ai-handoff.yaml.
+
+    Prompts for two agent names: lead first, reviewer second. No role prompt —
+    order defines role.
+    """
     config_path = Path("ai-handoff.yaml")
 
     print()
@@ -136,36 +161,21 @@ def init_command() -> int:
             return 0
         print()
 
-    print("Enter the names of your two AI agents and their roles.")
+    print("Enter the names of your two AI agents (first is Lead, second is Reviewer).")
     print()
 
-    agent1_name = prompt_input("Agent 1 name: ", lowercase=False)
-    agent1_role = prompt_input("Agent 1 role (lead/reviewer): ", ["lead", "reviewer"])
+    lead_name = prompt_input("Lead agent name: ", lowercase=False)
+    reviewer_name = prompt_input("Reviewer agent name: ", lowercase=False)
     print()
-
-    agent2_name = prompt_input("Agent 2 name: ", lowercase=False)
-    required_role = "reviewer" if agent1_role == "lead" else "lead"
-    agent2_role = prompt_input("Agent 2 role (lead/reviewer): ", ["lead", "reviewer"])
-
-    while agent2_role == agent1_role:
-        print(f"  You need one lead and one reviewer. Agent 1 is already the {agent1_role}.")
-        agent2_role = prompt_input(f"  Please enter '{required_role}': ", [required_role])
-
-    print()
-
-    if agent1_role == "lead":
-        lead_name = agent1_name
-        reviewer_name = agent2_name
-    else:
-        lead_name = agent2_name
-        reviewer_name = agent1_name
 
     write_config(".", lead_name, reviewer_name)
 
     print("Created ai-handoff.yaml")
     print(f"  Lead: {lead_name}")
     print(f"  Reviewer: {reviewer_name}")
-    print()
+
+    if show_explainer:
+        print(HANDOFF_EXPLAINER)
     print(GETTING_STARTED)
     return 0
 
@@ -178,9 +188,37 @@ def setup_command(target_dir: str = ".") -> int:
     return 0
 
 
+_BACKEND_SURFACE = {
+    "iterm2": "tab",
+    "tmux": "pane",
+    "manual": "terminal",
+}
+
+
+def _print_priming_box(lead_name: str, reviewer_name: str, surface: str) -> None:
+    """Print a boxed 'SESSION READY' message with backend-appropriate terminology."""
+    prime_body = (
+        "Read ai-handoff.yaml and .claude/skills/handoff/"
+        "SKILL.md, then type /handoff"
+    )
+    lines = [
+        "SESSION READY",
+        "",
+        f"In the Lead {surface}, tell {lead_name}:",
+        f'  "{prime_body}"',
+        "",
+        f"In the Reviewer {surface}, tell {reviewer_name} the same.",
+    ]
+    width = max(len(line) for line in lines) + 4
+    print("╔" + "═" * (width - 2) + "╗")
+    for line in lines:
+        print("║ " + line.ljust(width - 4) + " ║")
+    print("╚" + "═" * (width - 2) + "╝")
+
+
 def quickstart_command(args: list[str]) -> int:
     """Run setup + init + session start in one command."""
-    from ai_handoff.session import SUPPORTED_BACKENDS, ensure_session
+    from ai_handoff.session import SUPPORTED_BACKENDS, default_backend, ensure_session
     from ai_handoff.setup import run_setup
 
     project_dir = "."
@@ -212,7 +250,7 @@ def quickstart_command(args: list[str]) -> int:
     print()
 
     print("[2/3] Agent configuration...")
-    if not run_init(project_dir):
+    if not run_init(project_dir, show_explainer=False):
         return 1
     print()
 
@@ -221,16 +259,21 @@ def quickstart_command(args: list[str]) -> int:
     if outcome == "error":
         return 1
 
-    print()
-    if outcome == "created":
-        print("Ready! Tell each agent:")
-        print('  "Read ai-handoff.yaml to see your role, then read .claude/skills/handoff/SKILL.md"')
-    elif outcome == "exists":
-        print("Session already running. Switch to it to continue.")
-    elif outcome == "manual":
-        print("Framework setup is complete.")
-        print("Continue with the manual terminal workflow shown above.")
+    effective_backend = backend or default_backend()
+    surface = _BACKEND_SURFACE.get(effective_backend, "terminal")
 
+    config = read_config(Path(project_dir) / "ai-handoff.yaml") or {}
+    agents = config.get("agents", {})
+    lead_name = agents.get("lead", {}).get("name", "Lead")
+    reviewer_name = agents.get("reviewer", {}).get("name", "Reviewer")
+
+    print(HANDOFF_EXPLAINER)
+
+    if outcome == "exists":
+        print("Session already running. Switch to it to continue.")
+        return 0
+
+    _print_priming_box(lead_name, reviewer_name, surface)
     return 0
 
 
@@ -276,10 +319,10 @@ def upgrade_command() -> int:
 HELP_TEXT = """\
 AI Handoff Framework
 
-Usage: python -m ai_handoff <command>
+Usage: ai-handoff <command>
 
 Quick start (from project root):
-  python -m ai_handoff quickstart
+  ai-handoff quickstart
 
   This runs setup, agent configuration, and session start in one command.
   The session backend is auto-detected unless you pass --backend.
@@ -299,13 +342,13 @@ Commands:
   upgrade       Re-run setup on all registered projects (after pip upgrade)
 
 Advanced setup (individual steps, from project root):
-  python -m ai_handoff setup
-  python -m ai_handoff init
-  python -m ai_handoff session start
+  ai-handoff setup
+  ai-handoff init
+  ai-handoff session start
 
 Manual workflow fallback:
-  python -m ai_handoff session start --backend manual
-  python -m ai_handoff watch --mode notify
+  ai-handoff session start --backend manual
+  ai-handoff watch --mode notify
 """
 
 
@@ -367,7 +410,7 @@ def main() -> int:
         return 0
 
     print(f"Unknown command: {command}")
-    print("Run 'python -m ai_handoff --help' for usage.")
+    print("Run 'ai-handoff --help' for usage.")
     return 1
 
 

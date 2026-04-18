@@ -7,6 +7,7 @@ from unittest.mock import patch, call
 import pytest
 
 from ai_handoff.iterm import (
+    _ensure_iterm_running,
     _read_session_file,
     _write_session_file,
     get_session_id,
@@ -128,10 +129,12 @@ class TestOsascriptCalls:
 class TestCreateSessionLaunch:
     """Tests for create_session with --launch flag."""
 
+    @patch("ai_handoff.iterm.iterm_is_running", return_value=True)
+    @patch("ai_handoff.iterm._ensure_iterm_running")
     @patch("ai_handoff.iterm.write_text_to_session")
     @patch("ai_handoff.iterm._osascript")
     def test_launch_sends_raw_commands_after_session_file(
-        self, mock_osascript, mock_write_text, tmp_path
+        self, mock_osascript, mock_write_text, mock_ensure, mock_running, tmp_path
     ):
         """Launch commands must be sent after session file exists,
         and must NOT be double-escaped (regression test)."""
@@ -175,10 +178,12 @@ class TestCreateSessionLaunch:
         assert calls[3] == call("lead-id", PRIME_MESSAGE)
         assert calls[4] == call("reviewer-id", PRIME_MESSAGE)
 
+    @patch("ai_handoff.iterm.iterm_is_running", return_value=True)
+    @patch("ai_handoff.iterm._ensure_iterm_running")
     @patch("ai_handoff.iterm.write_text_to_session")
     @patch("ai_handoff.iterm._osascript")
     def test_launch_false_does_not_send_commands(
-        self, mock_osascript, mock_write_text, tmp_path
+        self, mock_osascript, mock_write_text, mock_ensure, mock_running, tmp_path
     ):
         mock_osascript.return_value = "lead-id,watcher-id,reviewer-id"
 
@@ -186,8 +191,12 @@ class TestCreateSessionLaunch:
         assert result is True
         mock_write_text.assert_not_called()
 
+    @patch("ai_handoff.iterm.iterm_is_running", return_value=True)
+    @patch("ai_handoff.iterm._ensure_iterm_running")
     @patch("ai_handoff.iterm._osascript")
-    def test_launch_without_config_falls_back(self, mock_osascript, tmp_path):
+    def test_launch_without_config_falls_back(
+        self, mock_osascript, mock_ensure, mock_running, tmp_path
+    ):
         """If ai-handoff.yaml is missing, launch degrades to no-launch."""
         mock_osascript.return_value = "lead-id,watcher-id,reviewer-id"
 
@@ -195,6 +204,50 @@ class TestCreateSessionLaunch:
         assert result is True
         # Session created but no launch commands sent (only the creation script)
         assert mock_osascript.call_count == 1
+
+
+class TestEnsureItermRunning:
+    """Cold-launch handling: launch iTerm2 if closed, wait for readiness."""
+
+    @patch("ai_handoff.iterm._osascript")
+    @patch("ai_handoff.iterm.iterm_is_running")
+    def test_noop_when_already_running(self, mock_running, mock_osa):
+        mock_running.return_value = True
+        _ensure_iterm_running()
+        mock_osa.assert_not_called()
+
+    @patch("ai_handoff.iterm.time.sleep")
+    @patch("ai_handoff.iterm._osascript")
+    @patch("ai_handoff.iterm.iterm_is_running")
+    def test_launches_when_not_running(self, mock_running, mock_osa, mock_sleep):
+        # First call (at entry) False, subsequent polling call True
+        mock_running.side_effect = [False, True]
+        _ensure_iterm_running()
+        # launch command sent
+        assert any(
+            "launch" in str(c) for c in mock_osa.call_args_list
+        ), f"expected launch call, got {mock_osa.call_args_list}"
+
+    @patch("ai_handoff.iterm.time.sleep")
+    @patch("ai_handoff.iterm._osascript")
+    @patch("ai_handoff.iterm.iterm_is_running")
+    def test_times_out(self, mock_running, mock_osa, mock_sleep):
+        # Always false → should raise RuntimeError after polling
+        mock_running.return_value = False
+        with pytest.raises(RuntimeError, match="did not start"):
+            _ensure_iterm_running()
+
+    @patch("ai_handoff.iterm._ensure_iterm_running")
+    @patch("ai_handoff.iterm._osascript")
+    def test_create_session_catches_launch_failure(
+        self, mock_osa, mock_ensure, tmp_path, capsys
+    ):
+        mock_ensure.side_effect = RuntimeError("iTerm2 did not start")
+        result = create_session(str(tmp_path), launch=False)
+        assert result is False
+        out = capsys.readouterr().out
+        assert "iTerm2 failed to launch" in out
+        assert "backend tmux" in out or "backend manual" in out
 
 
 class TestCheckIdlePatterns:

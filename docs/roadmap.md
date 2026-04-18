@@ -200,6 +200,29 @@ AI Handoff Framework - A collaboration framework enabling structured, multi-phas
   - WIP banner removed from README
 - **Phase Plan:** `docs/phases/saloon-production-ready.md`
 
+### Phase 19: Public Onboarding
+- **Status:** Complete
+- **Description:** Make ai-handoff ready to share with the world. Simpler init prompts, shared handoff explainer in CLI + README, iTerm2 cold-launch fix, README trimmed to a single backend-neutral Quick Start using the `ai-handoff` console script, prominent post-quickstart priming box.
+- **Key Deliverables:**
+  - `init` prompts simplified to 2 questions (lead name, reviewer name) — no role prompt
+  - `HANDOFF_EXPLAINER` printed once per quickstart path via `show_explainer` plumbing
+  - `_ensure_iterm_running()` launches iTerm2 from a fully-quit state; window-count guard prevents duplicate windows
+  - README rewritten with "How it works" section and backend-neutral Quick Start
+  - `python -m ai_handoff` replaced with `ai-handoff` throughout docs
+  - Backend-aware priming box (tab/pane/terminal) at end of quickstart
+- **Phase Plan:** `docs/phases/public-onboarding.md`
+
+## Backlog
+
+### Terminal.app backend (macOS, optional)
+- **Status:** Not started
+- **Motivation:** Terminal.app ships with every Mac, so a `terminal` backend would remove the iTerm2 install step for new macOS users. Default stays `iterm2` (richer scripting); Terminal.app is opt-in via `--backend terminal`.
+- **Sketch:**
+  - New `ai_handoff/terminal.py` mirroring `iterm.py` against Terminal.app's AppleScript (`do script`, `tell tab N of window M`)
+  - Add `"terminal"` to `SUPPORTED_BACKENDS` and `_validate_backend()` in `session.py`
+  - Extend `_parse_backend` / `ensure_session` dispatch
+- **Known tradeoff:** Terminal.app has no stable session IDs — stale-session recovery must fall back to window+tab index tracking, which is more fragile than iTerm2's session-ID model. Expect the module to be less robust under user tab rearrangement.
+
 ## Decision Log
 See `docs/decision_log.md`
 

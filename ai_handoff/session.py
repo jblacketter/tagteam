@@ -37,8 +37,19 @@ def _tmux(*args: str, check: bool = True) -> subprocess.CompletedProcess:
     )
 
 
+_ITERM_APP_PATHS = (
+    "/Applications/iTerm.app",
+    str(Path.home() / "Applications" / "iTerm.app"),
+)
+
+
 def _iterm2_supported() -> bool:
-    return sys.platform == "darwin" and shutil.which("osascript") is not None
+    if sys.platform != "darwin" or shutil.which("osascript") is None:
+        return False
+    # Only claim iTerm2 support when the app is actually installed,
+    # so default_backend() can honestly fall through to tmux on Macs
+    # without iTerm2.
+    return any(Path(p).exists() for p in _ITERM_APP_PATHS)
 
 
 def _tmux_supported() -> bool:

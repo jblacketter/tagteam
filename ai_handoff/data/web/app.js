@@ -378,7 +378,7 @@
           id: 'bart_explain',
           speaker: 'rabbit',
           type: 'dialogue',
-          text: "The Lead submits work, I help track the review. The Reviewer gives feedback or approves. If they can't agree after 5 rounds, it escalates to you \u2014 the arbiter.",
+          text: "The Lead submits work, I help track the review. The Reviewer gives feedback or approves. If they can't agree after 10 rounds, it escalates to you \u2014 the arbiter.",
           next: null,
         },
       ];
@@ -444,7 +444,7 @@
           id: 'watch_session',
           speaker: 'watcher',
           type: 'dialogue',
-          text: "To start a tmux session, run: python -m ai_handoff session start",
+          text: "To start a tmux session, run: ai-handoff session start",
           next: null,
         },
       ];
@@ -537,7 +537,7 @@
         speaker: 'watcher',
         text: session.active
           ? 'tmux session "' + session.session + '" is active.'
-          : "No tmux session detected. Run: python -m ai_handoff session start",
+          : "No tmux session detected. Run: ai-handoff session start",
       });
       dialogueCtrl.playLines(lines);
     }).catch(function() {

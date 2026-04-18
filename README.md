@@ -1,124 +1,121 @@
 # AI Handoff Framework
 
-A collaboration framework for structured AI-to-AI handoffs with human oversight. It implements a **lead / reviewer / arbiter** pattern where:
+A collaboration framework for structured AI-to-AI handoffs with human oversight. One AI leads, another reviews, and you arbitrate — the whole cycle runs phase by phase from a roadmap.
 
-- **Lead** plans phases, implements code, and creates handoffs
-- **Reviewer** reviews plans and implementations and provides feedback
-- **Arbiter** breaks ties, makes final decisions, and approves phases (typically human)
+## How it works
 
-Configure your agents via `ai-handoff.yaml` and use any AI combination you want.
+- **Lead** (one AI agent) plans each phase and implements the approved plan.
+- **Reviewer** (a second AI agent) reviews both the plan and the implementation.
+- **Arbiter** (you, the human) breaks ties and approves phases.
 
-## Installation
+Work progresses phase by phase. Each phase is listed in `docs/roadmap.md` and goes through two review cycles: plan, then implementation. If the two agents can't make progress in 10 rounds, control escalates to the human arbiter.
 
-```bash
-pip install git+https://github.com/jblacketter/ai-handoff.git
-```
+State is tracked in `handoff-state.json` (current turn) and `docs/handoffs/<phase>_<type>_rounds.jsonl` + `_status.json` (per-cycle rounds). Either agent can pick up where the other left off at any time.
 
 ## Quick Start
 
 ```bash
+pip install git+https://github.com/jblacketter/ai-handoff.git
 cd ~/projects/myproject
-python -m ai_handoff quickstart
+ai-handoff quickstart
 ```
 
-This runs framework setup, agent configuration, and session startup (with agents auto-launched) against the current directory. Pass `--dir <path>` to target a different project, or `--backend <name>` to override backend detection.
+You'll be prompted for your two agent names, then quickstart sets up the workspace and starts a handoff session. It auto-detects the best terminal backend available on your machine:
 
-Session backend selection is automatic:
+- **iTerm2** (macOS, default when iTerm2 is installed) — opens three labeled tabs in a single window, auto-launching iTerm2 if it isn't already running.
+- **tmux** (Linux, WSL, or macOS without iTerm2) — creates one `tmux` session with three labeled panes.
+- **manual** (anywhere else, including Windows without WSL) — prints the three commands for you to run in terminals you open yourself.
 
-- macOS + iTerm2: uses the `iterm2` backend
-- Any platform with `tmux` on `PATH`: uses the `tmux` backend
-- Otherwise: falls back to the `manual` backend and prints the commands to run
+When quickstart finishes it prints what to paste into the Lead and Reviewer agents to kick off the first handoff. Override the auto-detection with `--backend iterm2|tmux|manual` if you need a specific one.
 
-## Windows
+## Running a handoff
 
-Windows is usable today for the setup/state/manual workflow, but native terminal automation is not implemented yet.
-
-What works:
-
-- `quickstart`, `setup`, `init`, `state`, `cycle`, and document workflows
-- `session start` without crashing when no automation backend is available
-- `watch --mode notify` for console-guided manual coordination
-
-What does not work yet:
-
-- native Windows Terminal orchestration
-- desktop notifications outside macOS
-- automatic command injection unless you are using `tmux` or iTerm2
-
-For the least risky Windows flow today:
-
-```bash
-# Quickstart auto-detects manual backend on Windows
-python -m ai_handoff quickstart
-
-# Or do each step yourself:
-python -m ai_handoff setup
-python -m ai_handoff init
-python -m ai_handoff session start --backend manual
-python -m ai_handoff watch --mode notify
-```
-
-If you want automated terminal orchestration on Windows right now, use WSL + `tmux`.
-
-## Usage
-
-**Single phase**: start a review cycle, let the watcher handle the back-and-forth, and stop when the phase completes.
+**Single phase** — start a plan review, let the watcher handle the back-and-forth, and stop when the phase completes.
 
 ```text
 /handoff start my-phase
 ```
 
-**Full roadmap**: run all incomplete phases end-to-end.
+**Full roadmap** — run all incomplete phases end-to-end.
 
 ```text
 /handoff start --roadmap
 /handoff start --roadmap api-gateway
 ```
 
-### Commands
+| Command                         | Purpose                                         | Who  |
+| ------------------------------- | ----------------------------------------------- | ---- |
+| `/handoff`                      | Auto-detects role + state, does the right thing | Both |
+| `/handoff start [phase]`        | Begin a new phase (plan + review cycle)         | Lead |
+| `/handoff start [phase] impl`   | Begin implementation review for a phase         | Lead |
+| `/handoff status`               | Orientation, status check, drift reset          | Both |
 
-| Command                       | Purpose                                         | Who  |
-| ----------------------------- | ----------------------------------------------- | ---- |
-| `/handoff`                    | Auto-detects role + state, does the right thing | Both |
-| `/handoff start [phase]`      | Begin a new phase (plan + review cycle)         | Lead |
-| `/handoff start [phase] impl` | Begin implementation review for a phase         | Lead |
-| `/handoff status`             | Orientation, status check, drift reset          | Both |
-
-**Human-in-the-loop**: add `--confirm` to pause for approval before each automatic send.
+**Human-in-the-loop** — add `--confirm` to pause for approval before each automatic send.
 
 ```bash
-python -m ai_handoff watch --mode notify --confirm
+ai-handoff watch --mode notify --confirm
 ```
 
-> **Manual mode:** You can always run handoffs without automation by pasting `/handoff` command results between agents manually.
+## Other platforms
 
-## Advanced Setup
+<details>
+<summary>tmux (explicit invocation)</summary>
 
 ```bash
-cd ~/projects/myproject
-python -m ai_handoff setup
-python -m ai_handoff init
-python -m ai_handoff session start
+ai-handoff quickstart --backend tmux
 ```
 
-To force the manual backend:
+Creates one `tmux` session named `ai-handoff` with three labeled panes (Lead, Watcher, Reviewer). Attach later with `tmux attach -t ai-handoff`.
+
+</details>
+
+<details>
+<summary>Windows / manual fallback</summary>
+
+On Windows without WSL, terminal automation isn't available. Quickstart prints the commands for you to run yourself in three terminals:
 
 ```bash
-python -m ai_handoff session start --backend manual
+ai-handoff quickstart --backend manual
 ```
 
-To create the terminals without auto-launching agents:
+You can also run each step individually:
 
 ```bash
-python -m ai_handoff session start --no-launch
+ai-handoff setup
+ai-handoff init
+ai-handoff session start --backend manual
+ai-handoff watch --mode notify
 ```
+
+For full automation on Windows today, use WSL with `tmux`.
+
+</details>
+
+<details>
+<summary>Advanced setup (run each step yourself)</summary>
+
+```bash
+ai-handoff setup               # copy skills, templates, docs
+ai-handoff init                # interactive agent config → ai-handoff.yaml
+ai-handoff session start       # create terminals and auto-launch agents
+```
+
+Options:
+
+- `ai-handoff session start --no-launch` — create terminals but don't start agents
+- `ai-handoff session start --backend <name>` — force a specific backend
+- `ai-handoff session kill` — close the current session
+
+> **Manual mode:** you can always run handoffs without any automation by pasting `/handoff` output between agents yourself.
+
+</details>
 
 ## The Saloon
 
 A graphical dashboard for monitoring and controlling handoff cycles:
 
 ```bash
-python -m ai_handoff serve --dir ~/projects/myproject
+ai-handoff serve --dir ~/projects/myproject
 ```
 
 ## Configuration
@@ -138,20 +135,20 @@ agents:
 ## CLI Reference
 
 ```bash
-python -m ai_handoff quickstart                          # Setup + init + session start
-python -m ai_handoff session start                       # Auto-detect backend and launch agents
-python -m ai_handoff session start --backend manual   # Force manual backend
-python -m ai_handoff session start --no-launch          # Create terminals but skip agent launch
-python -m ai_handoff session kill
-python -m ai_handoff init
-python -m ai_handoff setup
-python -m ai_handoff state
-python -m ai_handoff state diagnose
-python -m ai_handoff watch --mode notify
-python -m ai_handoff roadmap phases
-python -m ai_handoff serve --dir .
-python -m ai_handoff upgrade
-python -m ai_handoff --help
+ai-handoff quickstart                     # Setup + init + session start
+ai-handoff session start                  # Auto-detect backend, launch agents
+ai-handoff session start --backend manual # Force manual backend
+ai-handoff session start --no-launch      # Create terminals, skip agent launch
+ai-handoff session kill
+ai-handoff init
+ai-handoff setup
+ai-handoff state
+ai-handoff state diagnose
+ai-handoff watch --mode notify
+ai-handoff roadmap phases
+ai-handoff serve --dir .
+ai-handoff upgrade
+ai-handoff --help
 ```
 
 ## License

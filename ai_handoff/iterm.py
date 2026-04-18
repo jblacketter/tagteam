@@ -8,10 +8,13 @@ no pane sharing, no nesting, no corruption.
 
 import json
 import subprocess
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 SESSION_FILE = ".handoff-session.json"
+_ITERM_LAUNCH_TIMEOUT_S = 5.0
+_ITERM_POLL_INTERVAL_S = 0.2
 
 
 def _osascript(script: str) -> str:
@@ -35,6 +38,29 @@ def iterm_is_running() -> bool:
         return out == "true"
     except Exception:
         return False
+
+
+def _ensure_iterm_running() -> None:
+    """Launch iTerm2 if not already running, and wait until it's ready.
+
+    `activate` alone is unreliable on a cold launch — the subsequent
+    AppleScript commands race iTerm2's boot and fail. We explicitly `launch`
+    (boots without activating) and poll for readiness before returning.
+    """
+    if iterm_is_running():
+        return
+    _osascript('tell application "iTerm2" to launch')
+    deadline = time.monotonic() + _ITERM_LAUNCH_TIMEOUT_S
+    while time.monotonic() < deadline:
+        if iterm_is_running():
+            # iTerm2's scripting environment needs a moment after the process
+            # appears. Without this, the next `tell` block can still fail.
+            time.sleep(0.5)
+            return
+        time.sleep(_ITERM_POLL_INTERVAL_S)
+    raise RuntimeError(
+        f"iTerm2 did not start within {_ITERM_LAUNCH_TIMEOUT_S:.0f}s"
+    )
 
 
 def _session_file_path(project_dir: str) -> Path:
@@ -84,7 +110,7 @@ def create_session(project_dir: str, launch: bool = False) -> bool:
     if existing:
         if _any_session_alive(existing):
             print(f"Session file already exists: {_session_file_path(project_dir)}")
-            print("  Kill first:  python -m ai_handoff session kill")
+            print("  Kill first:  ai-handoff session kill")
             return False
         stale_path = _find_session_file(project_dir) or _session_file_path(project_dir)
         print(f"Stale session file found (no live iTerm2 tabs): {stale_path}")
@@ -93,6 +119,19 @@ def create_session(project_dir: str, launch: bool = False) -> bool:
             stale_path.unlink()
         except OSError:
             pass
+
+    # Cold-launched iTerm2 opens its own default window, so we need to reuse
+    # it. When iTerm2 is already running, we must NOT reuse the current
+    # window — it may contain the user's unrelated work.
+    was_running = iterm_is_running()
+    try:
+        _ensure_iterm_running()
+    except RuntimeError as e:
+        print(f"iTerm2 failed to launch: {e}")
+        print("  Is iTerm2 installed? Alternatives:")
+        print("    ai-handoff session start --backend tmux")
+        print("    ai-handoff session start --backend manual")
+        return False
 
     # Resolve launch commands if requested
     lead_cmd = reviewer_cmd = None
@@ -106,13 +145,24 @@ def create_session(project_dir: str, launch: bool = False) -> bool:
 
     abs_dir = str(Path(project_dir).resolve())
 
-    # AppleScript: create window + 3 tabs with cd only.
-    # Launch commands are sent AFTER session file is written to avoid
-    # the watcher starting before .handoff-session.json exists.
+    if was_running:
+        # Always create a fresh window so we don't clobber the user's other work
+        window_clause = '    create window with default profile\n'
+    else:
+        # Cold launch: iTerm2 created a default window; reuse it if present
+        window_clause = (
+            '    if (count of windows) = 0 then\n'
+            '        create window with default profile\n'
+            '    end if\n'
+        )
+
+    # AppleScript: activate iTerm2, get a window, and set up 3 tabs.
+    # Launch commands are sent AFTER session file is written to avoid the
+    # watcher starting before .handoff-session.json exists.
     script = (
         'tell application "iTerm2"\n'
         '    activate\n'
-        '    create window with default profile\n'
+        + window_clause +
         '    tell current window\n'
         '        tell current session of current tab\n'
         '            set name to "Lead"\n'
