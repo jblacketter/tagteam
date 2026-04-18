@@ -13,8 +13,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SESSION_FILE = ".handoff-session.json"
-_ITERM_LAUNCH_TIMEOUT_S = 5.0
+_ITERM_LAUNCH_TIMEOUT_S = 10.0
 _ITERM_POLL_INTERVAL_S = 0.2
+_ITERM_READY_PROBE = 'tell application "iTerm2" to count windows'
+_ITERM_BUNDLE_ID = "com.googlecode.iterm2"
 
 
 def _osascript(script: str) -> str:
@@ -40,26 +42,49 @@ def iterm_is_running() -> bool:
         return False
 
 
-def _ensure_iterm_running() -> None:
-    """Launch iTerm2 if not already running, and wait until it's ready.
+def _launch_iterm_via_launchservices() -> None:
+    """Launch iTerm2 via macOS LaunchServices (`open -b <bundle-id>`).
 
-    `activate` alone is unreliable on a cold launch — the subsequent
-    AppleScript commands race iTerm2's boot and fail. We explicitly `launch`
-    (boots without activating) and poll for readiness before returning.
+    AppleScript's `launch` verb can fail with -1728 (errAENoSuchObject) when
+    iTerm2 isn't registered in the osascript process's terminology cache —
+    typically after a full quit. `open -b` goes through LaunchServices, which
+    uses a system-wide bundle index and works regardless of whether the app
+    bundle on disk is named `iTerm.app` or `iTerm2.app`. Errors are swallowed:
+    the probe in `_ensure_iterm_ready` is the authoritative readiness signal.
     """
-    if iterm_is_running():
-        return
-    _osascript('tell application "iTerm2" to launch')
+    try:
+        subprocess.run(
+            ["open", "-b", _ITERM_BUNDLE_ID],
+            capture_output=True, timeout=10, check=False,
+        )
+    except (subprocess.SubprocessError, OSError):
+        pass
+
+
+def _ensure_iterm_ready() -> None:
+    """Ensure iTerm2 is running AND its scripting dictionary is loaded.
+
+    Checking process existence is not enough on cold launch: iTerm2 registers
+    its AppleScript dictionary with macOS after the process appears, and
+    compiling a script against iTerm2's terms will fail until the dictionary
+    is registered. We poll with a trivial scripted command that exercises
+    the dictionary; once it compiles and runs, the main script will too.
+    """
+    if not iterm_is_running():
+        _launch_iterm_via_launchservices()
+
     deadline = time.monotonic() + _ITERM_LAUNCH_TIMEOUT_S
+    last_error: Exception | None = None
     while time.monotonic() < deadline:
-        if iterm_is_running():
-            # iTerm2's scripting environment needs a moment after the process
-            # appears. Without this, the next `tell` block can still fail.
-            time.sleep(0.5)
+        try:
+            _osascript(_ITERM_READY_PROBE)
             return
-        time.sleep(_ITERM_POLL_INTERVAL_S)
+        except RuntimeError as e:
+            last_error = e
+            time.sleep(_ITERM_POLL_INTERVAL_S)
     raise RuntimeError(
-        f"iTerm2 did not start within {_ITERM_LAUNCH_TIMEOUT_S:.0f}s"
+        f"iTerm2 scripting did not become ready within "
+        f"{_ITERM_LAUNCH_TIMEOUT_S:.0f}s: {last_error}"
     )
 
 
@@ -125,7 +150,7 @@ def create_session(project_dir: str, launch: bool = False) -> bool:
     # window — it may contain the user's unrelated work.
     was_running = iterm_is_running()
     try:
-        _ensure_iterm_running()
+        _ensure_iterm_ready()
     except RuntimeError as e:
         print(f"iTerm2 failed to launch: {e}")
         print("  Is iTerm2 installed? Alternatives:")

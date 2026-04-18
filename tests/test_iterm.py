@@ -7,7 +7,7 @@ from unittest.mock import patch, call
 import pytest
 
 from ai_handoff.iterm import (
-    _ensure_iterm_running,
+    _ensure_iterm_ready,
     _read_session_file,
     _write_session_file,
     get_session_id,
@@ -130,7 +130,7 @@ class TestCreateSessionLaunch:
     """Tests for create_session with --launch flag."""
 
     @patch("ai_handoff.iterm.iterm_is_running", return_value=True)
-    @patch("ai_handoff.iterm._ensure_iterm_running")
+    @patch("ai_handoff.iterm._ensure_iterm_ready")
     @patch("ai_handoff.iterm.write_text_to_session")
     @patch("ai_handoff.iterm._osascript")
     def test_launch_sends_raw_commands_after_session_file(
@@ -179,7 +179,7 @@ class TestCreateSessionLaunch:
         assert calls[4] == call("reviewer-id", PRIME_MESSAGE)
 
     @patch("ai_handoff.iterm.iterm_is_running", return_value=True)
-    @patch("ai_handoff.iterm._ensure_iterm_running")
+    @patch("ai_handoff.iterm._ensure_iterm_ready")
     @patch("ai_handoff.iterm.write_text_to_session")
     @patch("ai_handoff.iterm._osascript")
     def test_launch_false_does_not_send_commands(
@@ -192,7 +192,7 @@ class TestCreateSessionLaunch:
         mock_write_text.assert_not_called()
 
     @patch("ai_handoff.iterm.iterm_is_running", return_value=True)
-    @patch("ai_handoff.iterm._ensure_iterm_running")
+    @patch("ai_handoff.iterm._ensure_iterm_ready")
     @patch("ai_handoff.iterm._osascript")
     def test_launch_without_config_falls_back(
         self, mock_osascript, mock_ensure, mock_running, tmp_path
@@ -206,38 +206,112 @@ class TestCreateSessionLaunch:
         assert mock_osascript.call_count == 1
 
 
-class TestEnsureItermRunning:
-    """Cold-launch handling: launch iTerm2 if closed, wait for readiness."""
+class TestEnsureItermReady:
+    """Scripting-readiness probe: poll iTerm2 until its AppleScript
+    dictionary is loaded, not just until the process appears."""
 
+    @patch("ai_handoff.iterm.time.sleep")
     @patch("ai_handoff.iterm._osascript")
     @patch("ai_handoff.iterm.iterm_is_running")
-    def test_noop_when_already_running(self, mock_running, mock_osa):
+    def test_ensure_iterm_ready_returns_after_probe_succeeds(
+        self, mock_running, mock_osa, mock_sleep
+    ):
+        # Warm path: iTerm2 already running, first probe succeeds.
         mock_running.return_value = True
-        _ensure_iterm_running()
-        mock_osa.assert_not_called()
+        mock_osa.return_value = "1"
+        _ensure_iterm_ready()
+        # Exactly one probe call, no launch.
+        assert mock_osa.call_count == 1
+        assert "count windows" in mock_osa.call_args_list[0][0][0]
+        assert "launch" not in mock_osa.call_args_list[0][0][0]
 
     @patch("ai_handoff.iterm.time.sleep")
+    @patch("ai_handoff.iterm._launch_iterm_via_launchservices")
     @patch("ai_handoff.iterm._osascript")
     @patch("ai_handoff.iterm.iterm_is_running")
-    def test_launches_when_not_running(self, mock_running, mock_osa, mock_sleep):
-        # First call (at entry) False, subsequent polling call True
-        mock_running.side_effect = [False, True]
-        _ensure_iterm_running()
-        # launch command sent
-        assert any(
-            "launch" in str(c) for c in mock_osa.call_args_list
-        ), f"expected launch call, got {mock_osa.call_args_list}"
-
-    @patch("ai_handoff.iterm.time.sleep")
-    @patch("ai_handoff.iterm._osascript")
-    @patch("ai_handoff.iterm.iterm_is_running")
-    def test_times_out(self, mock_running, mock_osa, mock_sleep):
-        # Always false → should raise RuntimeError after polling
+    def test_ensure_iterm_ready_launches_then_polls(
+        self, mock_running, mock_osa, mock_launch, mock_sleep
+    ):
+        # Cold path: LaunchServices launch is invoked; probe succeeds on 3rd try.
         mock_running.return_value = False
-        with pytest.raises(RuntimeError, match="did not start"):
-            _ensure_iterm_running()
+        mock_osa.side_effect = [
+            RuntimeError("not ready"),
+            RuntimeError("not ready"),
+            "1",  # probe succeeds
+        ]
+        _ensure_iterm_ready()
+        mock_launch.assert_called_once()
+        # Every osascript call is a probe — launch no longer goes through osascript.
+        for c in mock_osa.call_args_list:
+            assert "count windows" in c[0][0]
+        assert mock_osa.call_count == 3
 
-    @patch("ai_handoff.iterm._ensure_iterm_running")
+    @patch("ai_handoff.iterm.time.monotonic")
+    @patch("ai_handoff.iterm.time.sleep")
+    @patch("ai_handoff.iterm._osascript")
+    @patch("ai_handoff.iterm.iterm_is_running")
+    def test_ensure_iterm_ready_times_out_on_probe_failure(
+        self, mock_running, mock_osa, mock_sleep, mock_monotonic
+    ):
+        # Probe always raises → after the timeout window, helper raises
+        # RuntimeError whose message includes the final probe error.
+        mock_running.return_value = True
+        mock_osa.side_effect = RuntimeError("bad-probe")
+        # Force the while-loop to exit after a couple iterations.
+        mock_monotonic.side_effect = [0.0, 0.1, 0.2, 999.0]
+        with pytest.raises(RuntimeError, match="did not become ready") as exc_info:
+            _ensure_iterm_ready()
+        assert "bad-probe" in str(exc_info.value)
+
+    @patch("ai_handoff.iterm.time.sleep")
+    @patch("ai_handoff.iterm._launch_iterm_via_launchservices")
+    @patch("ai_handoff.iterm._osascript")
+    @patch("ai_handoff.iterm.iterm_is_running")
+    def test_ensure_iterm_ready_cold_path_retries_until_probe_compiles(
+        self, mock_running, mock_osa, mock_launch, mock_sleep
+    ):
+        # Cold path: LaunchServices launch + 5 failed probes + 1 success = 6 osascript calls.
+        mock_running.return_value = False
+        mock_osa.side_effect = [
+            RuntimeError("boom 1"),
+            RuntimeError("boom 2"),
+            RuntimeError("boom 3"),
+            RuntimeError("boom 4"),
+            RuntimeError("boom 5"),
+            "1",  # probe success
+        ]
+        _ensure_iterm_ready()
+        mock_launch.assert_called_once()
+        assert mock_osa.call_count == 6
+        for c in mock_osa.call_args_list:
+            script = c[0][0]
+            assert "count windows" in script
+            assert "launch" not in script
+
+    @patch("ai_handoff.iterm.time.sleep")
+    @patch("ai_handoff.iterm._osascript")
+    @patch("ai_handoff.iterm.iterm_is_running")
+    def test_ensure_iterm_ready_warm_path_retries_until_probe_compiles(
+        self, mock_running, mock_osa, mock_sleep
+    ):
+        # Warm path: no launch, 5 failed probes + 1 successful probe = 6 calls.
+        mock_running.return_value = True
+        mock_osa.side_effect = [
+            RuntimeError("boom 1"),
+            RuntimeError("boom 2"),
+            RuntimeError("boom 3"),
+            RuntimeError("boom 4"),
+            RuntimeError("boom 5"),
+            "1",
+        ]
+        _ensure_iterm_ready()
+        assert mock_osa.call_count == 6
+        for c in mock_osa.call_args_list:
+            script = c[0][0]
+            assert "count windows" in script
+            assert "launch" not in script
+
+    @patch("ai_handoff.iterm._ensure_iterm_ready")
     @patch("ai_handoff.iterm._osascript")
     def test_create_session_catches_launch_failure(
         self, mock_osa, mock_ensure, tmp_path, capsys
