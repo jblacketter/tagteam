@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("textual", reason="textual not installed; run `pip install ai-handoff[tui]`")
+pytest.importorskip("textual", reason="textual not installed; run `pip install tagteam[tui]`")
 
-from ai_handoff.tui.state_watcher import (
+from tagteam.tui.state_watcher import (
     HandoffState,
     find_state_path,
     read_handoff_state,

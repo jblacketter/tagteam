@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from ai_handoff.cycle import (
+from tagteam.cycle import (
     init_cycle, add_round, read_status, read_rounds,
     render_cycle, list_cycles, VALID_ACTIONS, cycle_command,
 )
@@ -200,7 +200,7 @@ class TestUpdatedByStateIntegration:
     """--updated-by should update handoff-state.json alongside cycle."""
 
     def test_init_updates_state(self, project):
-        from ai_handoff.state import read_state
+        from tagteam.state import read_state
         init_cycle("p", "plan", "Claude", "Codex", "init", project,
                    updated_by="Claude")
         state = read_state(project)
@@ -212,7 +212,7 @@ class TestUpdatedByStateIntegration:
         assert state["updated_by"] == "Claude"
 
     def test_add_round_updates_state(self, project):
-        from ai_handoff.state import read_state
+        from tagteam.state import read_state
         init_cycle("p", "plan", "A", "B", "init", project, updated_by="A")
         add_round("p", "plan", "reviewer", "REQUEST_CHANGES", 1, "Fix.",
                   project, updated_by="B")
@@ -222,7 +222,7 @@ class TestUpdatedByStateIntegration:
         assert state["updated_by"] == "B"
 
     def test_approve_updates_state(self, project):
-        from ai_handoff.state import read_state
+        from tagteam.state import read_state
         init_cycle("p", "plan", "A", "B", "init", project, updated_by="A")
         add_round("p", "plan", "reviewer", "APPROVE", 1, "LGTM.",
                   project, updated_by="B")
@@ -231,7 +231,7 @@ class TestUpdatedByStateIntegration:
         assert state["result"] == "approved"
 
     def test_no_state_update_without_flag(self, project):
-        from ai_handoff.state import read_state
+        from tagteam.state import read_state
         init_cycle("p", "plan", "A", "B", "init", project)
         state = read_state(project)
         # State file should not have been created/updated by cycle init
@@ -241,7 +241,7 @@ class TestUpdatedByStateIntegration:
 
     def test_round5_with_progress_does_not_escalate(self, project):
         """Cycles with progress (changing content) should NOT auto-escalate at round 5."""
-        from ai_handoff.state import read_state
+        from tagteam.state import read_state
         init_cycle("p", "plan", "A", "B", "init", project, updated_by="A")
         # Simulate 4 rounds — each lead submission has different content (progress)
         for r in range(1, 5):
@@ -263,7 +263,7 @@ class TestUpdatedByStateIntegration:
 
     def test_stale_rounds_auto_escalate(self, project):
         """Cycles with no progress (identical submissions) SHOULD auto-escalate."""
-        from ai_handoff.state import read_state
+        from tagteam.state import read_state
         init_cycle("p", "plan", "A", "B", "same content", project, updated_by="A")
         # Simulate rounds where the lead keeps submitting identical content
         for r in range(1, 6):
@@ -296,7 +296,7 @@ class TestStaleStateClearing:
 
     def test_submit_for_review_clears_stale_result(self, project):
         """SUBMIT_FOR_REVIEW should clear stale result from previous cycle."""
-        from ai_handoff.state import read_state, write_state
+        from tagteam.state import read_state, write_state
 
         # Create a synthetic completed state with result="roadmap-complete"
         write_state({
@@ -321,7 +321,7 @@ class TestStaleStateClearing:
 
     def test_request_changes_clears_stale_result(self, project):
         """REQUEST_CHANGES should clear stale completion state."""
-        from ai_handoff.state import read_state, write_state
+        from tagteam.state import read_state, write_state
 
         # Create a synthetic completed state
         write_state({
@@ -347,7 +347,7 @@ class TestStaleStateClearing:
 
     def test_roadmap_preserved_during_active_roadmap_transitions(self, project):
         """Roadmap context should be preserved when cycling within active roadmap."""
-        from ai_handoff.state import read_state, write_state
+        from tagteam.state import read_state, write_state
 
         # Create a state with active roadmap where phase-2 is the current phase
         roadmap = {
@@ -378,7 +378,7 @@ class TestStaleStateClearing:
 
     def test_single_phase_cycle_clears_stale_roadmap(self, project):
         """Starting a new single-phase cycle should clear stale roadmap context."""
-        from ai_handoff.state import read_state, write_state
+        from tagteam.state import read_state, write_state
 
         # Create a completed full-roadmap state
         write_state({
@@ -410,7 +410,7 @@ class TestStaleStateClearing:
 
     def test_roadmap_watcher_cannot_advance_after_single_phase_approval(self, project):
         """After approving a single-phase cycle, watcher should not auto-advance stale roadmap."""
-        from ai_handoff.state import read_state, write_state
+        from tagteam.state import read_state, write_state
 
         # Create a completed full-roadmap state with stale queue
         write_state({
@@ -517,7 +517,7 @@ class TestExtractLastRoundWithProjectDir:
         reason="textual not installed"
     )
     def test_jsonl_outside_cwd(self, tmp_path, monkeypatch):
-        from ai_handoff.tui.handoff_reader import extract_last_round, find_cycle_doc
+        from tagteam.tui.handoff_reader import extract_last_round, find_cycle_doc
 
         # Create project in a different directory than cwd
         project = str(tmp_path / "other-project")

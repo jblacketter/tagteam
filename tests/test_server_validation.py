@@ -2,7 +2,7 @@
 
 import pytest
 
-from ai_handoff.server import _validate_state_post
+from tagteam.server import _validate_state_post
 
 
 class TestValidateStatePost:

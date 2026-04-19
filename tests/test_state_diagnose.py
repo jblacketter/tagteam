@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from ai_handoff.state import (
+from tagteam.state import (
     read_state, write_state, update_state, clear_state,
     diagnose_state, _log_seq_mismatch, _read_diagnostics_log,
     clear_diagnostics_log, DIAGNOSTICS_LOG,
@@ -256,7 +256,7 @@ class TestHistoryAnomalies:
 
 
 class TestAgentHealthCheck:
-    @patch("ai_handoff.state._check_agent_health")
+    @patch("tagteam.state._check_agent_health")
     def test_check_agents_flag_calls_health_check(self, mock_check, tmp_path):
         write_state({
             "turn": "lead", "status": "ready", "seq": 1,

@@ -1,3 +1,3 @@
-recursive-include ai_handoff/data *.md
-recursive-include ai_handoff/data/web *.html *.css *.js *.svg
-recursive-include ai_handoff/tui/sounds *.wav
+recursive-include tagteam/data *.md
+recursive-include tagteam/data/web *.html *.css *.js *.svg
+recursive-include tagteam/tui/sounds *.wav

@@ -3,7 +3,7 @@
 import pytest
 from pathlib import Path
 
-from ai_handoff.migrate import detect_agent_names
+from tagteam.migrate import detect_agent_names
 
 
 class TestDetectAgentNames:

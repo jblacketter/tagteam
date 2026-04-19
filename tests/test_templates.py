@@ -2,7 +2,7 @@
 
 import pytest
 
-from ai_handoff.templates import get_template_variables, render_template
+from tagteam.templates import get_template_variables, render_template
 
 
 class TestRenderTemplate:
