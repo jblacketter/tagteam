@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tagteam"
-version = "0.2.0"
+version = "0.3.0"
 description = "A collaboration framework for structured AI-to-AI handoffs with human oversight"
 readme = "README.md"
 license = {text = "MIT"}
