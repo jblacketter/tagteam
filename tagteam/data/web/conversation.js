@@ -2,7 +2,7 @@
  * conversation.js — Dialogue Engine
  *
  * Ported from Python TUI: conversation.py, dialogue.py, conversations/intro.py, conversations/transitions.py
- * Provides ConversationEngine, TypewriterEffect, DialogueController, scripts, and transitions.
+ * Provides ConversationEngine, DialogueController, scripts, and transitions.
  */
 
 /* global Sprites */
@@ -76,56 +76,6 @@ var Conversation = (function() {
   };
 
   // =========================================================================
-  // TypewriterEffect — types out text character by character
-  // =========================================================================
-  function TypewriterEffect(element, text, options) {
-    this.element = element;
-    this.text = text;
-    this.speed = (options && options.speed) || 30; // ms per char
-    this.onComplete = (options && options.onComplete) || null;
-    this._index = 0;
-    this._timer = null;
-    this._done = false;
-  }
-
-  TypewriterEffect.prototype.start = function() {
-    this.element.textContent = '';
-    this._index = 0;
-    this._done = false;
-    this._tick();
-  };
-
-  TypewriterEffect.prototype._tick = function() {
-    var self = this;
-    if (this._done) return;
-    if (this._index >= this.text.length) {
-      this._finish();
-      return;
-    }
-    this.element.textContent += this.text[this._index];
-    this._index++;
-    this._timer = setTimeout(function() { self._tick(); }, this.speed);
-  };
-
-  TypewriterEffect.prototype.skip = function() {
-    if (this._done) return;
-    if (this._timer) clearTimeout(this._timer);
-    this.element.textContent = this.text;
-    this._finish();
-  };
-
-  TypewriterEffect.prototype._finish = function() {
-    this._done = true;
-    if (this._timer) clearTimeout(this._timer);
-    if (this.onComplete) this.onComplete();
-  };
-
-  TypewriterEffect.prototype.destroy = function() {
-    this._done = true;
-    if (this._timer) clearTimeout(this._timer);
-  };
-
-  // =========================================================================
   // DialogueController — manages the dialogue panel DOM
   // =========================================================================
   function DialogueController(panelEl) {
@@ -136,10 +86,8 @@ var Conversation = (function() {
     this.actionsEl = panelEl.querySelector('.dialogue-body-actions');
     this.advanceEl = panelEl.querySelector('.dialogue-advance');
     this.engine = null;
-    this.typewriter = null;
     this.visible = false;
     this._onAdvanceClick = null;
-    this._onPanelClick = null;
   }
 
   DialogueController.prototype.show = function() {
@@ -152,10 +100,6 @@ var Conversation = (function() {
     this.panel.classList.add('hidden');
     this.panel.classList.remove('dialogue-visible');
     this.visible = false;
-    if (this.typewriter) {
-      this.typewriter.destroy();
-      this.typewriter = null;
-    }
     this._cleanup();
   };
 
@@ -163,10 +107,6 @@ var Conversation = (function() {
     if (this._onAdvanceClick) {
       this.advanceEl.removeEventListener('click', this._onAdvanceClick);
       this._onAdvanceClick = null;
-    }
-    if (this._onPanelClick) {
-      this.panel.removeEventListener('click', this._onPanelClick);
-      this._onPanelClick = null;
     }
   };
 
@@ -220,31 +160,15 @@ var Conversation = (function() {
     this.advanceEl.textContent = '\u25B6';
     this.advanceEl.classList.add('dialogue-advance-blink');
 
-    // Typewriter
-    if (this.typewriter) this.typewriter.destroy();
-    var typingDone = false;
-    this.typewriter = new TypewriterEffect(this.textEl, node.text, {
-      speed: 25,
-      onComplete: function() { typingDone = true; },
-    });
-    this.typewriter.start();
-
-    // Click to skip or advance
-    this._onPanelClick = function(e) {
-      // Don't intercept clicks on action buttons or inputs
-      if (e.target.closest('.dialogue-body-actions') || e.target.closest('.dialogue-advance')) return;
-      if (!typingDone) {
-        self.typewriter.skip();
-      }
-    };
-    this.panel.addEventListener('click', this._onPanelClick);
+    // Instant render with a brief fade-in (CSS handles the opacity transition)
+    this.textEl.textContent = node.text;
+    this.textEl.classList.remove('dialogue-text-fade');
+    // Force reflow so the animation restarts on each node
+    void this.textEl.offsetWidth;
+    this.textEl.classList.add('dialogue-text-fade');
 
     this._onAdvanceClick = function() {
-      if (!typingDone) {
-        self.typewriter.skip();
-      } else {
-        self.engine.advance();
-      }
+      self.engine.advance();
     };
     this.advanceEl.addEventListener('click', this._onAdvanceClick);
   };
@@ -295,14 +219,20 @@ var Conversation = (function() {
     var wrapper = document.createElement('div');
     wrapper.className = 'dialogue-input-wrapper';
 
-    var input = document.createElement('input');
-    input.type = 'text';
+    var input;
+    if (node.multiline) {
+      input = document.createElement('textarea');
+      input.rows = node.rows || 3;
+    } else {
+      input = document.createElement('input');
+      input.type = 'text';
+    }
     input.className = 'dialogue-input-field';
     input.placeholder = node.placeholder || '';
 
     var submit = document.createElement('button');
     submit.className = 'dialogue-input-submit';
-    submit.textContent = 'OK';
+    submit.textContent = node.submitLabel || 'OK';
 
     function doSubmit() {
       var val = input.value.trim();
@@ -312,7 +242,12 @@ var Conversation = (function() {
 
     submit.addEventListener('click', doSubmit);
     input.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter') doSubmit();
+      // Enter submits on single-line; Cmd/Ctrl+Enter submits on multiline.
+      if (e.key === 'Enter') {
+        if (node.multiline && !(e.metaKey || e.ctrlKey)) return;
+        e.preventDefault();
+        doSubmit();
+      }
     });
 
     wrapper.appendChild(input);
@@ -448,6 +383,47 @@ var Conversation = (function() {
 
   // --- Multi-character setup flow scripts ---
   // Each character has their own script segment, triggered by clicking them.
+
+  // Single-flow launchpad: collects lead, reviewer, and first prompt in one
+  // conversation and returns them to the caller for POST /api/launch.
+  var LAUNCHPAD = [
+    {
+      id: 'lp_welcome',
+      speaker: 'mayor',
+      type: 'dialogue',
+      text: "Welcome to the Handoff Saloon. Two AI agents will take turns on your project \u2014 a Lead and a Reviewer \u2014 and you're the arbiter. Let's get them set up.",
+      next: 'lp_lead',
+    },
+    {
+      id: 'lp_lead',
+      speaker: 'mayor',
+      type: 'input',
+      prompt: "What's the name of your Lead agent?",
+      placeholder: 'e.g. Claude',
+      default: 'Claude',
+      next: 'lp_reviewer',
+    },
+    {
+      id: 'lp_reviewer',
+      speaker: 'rabbit',
+      type: 'input',
+      prompt: "And the Reviewer?",
+      placeholder: 'e.g. Codex',
+      default: 'Codex',
+      next: 'lp_prompt',
+    },
+    {
+      id: 'lp_prompt',
+      speaker: 'mayor',
+      type: 'input',
+      prompt: "What should they work on first? A sentence or two \u2014 this becomes your first phase.",
+      placeholder: 'Describe the task...',
+      multiline: true,
+      rows: 4,
+      submitLabel: 'Open the Saloon',
+      next: null,
+    },
+  ];
 
   var SETUP_FLOW_MAYOR = [
     {
@@ -654,9 +630,9 @@ var Conversation = (function() {
 
   return {
     ConversationEngine: ConversationEngine,
-    TypewriterEffect: TypewriterEffect,
     DialogueController: DialogueController,
     INTRO: INTRO,
+    LAUNCHPAD: LAUNCHPAD,
     SETUP_INTRO: SETUP_INTRO,
     SETUP_FLOW_MAYOR: SETUP_FLOW_MAYOR,
     SETUP_FLOW_BARTENDER: SETUP_FLOW_BARTENDER,

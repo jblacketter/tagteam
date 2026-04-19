@@ -58,6 +58,11 @@
   var phaseMapPanel = document.getElementById('phase-map-panel');
   var phaseMapList  = document.getElementById('phase-map-list');
 
+  var panesSection = document.getElementById('panes-section');
+  var paneLead     = document.getElementById('pane-lead');
+  var paneWatcher  = document.getElementById('pane-watcher');
+  var paneReviewer = document.getElementById('pane-reviewer');
+
   // --- State ---
   var currentState = {};
   var prevState = {};
@@ -216,6 +221,9 @@
     // Phase map
     show(phaseMapPanel, mode !== 'welcome');
 
+    // Live panes section — visible once an active cycle is running.
+    show(panesSection, mode === 'active');
+
     // Character glow for setup guidance
     if (mode === 'welcome' || (setupState.step && setupState.step !== 'complete')) {
       if (!setupState.step) {
@@ -255,19 +263,7 @@
     var mode = getMode();
 
     if (mode === 'welcome') {
-      // Multi-character setup flow — Mayor's part
-      setupState.step = 'mayor';
-      clearAllGlows();
-      dialogueCtrl.playScript(Conversation.SETUP_FLOW_MAYOR, function(inputs) {
-        setupState.leadName = inputs.sf_mayor_lead || 'Claude';
-        setupState.step = 'bartender';
-        persistSetupState();
-        setCharGlow('bartender');
-        // Handoff message — state is already set so clicking Bartender will work
-        dialogueCtrl.playLines([
-          { speaker: 'mayor', text: "Great! Now go click on the Bartender \u2014 they handle the review side of things." },
-        ]);
-      });
+      runLaunchpad();
     } else if (mode === 'idle') {
       var idleScript = [
         {
@@ -1095,6 +1091,9 @@
         agentConfig = await configR.json();
         handleNewState(await stateR.json());
         loadPhaseMap();
+        if (getMode() === 'active') {
+          loadPaneLogs();
+        }
       } else {
         setDisconnected('Server error (' + (stateR.status || configR.status) + ')');
       }
@@ -1114,6 +1113,38 @@
   function schedulePoll() {
     if (pollTimer) clearTimeout(pollTimer);
     pollTimer = setTimeout(poll, pollDelay);
+  }
+
+  async function loadPaneLogs() {
+    try {
+      var r = await fetch('/api/watcher/logs?n=50');
+      if (!r.ok) return;
+      var data = await r.json();
+      renderPane(paneLead, data.lead, data.backend);
+      renderPane(paneWatcher, data.watcher, data.backend);
+      renderPane(paneReviewer, data.reviewer, data.backend);
+    } catch (e) { /* silent — pane logs are non-critical */ }
+  }
+
+  function renderPane(el, slot, backend) {
+    if (!el) return;
+    if (slot && slot.available) {
+      el.classList.remove('pane-unavailable');
+      el.textContent = slot.content || '';
+      el.scrollTop = el.scrollHeight;
+      return;
+    }
+    el.classList.add('pane-unavailable');
+    var reason = (slot && slot.reason) || 'unavailable';
+    if (reason === 'backend=manual') {
+      el.textContent = 'Manual backend \u2014 panes are external.';
+    } else if (reason === 'no-session') {
+      el.textContent = 'Not live yet.';
+    } else if (reason === 'dead-session') {
+      el.textContent = 'Terminal closed.';
+    } else {
+      el.textContent = reason;
+    }
   }
 
   async function init() {
@@ -1140,35 +1171,62 @@
     var mode = getMode();
     var inSetupFlow = hasRestoredSetup && setupState.step && setupState.step !== 'complete';
 
-    if (inSetupFlow) {
-      // Resume mid-flow: glow the character the user needs to click next
-      if (setupState.step === 'bartender') {
-        setCharGlow('bartender');
-      } else if (setupState.step === 'watcher') {
-        setCharGlow('watcher');
-      } else if (setupState.step === 'mayor') {
-        setCharGlow('mayor');
-      }
-    } else if (mode === 'welcome') {
-      // Fresh start — auto-play Mayor intro
-      setTimeout(function() {
-        setupState.step = 'mayor';
-        persistSetupState();
-        dialogueCtrl.playScript(Conversation.SETUP_FLOW_MAYOR, function(inputs) {
-          setupState.leadName = inputs.sf_mayor_lead || 'Claude';
-          setupState.step = 'bartender';
-          persistSetupState();
-          setCharGlow('bartender');
-          // Handoff message — state is already set so clicking Bartender will work
-          dialogueCtrl.playLines([
-            { speaker: 'mayor', text: "Great! Now go click on the Bartender \u2014 they handle the review side of things." },
-          ]);
-        });
-      }, 500);
+    if (mode === 'welcome') {
+      // Fresh start — auto-play the launchpad. Existing setupState is legacy
+      // and ignored in the new flow.
+      clearSetupState();
+      setTimeout(runLaunchpad, 400);
     } else {
-      // Not in setup — clear any stale state
       clearSetupState();
     }
+  }
+
+  function runLaunchpad() {
+    clearAllGlows();
+    dialogueCtrl.playScript(Conversation.LAUNCHPAD, function(inputs) {
+      var payload = {
+        lead: (inputs.lp_lead || 'Claude').trim(),
+        reviewer: (inputs.lp_reviewer || 'Codex').trim(),
+        first_prompt: (inputs.lp_prompt || '').trim(),
+      };
+      if (!payload.first_prompt) {
+        dialogueCtrl.playLines([
+          { speaker: 'mayor', text: "I need a first task to give them. Click me when you're ready to try again." },
+        ]);
+        return;
+      }
+
+      dialogueCtrl.playLines([
+        { speaker: 'mayor', text: "Opening the saloon. Spinning up " + payload.lead + " and " + payload.reviewer + "\u2026" },
+      ]);
+
+      fetch('/api/launch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }).then(function(r) {
+        return r.json().then(function(body) { return { ok: r.ok, body: body }; });
+      }).then(function(res) {
+        if (!res.ok) {
+          var msg = (res.body && res.body.error) || 'Something went wrong.';
+          dialogueCtrl.playLines([
+            { speaker: 'mayor', text: "Couldn't open the saloon: " + msg + " Click me to try again." },
+          ]);
+          return;
+        }
+        dialogueCtrl.playLines([
+          { speaker: 'rabbit', text: "Session up on phase " + res.body.phase + ". The agents should be starting up in your terminal now." },
+        ]);
+        // Trigger an immediate poll so the UI transitions to live mode
+        // without waiting for the normal polling interval.
+        if (pollTimer) clearTimeout(pollTimer);
+        poll();
+      }).catch(function(err) {
+        dialogueCtrl.playLines([
+          { speaker: 'mayor', text: "Network error launching the session: " + err.message + ". Click me to try again." },
+        ]);
+      });
+    });
   }
 
   init();

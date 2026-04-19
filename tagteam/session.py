@@ -255,8 +255,16 @@ def ensure_session(
     project_dir: str,
     backend: str | None = None,
     launch: bool = False,
+    *,
+    attach_existing: bool = True,
 ) -> str:
-    """Create or reuse a session. Returns one of: created, exists, manual, error."""
+    """Create or reuse a session. Returns one of: created, exists, manual, error.
+
+    When attach_existing is False, an already-running tmux session is reported
+    as 'exists' without invoking 'tmux attach' (which would block the caller).
+    iTerm2 and manual backends never attach, so the flag is accepted for
+    symmetry but is a no-op for them.
+    """
     backend = backend or default_backend()
     if not _validate_backend(backend):
         return "error"
@@ -267,8 +275,9 @@ def ensure_session(
 
     if backend == "tmux":
         if session_exists():
-            print(f"Session '{SESSION_NAME}' already exists; attaching.")
-            subprocess.run(["tmux", "attach", "-t", SESSION_NAME])
+            if attach_existing:
+                print(f"Session '{SESSION_NAME}' already exists; attaching.")
+                subprocess.run(["tmux", "attach", "-t", SESSION_NAME])
             return "exists"
         ok = create_tmux_session(project_dir=project_dir, launch=launch)
         return "created" if ok else "error"

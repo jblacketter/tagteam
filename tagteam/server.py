@@ -36,6 +36,46 @@ agents:
 """
 
 SAFE_AGENT_NAME = re.compile(r'^[\w\s\-\.]+$')
+# Stricter pattern for /api/launch: the name becomes a shell command fallback
+# when tagteam.yaml has no explicit command, so it must be a single token.
+SAFE_LAUNCH_AGENT_NAME = re.compile(r'^[a-zA-Z][a-zA-Z0-9_\-]{0,31}$')
+_SLUG_STRIP = re.compile(r'[^a-z0-9]+')
+_SLUG_TRIM = re.compile(r'^-+|-+$')
+
+
+def _slugify(text: str, max_len: int = 40) -> str:
+    """Derive a phase slug from free-text. Returns '' if nothing usable remains."""
+    s = _SLUG_STRIP.sub('-', text.lower())
+    s = _SLUG_TRIM.sub('', s)
+    s = s[:max_len]
+    s = _SLUG_TRIM.sub('', s)
+    if not s or not s[0].isalnum():
+        return ''
+    return s
+
+
+def _initial_phase_markdown(slug: str, first_prompt: str) -> str:
+    """Scaffold a phase markdown file from the user's launch prompt."""
+    title = slug.replace('-', ' ').title()
+    return (
+        f"# Phase: {title}\n\n"
+        "## Summary\n"
+        f"{first_prompt}\n\n"
+        "## Scope\n"
+        "_Lead to fill in during plan review._\n\n"
+        "## Technical Approach\n"
+        "_Lead to fill in during plan review._\n\n"
+        "## Success Criteria\n"
+        "_Lead to fill in during plan review._\n"
+    )
+
+
+def _detect_backend_safe() -> str:
+    try:
+        from tagteam.session import default_backend
+        return default_backend()
+    except Exception:
+        return "unknown"
 
 
 def _read_config(project_dir: str) -> dict | None:
@@ -190,6 +230,87 @@ def _get_session_status(project_dir: str) -> dict:
     return {"active": False, "session": None}
 
 
+def _unavailable(reason: str) -> dict:
+    return {"available": False, "reason": reason}
+
+
+def _available(content: str) -> dict:
+    return {"available": True, "content": content}
+
+
+def _get_pane_logs(project_dir: str, n: int = 50) -> dict:
+    """Return log-tail content for lead/watcher/reviewer panes.
+
+    Response shape:
+        {"lead": {...}, "watcher": {...}, "reviewer": {...}, "backend": "..."}
+    Each pane slot is either
+        {"available": True, "content": "..."}
+    or
+        {"available": False, "reason": "..."}.
+    """
+    try:
+        from tagteam.session import default_backend
+    except Exception:
+        return {
+            "backend": "unknown",
+            "lead": _unavailable("backend-detection-failed"),
+            "watcher": _unavailable("backend-detection-failed"),
+            "reviewer": _unavailable("backend-detection-failed"),
+        }
+
+    backend = default_backend()
+    if backend == "manual":
+        reason = "backend=manual"
+        return {
+            "backend": backend,
+            "lead": _unavailable(reason),
+            "watcher": _unavailable(reason),
+            "reviewer": _unavailable(reason),
+        }
+
+    if backend == "tmux":
+        from tagteam.watcher import capture_pane, pane_exists
+        slots = {}
+        for role, target in (
+            ("lead", "tagteam:0.0"),
+            ("watcher", "tagteam:0.1"),
+            ("reviewer", "tagteam:0.2"),
+        ):
+            if not pane_exists(target):
+                slots[role] = _unavailable("no-session")
+            else:
+                slots[role] = _available(capture_pane(target, last_n_lines=n))
+        return {"backend": backend, **slots}
+
+    # iTerm2
+    from tagteam.iterm import (
+        _read_session_file,
+        get_session_contents,
+        session_id_is_valid,
+    )
+    data = _read_session_file(project_dir)
+    if not data:
+        reason = "no-session"
+        return {
+            "backend": backend,
+            "lead": _unavailable(reason),
+            "watcher": _unavailable(reason),
+            "reviewer": _unavailable(reason),
+        }
+
+    tabs = data.get("tabs", {})
+    slots = {}
+    for role in ("lead", "watcher", "reviewer"):
+        sid = (tabs.get(role) or {}).get("session_id")
+        if not sid:
+            slots[role] = _unavailable("no-session")
+        elif not session_id_is_valid(sid):
+            slots[role] = _unavailable("dead-session")
+        else:
+            slots[role] = _available(get_session_contents(sid, last_n_lines=n))
+    return {"backend": backend, **slots}
+
+
 _STATE_FIELD_VALIDATORS = {
     "turn": (str, {"lead", "reviewer"}),
     "status": (str, {"ready", "working", "done", "escalated", "aborted"}),
@@ -331,6 +452,16 @@ def make_handler(project_dir: str):
                 status = _get_watcher_status(project_dir)
                 self._send_json(status)
 
+            elif path == "/api/watcher/logs":
+                from urllib.parse import parse_qs
+                qs = parse_qs(parsed.query or "")
+                try:
+                    n = int((qs.get("n") or ["50"])[0])
+                except ValueError:
+                    n = 50
+                n = max(1, min(n, 500))
+                self._send_json(_get_pane_logs(project_dir, n=n))
+
             elif path == "/api/session/status":
                 status = _get_session_status(project_dir)
                 self._send_json(status)
@@ -431,6 +562,150 @@ def make_handler(project_dir: str):
                 content = CONFIG_TEMPLATE.format(lead_name=lead, reviewer_name=reviewer)
                 config_path.write_text(content, encoding="utf-8")
                 self._send_json(_read_config(project_dir) or {})
+
+            elif path == "/api/launch":
+                try:
+                    length = int(self.headers.get("Content-Length", 0))
+                    body = self.rfile.read(length)
+                    data = json.loads(body)
+                except (json.JSONDecodeError, ValueError):
+                    self._send_json({"error": "Invalid JSON"}, 400)
+                    return
+
+                if not isinstance(data, dict):
+                    self._send_json({"error": "Expected JSON object"}, 400)
+                    return
+
+                lead = (data.get("lead") or "").strip()
+                reviewer = (data.get("reviewer") or "").strip()
+                first_prompt = (data.get("first_prompt") or "").strip()
+
+                if not lead or not reviewer:
+                    self._send_json({"error": "Both 'lead' and 'reviewer' are required"}, 400)
+                    return
+                if (not SAFE_LAUNCH_AGENT_NAME.match(lead)
+                        or not SAFE_LAUNCH_AGENT_NAME.match(reviewer)):
+                    self._send_json({
+                        "error": ("Agent names must start with a letter and contain only "
+                                  "letters, digits, hyphens, or underscores (max 32 chars)."),
+                    }, 400)
+                    return
+                if not first_prompt:
+                    self._send_json({"error": "'first_prompt' is required"}, 400)
+                    return
+                if len(first_prompt) > 2000:
+                    self._send_json({"error": "'first_prompt' must be 2000 chars or fewer"}, 400)
+                    return
+
+                slug = _slugify(first_prompt)
+                if not slug:
+                    self._send_json({"error": "Could not derive a phase slug from first_prompt"}, 400)
+                    return
+
+                config_path = Path(project_dir) / "tagteam.yaml"
+                if config_path.exists():
+                    existing = _read_config(project_dir)
+                    if existing is None:
+                        self._send_json({
+                            "error": "tagteam.yaml exists but could not be parsed. "
+                                     "Fix or remove it before launching from the saloon.",
+                        }, 409)
+                        return
+                    ex_lead, ex_reviewer = get_agent_names(existing)
+                    if not ex_lead or not ex_reviewer:
+                        self._send_json({
+                            "error": "tagteam.yaml exists but is missing a lead or reviewer. "
+                                     "Fix or remove it before launching from the saloon.",
+                            "existing": {"lead": ex_lead, "reviewer": ex_reviewer},
+                        }, 409)
+                        return
+                    if ex_lead != lead or ex_reviewer != reviewer:
+                        self._send_json({
+                            "error": "tagteam.yaml exists with different agent names",
+                            "existing": {"lead": ex_lead, "reviewer": ex_reviewer},
+                        }, 409)
+                        return
+                else:
+                    try:
+                        from tagteam.cli import write_config
+                        write_config(project_dir, lead, reviewer)
+                    except Exception as exc:
+                        self._send_json({"error": f"Failed to write tagteam.yaml: {exc}"}, 500)
+                        return
+
+                phases_dir = Path(project_dir) / "docs" / "phases"
+                phases_dir.mkdir(parents=True, exist_ok=True)
+                phase_file = phases_dir / f"{slug}.md"
+                if phase_file.exists():
+                    self._send_json({
+                        "error": f"Phase file already exists: docs/phases/{slug}.md",
+                    }, 409)
+                    return
+                phase_content = _initial_phase_markdown(slug, first_prompt)
+                try:
+                    phase_file.write_text(phase_content, encoding="utf-8")
+                except OSError as exc:
+                    self._send_json({"error": f"Failed to write phase file: {exc}"}, 500)
+                    return
+
+                try:
+                    from tagteam.cycle import init_cycle
+                    summary = first_prompt.splitlines()[0][:280]
+                    init_cycle(
+                        phase=slug,
+                        cycle_type="plan",
+                        lead=lead,
+                        reviewer=reviewer,
+                        content=summary,
+                        project_dir=project_dir,
+                        updated_by="saloon",
+                    )
+                except Exception as exc:
+                    self._send_json({
+                        "error": f"Failed to initialize cycle: {exc}",
+                        "partial": True,
+                        "phase": slug,
+                    }, 500)
+                    return
+
+                try:
+                    from tagteam.session import ensure_session
+                    result = ensure_session(
+                        project_dir,
+                        launch=True,
+                        attach_existing=False,
+                    )
+                except Exception as exc:
+                    self._send_json({
+                        "error": f"Failed to launch session: {exc}",
+                        "partial": True,
+                        "phase": slug,
+                    }, 500)
+                    return
+
+                # ensure_session reports backend/session failures by returning
+                # the sentinel string "error" rather than raising. Config, phase
+                # file, and cycle have already been written at this point;
+                # surface a non-2xx so the browser doesn't transition to live
+                # mode, but leave the partial artifacts in place (recoverable
+                # via the CLI).
+                if result == "error":
+                    self._send_json({
+                        "error": ("Session launch failed. Config, phase, and cycle were "
+                                  "created; start the session manually with "
+                                  "`tagteam session start --launch`."),
+                        "partial": True,
+                        "phase": slug,
+                        "backend": _detect_backend_safe(),
+                    }, 500)
+                    return
+
+                self._send_json({
+                    "status": result if result in ("created", "exists", "manual") else "ok",
+                    "session": result,
+                    "phase": slug,
+                    "backend": _detect_backend_safe(),
+                })
 
             elif path == "/api/start-phase":
                 try:
