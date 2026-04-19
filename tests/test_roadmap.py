@@ -1,4 +1,4 @@
-"""Tests for ai_handoff.roadmap and related state/watcher changes."""
+"""Tests for tagteam.roadmap and related state/watcher changes."""
 
 import json
 import textwrap
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from ai_handoff.roadmap import (
+from tagteam.roadmap import (
     RoadmapPhase,
     _slugify,
     parse_roadmap,
@@ -14,7 +14,7 @@ from ai_handoff.roadmap import (
     build_queue,
     roadmap_command,
 )
-from ai_handoff.state import (
+from tagteam.state import (
     VALID_RUN_MODES,
     format_state,
     read_state,
@@ -22,7 +22,7 @@ from ai_handoff.state import (
     write_state,
     _state_set,
 )
-from ai_handoff.watcher import _try_roadmap_advance
+from tagteam.watcher import _try_roadmap_advance
 
 
 # ── Helpers ──────────────────────────────────────────────────────

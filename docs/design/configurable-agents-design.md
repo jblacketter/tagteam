@@ -21,7 +21,7 @@
 |----------|---------|------------|
 | **High** | Role resolution underspecified - AI can't determine which agent it is | Added Section 1.1: Agent Self-Identification |
 | **Medium** | Primary lead/reviewer undefined for templates | Added explicit `primary: true` flag in schema |
-| **Medium** | `.claude/skills/` only - other AIs won't load skills | Changed to `.ai-handoff/skills/` with symlinks |
+| **Medium** | `.claude/skills/` only - other AIs won't load skills | Changed to `.tagteam/skills/` with symlinks |
 | **Medium** | Regeneration drift when users edit files | Added drift detection and merge strategy |
 | **Medium** | Migration preserves old hardcoded names | Added `--regenerate-docs` flag to migration |
 | **Low** | Arbiter validation unclear | Clarified arbiter rules in schema |
@@ -38,7 +38,7 @@
 
 ## Problem Statement
 
-The current AI Handoff Framework hardcodes "Claude" as Lead and "Codex" as Reviewer throughout the documentation and skills. This limits adoption for users who:
+The current Tagteam hardcodes "Claude" as Lead and "Codex" as Reviewer throughout the documentation and skills. This limits adoption for users who:
 
 - Use different AI combinations (e.g., Claude + Gemini, Grok + Codex)
 - Want multiple reviewers (e.g., Codex AND Gemini)
@@ -55,12 +55,12 @@ Introduce a configuration file that defines which AIs are used and their roles, 
 
 ### 1. Configuration File
 
-**Location**: `ai-handoff.yaml` in project root (visible, easy to find)
+**Location**: `tagteam.yaml` in project root (visible, easy to find)
 
 **Schema**:
 
 ```yaml
-# ai-handoff.yaml
+# tagteam.yaml
 
 # Project metadata (optional)
 project_name: "My Project"
@@ -146,7 +146,7 @@ defaults:
 
 2. **CLI Flag** (for manual invocation):
    ```bash
-   ai-handoff --agent Claude /plan create phase-1
+   tagteam --agent Claude /plan create phase-1
    ```
 
 3. **Model Self-Identification** (fallback):
@@ -170,7 +170,7 @@ defaults:
    Tools can inject identity context:
    ```
    You are operating as "Claude" in this project.
-   See ai-handoff.yaml for your role configuration.
+   See tagteam.yaml for your role configuration.
    ```
 
 #### Skill Preamble (Updated):
@@ -181,7 +181,7 @@ defaults:
 > **Identity Check**: Determine which agent you are:
 > 1. Check for AI_HANDOFF_AGENT environment variable
 > 2. Check for --agent flag in invocation
-> 3. Match your model identifier against `model_patterns` in ai-handoff.yaml
+> 3. Match your model identifier against `model_patterns` in tagteam.yaml
 > 4. If still ambiguous, ask the user to clarify
 >
 > Once identified, read your `role` from the config to determine behavior.
@@ -320,8 +320,8 @@ Disputes will be escalated to {{arbiter}}.
 **Generation Flow**:
 
 ```
-ai-handoff-setup myproject/
-  ├── Read/create ai-handoff.yaml
+tagteam-setup myproject/
+  ├── Read/create tagteam.yaml
   ├── Load templates from templates/
   ├── Substitute variables
   └── Write to docs/
@@ -330,7 +330,7 @@ ai-handoff-setup myproject/
 **Regeneration Command**:
 
 ```bash
-ai-handoff regenerate [--force] [--merge]
+tagteam regenerate [--force] [--merge]
 ```
 
 **Drift Detection and Handling** (Addresses Medium Finding):
@@ -342,8 +342,8 @@ ai-handoff regenerate [--force] [--merge]
 | Config changed | Regenerate unmodified only | Regenerate all | Merge changes into modified |
 
 **Drift Detection**:
-- On generation, store SHA256 hash of generated content in `.ai-handoff/checksums.json`
-- Also store last-generated content in `.ai-handoff/generated/` to serve as merge base
+- On generation, store SHA256 hash of generated content in `.tagteam/checksums.json`
+- Also store last-generated content in `.tagteam/generated/` to serve as merge base
 - On regeneration, compare current file hash to stored hash
 - If different, file was user-modified
 - `--merge` uses base (last generated), current file, and newly generated content
@@ -351,7 +351,7 @@ ai-handoff regenerate [--force] [--merge]
 
 **Example Output**:
 ```
-ai-handoff regenerate
+tagteam regenerate
 ✓ docs/roadmap.md - regenerated
 ⚠ docs/phases/phase-1.md - modified by user, skipped (use --force or --merge)
 ✓ docs/decision_log.md - regenerated
@@ -368,7 +368,7 @@ ai-handoff regenerate
 ```markdown
 # /plan
 
-> **Before using this skill**: Read `ai-handoff.yaml` to determine your role.
+> **Before using this skill**: Read `tagteam.yaml` to determine your role.
 
 ## If you are a **Lead**:
 
@@ -423,13 +423,13 @@ Redirect to: `/decide` or `/escalate resolve`
 
 **Current Flow**:
 ```bash
-ai-handoff-setup myproject/
+tagteam-setup myproject/
 # Copies files, done
 ```
 
 **New Flow**:
 ```bash
-ai-handoff-setup myproject/
+tagteam-setup myproject/
 
 # Interactive prompts:
 ? Project name: My Project
@@ -442,9 +442,9 @@ ai-handoff-setup myproject/
 ? Arbiter (default: Human): Human
 
 # Actions:
-✓ Created ai-handoff.yaml
+✓ Created tagteam.yaml
 ✓ Generated docs from templates
-✓ Installed skills to .ai-handoff/skills/ and linked to .claude/skills/
+✓ Installed skills to .tagteam/skills/ and linked to .claude/skills/
 ✓ Setup complete!
 
 # Output:
@@ -453,7 +453,7 @@ Run /status to verify your setup.
 
 **Non-Interactive Mode**:
 ```bash
-ai-handoff-setup myproject/ --config path/to/ai-handoff.yaml
+tagteam-setup myproject/ --config path/to/tagteam.yaml
 ```
 
 ---
@@ -462,7 +462,7 @@ ai-handoff-setup myproject/ --config path/to/ai-handoff.yaml
 
 **Problem**: `.claude/skills/` only works for Claude; other AIs won't load skills from there.
 
-**Solution**: Use `.ai-handoff/skills/` as source of truth, with symlinks/copies to AI-specific directories.
+**Solution**: Use `.tagteam/skills/` as source of truth, with symlinks/copies to AI-specific directories.
 
 **Before**:
 ```
@@ -478,8 +478,8 @@ project/
 **After**:
 ```
 project/
-├── ai-handoff.yaml              # Configuration file
-├── .ai-handoff/
+├── tagteam.yaml              # Configuration file
+├── .tagteam/
 │   ├── skills/                  # Source of truth for all skills
 │   │   ├── plan.md
 │   │   ├── handoff.md
@@ -489,11 +489,11 @@ project/
 │   ├── checksums.json           # For drift detection
 │   └── config.schema.json       # Optional: JSON schema for validation
 ├── .claude/
-│   └── skills/ → ../.ai-handoff/skills/   # Symlink (or copy on Windows)
+│   └── skills/ → ../.tagteam/skills/   # Symlink (or copy on Windows)
 ├── .codex/
-│   └── skills/ → ../.ai-handoff/skills/   # Created per configured agent
+│   └── skills/ → ../.tagteam/skills/   # Created per configured agent
 ├── .gemini/
-│   └── skills/ → ../.ai-handoff/skills/
+│   └── skills/ → ../.tagteam/skills/
 ├── docs/
 │   ├── phases/
 │   ├── handoffs/
@@ -505,11 +505,11 @@ project/
 - For each agent in config, create `.{agent.id}/skills/` (uses `id` field, not `name`)
 - Example: agent with `id: claude` → `.claude/skills/`
 - Example: agent with `name: "GPT-4 Turbo"`, `id: gpt4` → `.gpt4/skills/`
-- On Unix/macOS: symlink to `.ai-handoff/skills/`
+- On Unix/macOS: symlink to `.tagteam/skills/`
 - On Windows: copy files (symlinks require admin)
 
 **Benefits**:
-- Single source of truth (`.ai-handoff/skills/`)
+- Single source of truth (`.tagteam/skills/`)
 - Each AI loads skills from its expected location
 - Updates to skills automatically propagate via symlinks
 - `id` field ensures stable, filesystem-safe directory names
@@ -518,23 +518,23 @@ project/
 
 ### 5.1 Windows Skill Sync (NEW - Addresses Low Finding)
 
-**Problem**: Windows uses file copies instead of symlinks. When skills are updated in `.ai-handoff/skills/`, the copies in `.{agent.id}/skills/` become stale.
+**Problem**: Windows uses file copies instead of symlinks. When skills are updated in `.tagteam/skills/`, the copies in `.{agent.id}/skills/` become stale.
 
-**Solution**: Add `ai-handoff sync-skills` command.
+**Solution**: Add `tagteam sync-skills` command.
 
 ```bash
-ai-handoff sync-skills [--dry-run]
+tagteam sync-skills [--dry-run]
 ```
 
 **Behavior**:
-1. Read `ai-handoff.yaml` to get list of configured agents
-2. For each agent, compare `.ai-handoff/skills/` to `.{agent.id}/skills/`
+1. Read `tagteam.yaml` to get list of configured agents
+2. For each agent, compare `.tagteam/skills/` to `.{agent.id}/skills/`
 3. Copy any files that differ (based on content hash, not mtime)
 4. Report what was synced
 
 **Example Output**:
 ```
-ai-handoff sync-skills
+tagteam sync-skills
 
 Syncing skills for 3 agents...
   .claude/skills/: 0 files updated (symlink, no sync needed)
@@ -549,9 +549,9 @@ Sync complete.
 ```
 
 **When to Run**:
-- After updating skills in `.ai-handoff/skills/`
+- After updating skills in `.tagteam/skills/`
 - After pulling changes that modify skills
-- After running `ai-handoff migrate` or `ai-handoff setup`
+- After running `tagteam migrate` or `tagteam setup`
 
 **Automation Options**:
 - Git hook: `post-merge` to auto-sync after pulls
@@ -566,7 +566,7 @@ Sync complete.
 **Solution**: Add `--regenerate-docs` flag and provide clear guidance.
 
 ```bash
-ai-handoff migrate [--regenerate-docs] [--dry-run]
+tagteam migrate [--regenerate-docs] [--dry-run]
 ```
 
 **Migration Steps**:
@@ -576,11 +576,11 @@ ai-handoff migrate [--regenerate-docs] [--dry-run]
    - Scan docs for hardcoded "Claude"/"Codex" references
 
 2. **Generate config**:
-   - Create `ai-handoff.yaml` with defaults (Claude=lead, Codex=reviewer)
+   - Create `tagteam.yaml` with defaults (Claude=lead, Codex=reviewer)
    - User can edit before proceeding
 
 3. **Update skills**:
-   - Move skills to `.ai-handoff/skills/`
+   - Move skills to `.tagteam/skills/`
    - Create symlinks from `.claude/skills/`
    - Replace old skills with config-aware versions
 
@@ -594,16 +594,16 @@ ai-handoff migrate [--regenerate-docs] [--dry-run]
 
 **Example Migration Output**:
 ```
-ai-handoff migrate --dry-run
+tagteam migrate --dry-run
 
-Detected existing ai-handoff setup:
+Detected existing tagteam setup:
   - Skills: .claude/skills/ (9 files)
   - Docs: docs/ (hardcoded names found in 5 files)
 
 Planned changes:
-  ✓ Create ai-handoff.yaml (Claude=lead, Codex=reviewer)
-  ✓ Move skills to .ai-handoff/skills/
-  ✓ Create symlink .claude/skills/ → .ai-handoff/skills/
+  ✓ Create tagteam.yaml (Claude=lead, Codex=reviewer)
+  ✓ Move skills to .tagteam/skills/
+  ✓ Create symlink .claude/skills/ → .tagteam/skills/
   ⚠ Docs contain hardcoded names (use --regenerate-docs to update):
     - docs/workflows.md: 12 references
     - docs/phases/phase-1.md: 3 references
@@ -651,11 +651,11 @@ Handoff documents include routing:
 
 ### 2. Skill File Location → RESOLVED: Hybrid Approach
 
-**Codex Recommendation**: Use `.ai-handoff/skills` as source of truth, copy/symlink to client-specific folders.
+**Codex Recommendation**: Use `.tagteam/skills` as source of truth, copy/symlink to client-specific folders.
 
 **Implementation**: See Section 5 (File Structure Changes)
 
-- Source: `.ai-handoff/skills/`
+- Source: `.tagteam/skills/`
 - Per-agent: `.claude/skills/`, `.codex/skills/`, etc. (symlinks)
 - Windows: copies instead of symlinks
 
@@ -669,8 +669,8 @@ Handoff documents include routing:
 
 | When | Validation Level | Actions |
 |------|-----------------|---------|
-| `ai-handoff setup` | Strict | Full schema validation, fail on any error |
-| `ai-handoff migrate` | Strict | Validate before applying changes |
+| `tagteam setup` | Strict | Full schema validation, fail on any error |
+| `tagteam migrate` | Strict | Validate before applying changes |
 | Skill invocation | Lightweight | Check config exists, agent identifiable, role valid |
 
 **Skill-Level Validation Errors**:
@@ -680,7 +680,7 @@ Configured agents: Claude (lead), Codex (reviewer)
 Set AI_HANDOFF_AGENT environment variable or use --agent flag.
 
 Error: Config file missing or invalid.
-Run 'ai-handoff validate' to check your configuration.
+Run 'tagteam validate' to check your configuration.
 ```
 
 ---
@@ -756,7 +756,7 @@ Run 'ai-handoff validate' to check your configuration.
 | Old setup with hardcoded names | Detect and warn |
 | `--dry-run` | Show changes without modifying |
 | `--regenerate-docs` | Update docs to use config values |
-| Skills in `.claude/skills/` | Moved to `.ai-handoff/skills/`, symlink created |
+| Skills in `.claude/skills/` | Moved to `.tagteam/skills/`, symlink created |
 
 ### Agent Identification Tests
 

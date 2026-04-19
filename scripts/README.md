@@ -1,6 +1,6 @@
 # Project Scripts
 
-Helper scripts for the ai-handoff project to streamline common operations and avoid permission prompts.
+Helper scripts for the tagteam project to streamline common operations and avoid permission prompts.
 
 ## project-helper.sh
 

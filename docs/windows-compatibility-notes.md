@@ -1,17 +1,17 @@
-# AI Handoff Windows Compatibility Notes
+# Tagteam Windows Compatibility Notes
 
 Date: 2026-04-01
-Prepared from a Windows validation pass against `ai_handoff 0.1.0` and an active consumer project (`botastrophic`).
+Prepared from a Windows validation pass against `tagteam 0.1.0` and an active consumer project (`botastrophic`).
 
 ## Update: Track A Status
 
 The pre-fix validation below is still useful context, but the current repo behavior is now better than this note originally described.
 
 What now works in this repo:
-- `python -m ai_handoff session start` no longer crashes on Windows when `tmux` is unavailable.
+- `python -m tagteam session start` no longer crashes on Windows when `tmux` is unavailable.
 - Session backend selection is auto-detected instead of assuming `iterm2`.
 - A `manual` session backend now prints the commands for a Windows-safe workflow.
-- `python -m ai_handoff quickstart` can complete on Windows and hand off to the manual workflow.
+- `python -m tagteam quickstart` can complete on Windows and hand off to the manual workflow.
 
 What still does not work:
 - There is still no native Windows Terminal / `wt.exe` backend.
@@ -25,13 +25,13 @@ Follow-up review status:
 - Recommended next step: Track B, add a native Windows Terminal backend around `wt.exe` and PowerShell.
 
 For Windows today, the recommended path is:
-- `python -m ai_handoff quickstart --dir .`
-- `python -m ai_handoff session start --dir . --backend manual`
-- `python -m ai_handoff watch --mode notify`
+- `python -m tagteam quickstart --dir .`
+- `python -m tagteam session start --dir . --backend manual`
+- `python -m tagteam watch --mode notify`
 
 ## Summary
 
-`ai_handoff` is only partially Windows-compatible today.
+`tagteam` is only partially Windows-compatible today.
 
 What works:
 - State file reads and writes are Windows-safe.
@@ -41,14 +41,14 @@ What works:
 What does not work yet:
 - Automated session orchestration still assumes `tmux`.
 - Desktop notifications still assume macOS `osascript`.
-- `python -m ai_handoff session start` crashes on Windows instead of failing cleanly.
+- `python -m tagteam session start` crashes on Windows instead of failing cleanly.
 - There is no Windows terminal backend analogous to the prior iTerm2/mac usage.
 
 ## Evidence
 
 ### 1. State layer is Windows-safe
 
-`ai_handoff/state.py` uses `pathlib` and atomic replace semantics:
+`tagteam/state.py` uses `pathlib` and atomic replace semantics:
 - `tmp_path = Path(project_dir) / STATE_TMP`
 - `tmp_path.replace(path)`
 
@@ -56,7 +56,7 @@ That is the right fix for Windows, where `rename()` fails when the target exists
 
 ### 2. Session orchestration is still tmux-only
 
-`ai_handoff/session.py`:
+`tagteam/session.py`:
 - shells out to `tmux` for `has-session`, `new-session`, `split-window`, `send-keys`, `attach`, and `kill-session`
 - prints `Install: brew install tmux` on failure
 
@@ -64,7 +64,7 @@ This is not Windows-ready.
 
 ### 3. Watcher automation is still macOS/tmux-centric
 
-`ai_handoff/watcher.py`:
+`tagteam/watcher.py`:
 - notifications are sent through `osascript`
 - send-to-agent automation is implemented via `tmux send-keys`
 - supported modes are only `notify` and `tmux`
@@ -74,9 +74,9 @@ On plain Windows, `notify` degrades to console logging because `osascript` does 
 ### 4. Runtime validation on Windows
 
 From the consumer project environment on Windows:
-- `python -m ai_handoff state` worked
-- `python -m ai_handoff watch --help` worked
-- `python -m ai_handoff session start` failed with `FileNotFoundError: [WinError 2]` because it attempted to execute `tmux`
+- `python -m tagteam state` worked
+- `python -m tagteam watch --help` worked
+- `python -m tagteam session start` failed with `FileNotFoundError: [WinError 2]` because it attempted to execute `tmux`
 
 ## Recommendation
 
@@ -142,7 +142,7 @@ A consumer repo still had stale mac-specific session metadata from an earlier iT
 - backend: `iterm2`
 - a macOS project path under `/Users/...`
 
-That file did not appear to be read by `ai_handoff 0.1.0`, so it looks like stale session state rather than active configuration. Still, it is a reminder that session metadata should be clearly scoped, documented, and either regenerated or ignored when changing platforms.
+That file did not appear to be read by `tagteam 0.1.0`, so it looks like stale session state rather than active configuration. Still, it is a reminder that session metadata should be clearly scoped, documented, and either regenerated or ignored when changing platforms.
 
 ## Suggested next-session goal
 

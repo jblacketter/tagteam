@@ -1,5 +1,5 @@
 #!/bin/bash
-# Helper script for common ai-handoff project operations
+# Helper script for common tagteam project operations
 # Usage: ./scripts/project-helper.sh <command> [args...]
 
 set -e
@@ -28,23 +28,23 @@ case "$command" in
 
   state)
     # Show current handoff state
-    python3 -m ai_handoff state "$@"
+    python3 -m tagteam state "$@"
     ;;
 
   cycle)
     # Cycle operations
-    python3 -m ai_handoff cycle "$@"
+    python3 -m tagteam cycle "$@"
     ;;
 
   roadmap)
     # Roadmap operations
-    python3 -m ai_handoff roadmap "$@"
+    python3 -m tagteam roadmap "$@"
     ;;
 
   format)
     # Format code (if black is installed)
     if command -v black >/dev/null 2>&1; then
-      black ai_handoff/ tests/
+      black tagteam/ tests/
     else
       echo "black not installed, skipping formatting"
     fi
@@ -53,7 +53,7 @@ case "$command" in
   lint)
     # Run linting (if ruff is installed)
     if command -v ruff >/dev/null 2>&1; then
-      ruff check ai_handoff/ tests/
+      ruff check tagteam/ tests/
     else
       echo "ruff not installed, skipping linting"
     fi
@@ -79,7 +79,7 @@ case "$command" in
 
   help|*)
     cat <<EOF
-AI Handoff Project Helper
+Tagteam Project Helper
 
 Usage: ./scripts/project-helper.sh <command> [args...]
 

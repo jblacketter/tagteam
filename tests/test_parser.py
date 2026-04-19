@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from ai_handoff.parser import (
+from tagteam.parser import (
     extract_all_rounds, format_rounds_html, _extract_summary,
     parse_jsonl_rounds, read_cycle_rounds,
 )

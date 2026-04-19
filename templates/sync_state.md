@@ -26,7 +26,7 @@ For Human:
 - Phase plan: `docs/phases/[phase].md`
 - Latest handoff: `docs/handoffs/[file].md`
 - Decision log: `docs/decision_log.md`
-- Agent config: `ai-handoff.yaml`
+- Agent config: `tagteam.yaml`
 
 ## Session Continuity
 Last activity: [what was done]

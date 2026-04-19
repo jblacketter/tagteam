@@ -1,4 +1,4 @@
-# AI Handoff Framework
+# Tagteam
 
 A collaboration framework for structured AI-to-AI handoffs with human oversight. One AI leads, another reviews, and you arbitrate — the whole cycle runs phase by phase from a roadmap.
 
@@ -15,9 +15,9 @@ State is tracked in `handoff-state.json` (current turn) and `docs/handoffs/<phas
 ## Quick Start
 
 ```bash
-pip install git+https://github.com/jblacketter/ai-handoff.git
+pip install git+https://github.com/jblacketter/tagteam.git
 cd ~/projects/myproject
-ai-handoff quickstart
+tagteam quickstart
 ```
 
 You'll be prompted for your two agent names, then quickstart sets up the workspace and starts a handoff session. It auto-detects the best terminal backend available on your machine:
@@ -53,7 +53,7 @@ When quickstart finishes it prints what to paste into the Lead and Reviewer agen
 **Human-in-the-loop** — add `--confirm` to pause for approval before each automatic send.
 
 ```bash
-ai-handoff watch --mode notify --confirm
+tagteam watch --mode notify --confirm
 ```
 
 ## Other platforms
@@ -62,10 +62,10 @@ ai-handoff watch --mode notify --confirm
 <summary>tmux (explicit invocation)</summary>
 
 ```bash
-ai-handoff quickstart --backend tmux
+tagteam quickstart --backend tmux
 ```
 
-Creates one `tmux` session named `ai-handoff` with three labeled panes (Lead, Watcher, Reviewer). Attach later with `tmux attach -t ai-handoff`.
+Creates one `tmux` session named `tagteam` with three labeled panes (Lead, Watcher, Reviewer). Attach later with `tmux attach -t tagteam`.
 
 </details>
 
@@ -75,16 +75,16 @@ Creates one `tmux` session named `ai-handoff` with three labeled panes (Lead, Wa
 On Windows without WSL, terminal automation isn't available. Quickstart prints the commands for you to run yourself in three terminals:
 
 ```bash
-ai-handoff quickstart --backend manual
+tagteam quickstart --backend manual
 ```
 
 You can also run each step individually:
 
 ```bash
-ai-handoff setup
-ai-handoff init
-ai-handoff session start --backend manual
-ai-handoff watch --mode notify
+tagteam setup
+tagteam init
+tagteam session start --backend manual
+tagteam watch --mode notify
 ```
 
 For full automation on Windows today, use WSL with `tmux`.
@@ -95,16 +95,16 @@ For full automation on Windows today, use WSL with `tmux`.
 <summary>Advanced setup (run each step yourself)</summary>
 
 ```bash
-ai-handoff setup               # copy skills, templates, docs
-ai-handoff init                # interactive agent config → ai-handoff.yaml
-ai-handoff session start       # create terminals and auto-launch agents
+tagteam setup               # copy skills, templates, docs
+tagteam init                # interactive agent config → tagteam.yaml
+tagteam session start       # create terminals and auto-launch agents
 ```
 
 Options:
 
-- `ai-handoff session start --no-launch` — create terminals but don't start agents
-- `ai-handoff session start --backend <name>` — force a specific backend
-- `ai-handoff session kill` — close the current session
+- `tagteam session start --no-launch` — create terminals but don't start agents
+- `tagteam session start --backend <name>` — force a specific backend
+- `tagteam session kill` — close the current session
 
 > **Manual mode:** you can always run handoffs without any automation by pasting `/handoff` output between agents yourself.
 
@@ -115,12 +115,12 @@ Options:
 A graphical dashboard for monitoring and controlling handoff cycles:
 
 ```bash
-ai-handoff serve --dir ~/projects/myproject
+tagteam serve --dir ~/projects/myproject
 ```
 
 ## Configuration
 
-Agents are defined in `ai-handoff.yaml`:
+Agents are defined in `tagteam.yaml`:
 
 ```yaml
 agents:
@@ -135,20 +135,20 @@ agents:
 ## CLI Reference
 
 ```bash
-ai-handoff quickstart                     # Setup + init + session start
-ai-handoff session start                  # Auto-detect backend, launch agents
-ai-handoff session start --backend manual # Force manual backend
-ai-handoff session start --no-launch      # Create terminals, skip agent launch
-ai-handoff session kill
-ai-handoff init
-ai-handoff setup
-ai-handoff state
-ai-handoff state diagnose
-ai-handoff watch --mode notify
-ai-handoff roadmap phases
-ai-handoff serve --dir .
-ai-handoff upgrade
-ai-handoff --help
+tagteam quickstart                     # Setup + init + session start
+tagteam session start                  # Auto-detect backend, launch agents
+tagteam session start --backend manual # Force manual backend
+tagteam session start --no-launch      # Create terminals, skip agent launch
+tagteam session kill
+tagteam init
+tagteam setup
+tagteam state
+tagteam state diagnose
+tagteam watch --mode notify
+tagteam roadmap phases
+tagteam serve --dir .
+tagteam upgrade
+tagteam --help
 ```
 
 ## License

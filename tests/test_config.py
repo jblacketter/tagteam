@@ -4,7 +4,7 @@ import pytest
 from pathlib import Path
 import tempfile
 
-from ai_handoff.config import read_config, validate_config, get_agent_names, get_launch_commands
+from tagteam.config import read_config, validate_config, get_agent_names, get_launch_commands
 
 
 class TestReadConfig:
@@ -15,7 +15,7 @@ class TestReadConfig:
         assert result is None
 
     def test_reads_valid_config(self, tmp_path):
-        config_file = tmp_path / "ai-handoff.yaml"
+        config_file = tmp_path / "tagteam.yaml"
         config_file.write_text("""
 agents:
   lead:
@@ -29,7 +29,7 @@ agents:
         assert result["agents"]["reviewer"]["name"] == "Codex"
 
     def test_reads_config_with_model_patterns(self, tmp_path):
-        config_file = tmp_path / "ai-handoff.yaml"
+        config_file = tmp_path / "tagteam.yaml"
         config_file.write_text("""
 agents:
   lead:
@@ -47,25 +47,25 @@ agents:
         assert result["agents"]["lead"]["model_patterns"] == ["claude", "anthropic"]
 
     def test_returns_none_for_non_dict_yaml_list(self, tmp_path):
-        config_file = tmp_path / "ai-handoff.yaml"
+        config_file = tmp_path / "tagteam.yaml"
         config_file.write_text("- item1\n- item2")
         result = read_config(config_file)
         assert result is None
 
     def test_returns_none_for_non_dict_yaml_string(self, tmp_path):
-        config_file = tmp_path / "ai-handoff.yaml"
+        config_file = tmp_path / "tagteam.yaml"
         config_file.write_text("just a string")
         result = read_config(config_file)
         assert result is None
 
     def test_returns_none_for_non_dict_yaml_number(self, tmp_path):
-        config_file = tmp_path / "ai-handoff.yaml"
+        config_file = tmp_path / "tagteam.yaml"
         config_file.write_text("42")
         result = read_config(config_file)
         assert result is None
 
     def test_returns_empty_dict_for_empty_yaml(self, tmp_path):
-        config_file = tmp_path / "ai-handoff.yaml"
+        config_file = tmp_path / "tagteam.yaml"
         config_file.write_text("{}")
         result = read_config(config_file)
         assert result == {}
@@ -318,10 +318,10 @@ class TestFallbackParserCommand:
 
     def test_fallback_parses_command_fields(self, tmp_path, monkeypatch):
         # Force fallback parser by pretending yaml is unavailable
-        import ai_handoff.config as config_mod
+        import tagteam.config as config_mod
         monkeypatch.setattr(config_mod, "HAS_YAML", False)
 
-        config_file = tmp_path / "ai-handoff.yaml"
+        config_file = tmp_path / "tagteam.yaml"
         config_file.write_text(
             "agents:\n"
             "  lead:\n"
@@ -337,10 +337,10 @@ class TestFallbackParserCommand:
         assert result["agents"]["reviewer"]["command"] == "codex --full-auto"
 
     def test_fallback_without_command_fields(self, tmp_path, monkeypatch):
-        import ai_handoff.config as config_mod
+        import tagteam.config as config_mod
         monkeypatch.setattr(config_mod, "HAS_YAML", False)
 
-        config_file = tmp_path / "ai-handoff.yaml"
+        config_file = tmp_path / "tagteam.yaml"
         config_file.write_text(
             "agents:\n"
             "  lead:\n"

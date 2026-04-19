@@ -5,7 +5,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch
 
-from ai_handoff.registry import (
+from tagteam.registry import (
     register_project,
     get_registered_projects,
     unregister_project,
@@ -17,10 +17,10 @@ from ai_handoff.registry import (
 @pytest.fixture
 def mock_registry(tmp_path):
     """Patch registry constants to use a temp directory."""
-    reg_dir = tmp_path / ".ai-handoff"
+    reg_dir = tmp_path / ".tagteam"
     reg_file = reg_dir / "projects.json"
-    with patch("ai_handoff.registry.REGISTRY_DIR", reg_dir), \
-         patch("ai_handoff.registry.REGISTRY_FILE", reg_file):
+    with patch("tagteam.registry.REGISTRY_DIR", reg_dir), \
+         patch("tagteam.registry.REGISTRY_FILE", reg_file):
         yield reg_dir, reg_file
 
 

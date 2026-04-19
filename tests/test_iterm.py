@@ -6,7 +6,7 @@ from unittest.mock import patch, call
 
 import pytest
 
-from ai_handoff.iterm import (
+from tagteam.iterm import (
     _ensure_iterm_ready,
     _read_session_file,
     _write_session_file,
@@ -17,7 +17,7 @@ from ai_handoff.iterm import (
     iterm_is_running,
     create_session,
 )
-from ai_handoff.watcher import _check_idle_patterns
+from tagteam.watcher import _check_idle_patterns
 
 
 class TestSessionFile:
@@ -64,7 +64,7 @@ class TestSessionFile:
 
 
 class TestOsascriptCalls:
-    @patch("ai_handoff.iterm._osascript")
+    @patch("tagteam.iterm._osascript")
     def test_write_text_success(self, mock_osascript):
         mock_osascript.return_value = "ok"
         result = write_text_to_session("session-123", "/handoff")
@@ -76,48 +76,48 @@ class TestOsascriptCalls:
         assert 'write text "/handoff" newline NO' in call_script
         assert "ASCII character 13" in call_script
 
-    @patch("ai_handoff.iterm._osascript")
+    @patch("tagteam.iterm._osascript")
     def test_write_text_not_found(self, mock_osascript):
         mock_osascript.return_value = "not_found"
         result = write_text_to_session("bad-id", "/handoff")
         assert result is False
 
-    @patch("ai_handoff.iterm._osascript")
+    @patch("tagteam.iterm._osascript")
     def test_write_text_exception(self, mock_osascript):
         mock_osascript.side_effect = RuntimeError("fail")
         result = write_text_to_session("session-123", "/handoff")
         assert result is False
 
-    @patch("ai_handoff.iterm._osascript")
+    @patch("tagteam.iterm._osascript")
     def test_write_text_escapes_quotes(self, mock_osascript):
         mock_osascript.return_value = "ok"
         write_text_to_session("s1", 'say "hello"')
         call_script = mock_osascript.call_args[0][0]
         assert '\\"hello\\"' in call_script
 
-    @patch("ai_handoff.iterm._osascript")
+    @patch("tagteam.iterm._osascript")
     def test_get_session_contents(self, mock_osascript):
         mock_osascript.return_value = "line1\nline2\nline3\nline4\nline5\nline6"
         result = get_session_contents("session-123", last_n_lines=3)
         assert result == "line4\nline5\nline6"
 
-    @patch("ai_handoff.iterm._osascript")
+    @patch("tagteam.iterm._osascript")
     def test_get_session_contents_empty(self, mock_osascript):
         mock_osascript.return_value = ""
         result = get_session_contents("session-123")
         assert result == ""
 
-    @patch("ai_handoff.iterm._osascript")
+    @patch("tagteam.iterm._osascript")
     def test_session_id_is_valid_found(self, mock_osascript):
         mock_osascript.return_value = "found"
         assert session_id_is_valid("session-123") is True
 
-    @patch("ai_handoff.iterm._osascript")
+    @patch("tagteam.iterm._osascript")
     def test_session_id_is_valid_not_found(self, mock_osascript):
         mock_osascript.return_value = "not_found"
         assert session_id_is_valid("bad-id") is False
 
-    @patch("ai_handoff.iterm._osascript")
+    @patch("tagteam.iterm._osascript")
     def test_iterm_is_running(self, mock_osascript):
         mock_osascript.return_value = "true"
         assert iterm_is_running() is True
@@ -129,10 +129,10 @@ class TestOsascriptCalls:
 class TestCreateSessionLaunch:
     """Tests for create_session with --launch flag."""
 
-    @patch("ai_handoff.iterm.iterm_is_running", return_value=True)
-    @patch("ai_handoff.iterm._ensure_iterm_ready")
-    @patch("ai_handoff.iterm.write_text_to_session")
-    @patch("ai_handoff.iterm._osascript")
+    @patch("tagteam.iterm.iterm_is_running", return_value=True)
+    @patch("tagteam.iterm._ensure_iterm_ready")
+    @patch("tagteam.iterm.write_text_to_session")
+    @patch("tagteam.iterm._osascript")
     def test_launch_sends_raw_commands_after_session_file(
         self, mock_osascript, mock_write_text, mock_ensure, mock_running, tmp_path
     ):
@@ -142,7 +142,7 @@ class TestCreateSessionLaunch:
         mock_write_text.return_value = True
 
         # Write config with quoted command args
-        config_file = tmp_path / "ai-handoff.yaml"
+        config_file = tmp_path / "tagteam.yaml"
         config_file.write_text(
             "agents:\n"
             "  lead:\n"
@@ -171,17 +171,17 @@ class TestCreateSessionLaunch:
         assert calls[1] == call("reviewer-id", 'codex --approval-mode "full-auto"')
         # Watcher
         assert calls[2] == call(
-            "watcher-id", "python -m ai_handoff watch --mode iterm2"
+            "watcher-id", "python -m tagteam watch --mode iterm2"
         )
         # Auto-prime messages sent to lead and reviewer
-        from ai_handoff.session import PRIME_MESSAGE
+        from tagteam.session import PRIME_MESSAGE
         assert calls[3] == call("lead-id", PRIME_MESSAGE)
         assert calls[4] == call("reviewer-id", PRIME_MESSAGE)
 
-    @patch("ai_handoff.iterm.iterm_is_running", return_value=True)
-    @patch("ai_handoff.iterm._ensure_iterm_ready")
-    @patch("ai_handoff.iterm.write_text_to_session")
-    @patch("ai_handoff.iterm._osascript")
+    @patch("tagteam.iterm.iterm_is_running", return_value=True)
+    @patch("tagteam.iterm._ensure_iterm_ready")
+    @patch("tagteam.iterm.write_text_to_session")
+    @patch("tagteam.iterm._osascript")
     def test_launch_false_does_not_send_commands(
         self, mock_osascript, mock_write_text, mock_ensure, mock_running, tmp_path
     ):
@@ -191,13 +191,13 @@ class TestCreateSessionLaunch:
         assert result is True
         mock_write_text.assert_not_called()
 
-    @patch("ai_handoff.iterm.iterm_is_running", return_value=True)
-    @patch("ai_handoff.iterm._ensure_iterm_ready")
-    @patch("ai_handoff.iterm._osascript")
+    @patch("tagteam.iterm.iterm_is_running", return_value=True)
+    @patch("tagteam.iterm._ensure_iterm_ready")
+    @patch("tagteam.iterm._osascript")
     def test_launch_without_config_falls_back(
         self, mock_osascript, mock_ensure, mock_running, tmp_path
     ):
-        """If ai-handoff.yaml is missing, launch degrades to no-launch."""
+        """If tagteam.yaml is missing, launch degrades to no-launch."""
         mock_osascript.return_value = "lead-id,watcher-id,reviewer-id"
 
         result = create_session(str(tmp_path), launch=True)
@@ -210,9 +210,9 @@ class TestEnsureItermReady:
     """Scripting-readiness probe: poll iTerm2 until its AppleScript
     dictionary is loaded, not just until the process appears."""
 
-    @patch("ai_handoff.iterm.time.sleep")
-    @patch("ai_handoff.iterm._osascript")
-    @patch("ai_handoff.iterm.iterm_is_running")
+    @patch("tagteam.iterm.time.sleep")
+    @patch("tagteam.iterm._osascript")
+    @patch("tagteam.iterm.iterm_is_running")
     def test_ensure_iterm_ready_returns_after_probe_succeeds(
         self, mock_running, mock_osa, mock_sleep
     ):
@@ -225,10 +225,10 @@ class TestEnsureItermReady:
         assert "count windows" in mock_osa.call_args_list[0][0][0]
         assert "launch" not in mock_osa.call_args_list[0][0][0]
 
-    @patch("ai_handoff.iterm.time.sleep")
-    @patch("ai_handoff.iterm._launch_iterm_via_launchservices")
-    @patch("ai_handoff.iterm._osascript")
-    @patch("ai_handoff.iterm.iterm_is_running")
+    @patch("tagteam.iterm.time.sleep")
+    @patch("tagteam.iterm._launch_iterm_via_launchservices")
+    @patch("tagteam.iterm._osascript")
+    @patch("tagteam.iterm.iterm_is_running")
     def test_ensure_iterm_ready_launches_then_polls(
         self, mock_running, mock_osa, mock_launch, mock_sleep
     ):
@@ -246,10 +246,10 @@ class TestEnsureItermReady:
             assert "count windows" in c[0][0]
         assert mock_osa.call_count == 3
 
-    @patch("ai_handoff.iterm.time.monotonic")
-    @patch("ai_handoff.iterm.time.sleep")
-    @patch("ai_handoff.iterm._osascript")
-    @patch("ai_handoff.iterm.iterm_is_running")
+    @patch("tagteam.iterm.time.monotonic")
+    @patch("tagteam.iterm.time.sleep")
+    @patch("tagteam.iterm._osascript")
+    @patch("tagteam.iterm.iterm_is_running")
     def test_ensure_iterm_ready_times_out_on_probe_failure(
         self, mock_running, mock_osa, mock_sleep, mock_monotonic
     ):
@@ -263,10 +263,10 @@ class TestEnsureItermReady:
             _ensure_iterm_ready()
         assert "bad-probe" in str(exc_info.value)
 
-    @patch("ai_handoff.iterm.time.sleep")
-    @patch("ai_handoff.iterm._launch_iterm_via_launchservices")
-    @patch("ai_handoff.iterm._osascript")
-    @patch("ai_handoff.iterm.iterm_is_running")
+    @patch("tagteam.iterm.time.sleep")
+    @patch("tagteam.iterm._launch_iterm_via_launchservices")
+    @patch("tagteam.iterm._osascript")
+    @patch("tagteam.iterm.iterm_is_running")
     def test_ensure_iterm_ready_cold_path_retries_until_probe_compiles(
         self, mock_running, mock_osa, mock_launch, mock_sleep
     ):
@@ -288,9 +288,9 @@ class TestEnsureItermReady:
             assert "count windows" in script
             assert "launch" not in script
 
-    @patch("ai_handoff.iterm.time.sleep")
-    @patch("ai_handoff.iterm._osascript")
-    @patch("ai_handoff.iterm.iterm_is_running")
+    @patch("tagteam.iterm.time.sleep")
+    @patch("tagteam.iterm._osascript")
+    @patch("tagteam.iterm.iterm_is_running")
     def test_ensure_iterm_ready_warm_path_retries_until_probe_compiles(
         self, mock_running, mock_osa, mock_sleep
     ):
@@ -311,8 +311,8 @@ class TestEnsureItermReady:
             assert "count windows" in script
             assert "launch" not in script
 
-    @patch("ai_handoff.iterm._ensure_iterm_ready")
-    @patch("ai_handoff.iterm._osascript")
+    @patch("tagteam.iterm._ensure_iterm_ready")
+    @patch("tagteam.iterm._osascript")
     def test_create_session_catches_launch_failure(
         self, mock_osa, mock_ensure, tmp_path, capsys
     ):

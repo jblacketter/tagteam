@@ -29,7 +29,7 @@ For Human:
 - Phase plans: `docs/phases/*.md`
 - Handoff cycles: `docs/handoffs/*_cycle.md`
 - Decision log: `docs/decision_log.md`
-- Agent config: `ai-handoff.yaml`
+- Agent config: `tagteam.yaml`
 
 ## Completed Phases
 

@@ -56,11 +56,11 @@ This keeps human readability without paying markdown edit costs on every turn.
 The active path should be shell commands, not manual doc edits.
 
 Recommended commands:
-- `python -m ai_handoff cycle init`
-- `python -m ai_handoff cycle add`
-- `python -m ai_handoff cycle status`
-- `python -m ai_handoff cycle rounds`
-- `python -m ai_handoff cycle render`
+- `python -m tagteam cycle init`
+- `python -m tagteam cycle add`
+- `python -m tagteam cycle status`
+- `python -m tagteam cycle rounds`
+- `python -m tagteam cycle render`
 
 That shifts the heavy work from the agent to deterministic code.
 

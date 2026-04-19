@@ -1,7 +1,7 @@
 # Project Roadmap
 
 ## Overview
-AI Handoff Framework - A collaboration framework enabling structured, multi-phase AI-to-AI collaboration with human oversight.
+Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI collaboration with human oversight.
 
 **Tech Stack:** Python 3.10+, YAML configuration, Markdown templates, Textual (TUI)
 
@@ -13,8 +13,8 @@ AI Handoff Framework - A collaboration framework enabling structured, multi-phas
 - **Status:** Complete
 - **Description:** Create interactive init command for configuring AI agents and their roles
 - **Key Deliverables:**
-  - Interactive `python -m ai_handoff init` command
-  - `ai-handoff.yaml` config file generation
+  - Interactive `python -m tagteam init` command
+  - `tagteam.yaml` config file generation
   - Skills updated to read config at runtime
   - Getting started documentation
 
@@ -32,26 +32,26 @@ AI Handoff Framework - A collaboration framework enabling structured, multi-phas
 - **Description:** File-based state machine and watcher daemon for automated turn-taking between agents
 - **Key Deliverables:**
   - `handoff-state.json` state file with atomic read/write
-  - `python -m ai_handoff watch` watcher daemon (notify + tmux modes)
-  - `python -m ai_handoff state` CLI for viewing/updating state
-  - `python -m ai_handoff session` tmux session management
+  - `python -m tagteam watch` watcher daemon (notify + tmux modes)
+  - `python -m tagteam state` CLI for viewing/updating state
+  - `python -m tagteam session` tmux session management
   - `/handoff-cycle` skill updated with state file integration
 
 ### Phase 4: TUI Consolidation
 - **Status:** Complete
-- **Description:** Consolidate the gamerfy TUI into ai-handoff as a subpackage. Adds `python -m ai_handoff tui` command with `--dir` flag, first-time user setup via TUI dialogue, and sound effects.
+- **Description:** Consolidate the gamerfy TUI into tagteam as a subpackage. Adds `python -m tagteam tui` command with `--dir` flag, first-time user setup via TUI dialogue, and sound effects.
 - **Key Deliverables:**
-  - `ai_handoff/tui/` subpackage with ASCII saloon scene, dialogue system, map widget
-  - `python -m ai_handoff tui [--dir PATH]` CLI subcommand
+  - `tagteam/tui/` subpackage with ASCII saloon scene, dialogue system, map widget
+  - `python -m tagteam tui [--dir PATH]` CLI subcommand
   - First-time user flow with project scaffolding via TUI
-  - `pip install ai-handoff[tui]` optional dependency
+  - `pip install tagteam[tui]` optional dependency
   - Sound effects bundled in package
 
 ### Phase 5: Template Variable Substitution
 - **Status:** Complete
 - **Description:** Templates automatically use configured agent names
 - **Key Deliverables:**
-  - `ai_handoff/templates.py` module with `render_template()` and `get_template_variables()`
+  - `tagteam/templates.py` module with `render_template()` and `get_template_variables()`
   - Variable substitution in 8 templates (`{{lead}}`, `{{reviewer}}`)
   - `setup.py` reads config and substitutes variables when copying templates
   - Generated docs reflect config when `setup` runs after `init`
@@ -60,8 +60,8 @@ AI Handoff Framework - A collaboration framework enabling structured, multi-phas
 - **Status:** Complete
 - **Description:** Migration tooling for legacy projects, centralized config parsing with validation
 - **Key Deliverables:**
-  - `python -m ai_handoff migrate` command with auto-detection and backups
-  - Centralized `ai_handoff/config.py` module (read, validate, get_agent_names)
+  - `python -m tagteam migrate` command with auto-detection and backups
+  - Centralized `tagteam/config.py` module (read, validate, get_agent_names)
   - Forward-compatible `model_patterns` schema field with overlap validation
   - Unit tests for config and migration modules
 
@@ -93,7 +93,7 @@ AI Handoff Framework - A collaboration framework enabling structured, multi-phas
 - **Status:** Complete
 - **Description:** Fix TUI bugs (GAMERFY naming, silent poll failures, status bar overflow), extract shared parser for TUI and web dashboard, improve web dashboard with escalation choices, phase map, and structured round display, split 46KB HTML into 3 files, add unit test coverage
 - **Key Deliverables:**
-  - Shared `ai_handoff/parser.py` used by both TUI and web dashboard
+  - Shared `tagteam/parser.py` used by both TUI and web dashboard
   - `GAMERFY_SOUND` → `HANDOFF_SOUND` rename with backward-compat fallback
   - TUI state poller: failure logging + `[STALE]` indicator
   - Status bar: action truncation (25 chars), `Round N` display (no `/5`)
@@ -127,7 +127,7 @@ AI Handoff Framework - A collaboration framework enabling structured, multi-phas
 - **Status:** Complete
 - **Description:** Replace markdown-based cycle documents with append-only JSONL rounds + JSON status files, updated via CLI commands. Eliminates repeated read/modify/write of markdown from the active handoff loop.
 - **Key Deliverables:**
-  - `ai_handoff/cycle.py` module (JSONL/JSON storage, CLI commands, centralized discovery)
+  - `tagteam/cycle.py` module (JSONL/JSON storage, CLI commands, centralized discovery)
   - CLI commands: `cycle init`, `cycle add`, `cycle status`, `cycle rounds`, `cycle render`
   - Format dispatcher in `parser.py` (JSONL first, legacy markdown fallback)
   - All consumers updated: `server.py`, `app.js`, `handoff_reader.py`, `review_replay.py`
@@ -148,7 +148,7 @@ AI Handoff Framework - A collaboration framework enabling structured, multi-phas
 
 ### Phase 14: Sharing Readiness
 - **Status:** Complete
-- **Description:** Make ai-handoff ready for wider sharing — simplify README (remove manual setup, promote automated), mark Saloon as WIP, improve watcher robustness (seq-based change detection, re-send watchdog, retry loop), add `session start --launch` for auto-starting agents
+- **Description:** Make tagteam ready for wider sharing — simplify README (remove manual setup, promote automated), mark Saloon as WIP, improve watcher robustness (seq-based change detection, re-send watchdog, retry loop), add `session start --launch` for auto-starting agents
 - **Key Deliverables:**
   - README restructured: single automated workflow, one-line manual mention, Saloon marked WIP
   - `config.py`: `get_launch_commands()` helper, `command` field validation, no-PyYAML fallback
@@ -202,13 +202,13 @@ AI Handoff Framework - A collaboration framework enabling structured, multi-phas
 
 ### Phase 19: Public Onboarding
 - **Status:** Complete
-- **Description:** Make ai-handoff ready to share with the world. Simpler init prompts, shared handoff explainer in CLI + README, iTerm2 cold-launch fix, README trimmed to a single backend-neutral Quick Start using the `ai-handoff` console script, prominent post-quickstart priming box.
+- **Description:** Make tagteam ready to share with the world. Simpler init prompts, shared handoff explainer in CLI + README, iTerm2 cold-launch fix, README trimmed to a single backend-neutral Quick Start using the `tagteam` console script, prominent post-quickstart priming box.
 - **Key Deliverables:**
   - `init` prompts simplified to 2 questions (lead name, reviewer name) — no role prompt
   - `HANDOFF_EXPLAINER` printed once per quickstart path via `show_explainer` plumbing
   - `_ensure_iterm_running()` launches iTerm2 from a fully-quit state; window-count guard prevents duplicate windows
   - README rewritten with "How it works" section and backend-neutral Quick Start
-  - `python -m ai_handoff` replaced with `ai-handoff` throughout docs
+  - `python -m tagteam` replaced with `tagteam` throughout docs
   - Backend-aware priming box (tab/pane/terminal) at end of quickstart
 - **Phase Plan:** `docs/phases/public-onboarding.md`
 
@@ -218,7 +218,7 @@ AI Handoff Framework - A collaboration framework enabling structured, multi-phas
 - **Status:** Not started
 - **Motivation:** Terminal.app ships with every Mac, so a `terminal` backend would remove the iTerm2 install step for new macOS users. Default stays `iterm2` (richer scripting); Terminal.app is opt-in via `--backend terminal`.
 - **Sketch:**
-  - New `ai_handoff/terminal.py` mirroring `iterm.py` against Terminal.app's AppleScript (`do script`, `tell tab N of window M`)
+  - New `tagteam/terminal.py` mirroring `iterm.py` against Terminal.app's AppleScript (`do script`, `tell tab N of window M`)
   - Add `"terminal"` to `SUPPORTED_BACKENDS` and `_validate_backend()` in `session.py`
   - Extend `_parse_backend` / `ensure_session` dispatch
 - **Known tradeoff:** Terminal.app has no stable session IDs — stale-session recovery must fall back to window+tab index tracking, which is more fragile than iTerm2's session-ID model. Expect the module to be less robust under user tab rearrangement.

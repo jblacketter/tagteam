@@ -3,8 +3,8 @@
 import os
 from unittest.mock import MagicMock, patch
 
-from ai_handoff.setup import needs_setup, run_setup
-from ai_handoff.cli import (
+from tagteam.setup import needs_setup, run_setup
+from tagteam.cli import (
     HANDOFF_EXPLAINER,
     init_command,
     needs_init,
@@ -69,13 +69,13 @@ class TestNeedsInit:
         assert needs_init(str(tmp_path)) is True
 
     def test_config_exists(self, tmp_path):
-        (tmp_path / "ai-handoff.yaml").write_text("agents: {}")
+        (tmp_path / "tagteam.yaml").write_text("agents: {}")
         assert needs_init(str(tmp_path)) is False
 
 
 class TestRunInit:
     def test_skips_when_config_exists(self, tmp_path):
-        (tmp_path / "ai-handoff.yaml").write_text("agents: {}")
+        (tmp_path / "tagteam.yaml").write_text("agents: {}")
         result = run_init(str(tmp_path))
         assert result is True
 
@@ -88,7 +88,7 @@ class TestRunInit:
 # --- run_setup tests ---
 
 class TestRunSetup:
-    @patch("ai_handoff.setup.main")
+    @patch("tagteam.setup.main")
     def test_skips_when_complete(self, mock_main, tmp_path):
         # Set up all required files
         (tmp_path / ".claude" / "skills" / "handoff").mkdir(parents=True)
@@ -101,7 +101,7 @@ class TestRunSetup:
         run_setup(str(tmp_path))
         mock_main.assert_not_called()
 
-    @patch("ai_handoff.setup.main")
+    @patch("tagteam.setup.main")
     def test_runs_when_needed(self, mock_main, tmp_path):
         run_setup(str(tmp_path))
         mock_main.assert_called_once_with(str(tmp_path))
@@ -110,9 +110,9 @@ class TestRunSetup:
 # --- quickstart tests ---
 
 class TestQuickstart:
-    @patch("ai_handoff.session.ensure_session", return_value="created")
-    @patch("ai_handoff.cli.run_init", return_value=True)
-    @patch("ai_handoff.setup.run_setup")
+    @patch("tagteam.session.ensure_session", return_value="created")
+    @patch("tagteam.cli.run_init", return_value=True)
+    @patch("tagteam.setup.run_setup")
     def test_happy_path(self, mock_setup, mock_init, mock_session, tmp_path):
         result = quickstart_command(["--dir", str(tmp_path)])
         assert result == 0
@@ -120,44 +120,44 @@ class TestQuickstart:
         mock_init.assert_called_once()
         mock_session.assert_called_once()
 
-    @patch("ai_handoff.session.ensure_session", return_value="created")
-    @patch("ai_handoff.cli.run_init", return_value=True)
-    @patch("ai_handoff.setup.run_setup")
+    @patch("tagteam.session.ensure_session", return_value="created")
+    @patch("tagteam.cli.run_init", return_value=True)
+    @patch("tagteam.setup.run_setup")
     def test_passes_backend(self, mock_setup, mock_init, mock_session, tmp_path):
         quickstart_command(["--dir", str(tmp_path), "--backend", "tmux"])
         # ensure_session called with backend="tmux"
         assert mock_session.call_args[0][1] == "tmux"
 
-    @patch("ai_handoff.session.ensure_session", return_value="exists")
-    @patch("ai_handoff.cli.run_init", return_value=True)
-    @patch("ai_handoff.setup.run_setup")
+    @patch("tagteam.session.ensure_session", return_value="exists")
+    @patch("tagteam.cli.run_init", return_value=True)
+    @patch("tagteam.setup.run_setup")
     def test_existing_session_returns_success(
         self, mock_setup, mock_init, mock_session, tmp_path
     ):
         result = quickstart_command(["--dir", str(tmp_path)])
         assert result == 0
 
-    @patch("ai_handoff.session.ensure_session", return_value="manual")
-    @patch("ai_handoff.cli.run_init", return_value=True)
-    @patch("ai_handoff.setup.run_setup")
+    @patch("tagteam.session.ensure_session", return_value="manual")
+    @patch("tagteam.cli.run_init", return_value=True)
+    @patch("tagteam.setup.run_setup")
     def test_manual_session_returns_success(
         self, mock_setup, mock_init, mock_session, tmp_path
     ):
         result = quickstart_command(["--dir", str(tmp_path)])
         assert result == 0
 
-    @patch("ai_handoff.session.ensure_session", return_value="error")
-    @patch("ai_handoff.cli.run_init", return_value=True)
-    @patch("ai_handoff.setup.run_setup")
+    @patch("tagteam.session.ensure_session", return_value="error")
+    @patch("tagteam.cli.run_init", return_value=True)
+    @patch("tagteam.setup.run_setup")
     def test_session_error_returns_failure(
         self, mock_setup, mock_init, mock_session, tmp_path
     ):
         result = quickstart_command(["--dir", str(tmp_path)])
         assert result == 1
 
-    @patch("ai_handoff.session.ensure_session", return_value="created")
-    @patch("ai_handoff.cli.run_init", return_value=False)
-    @patch("ai_handoff.setup.run_setup")
+    @patch("tagteam.session.ensure_session", return_value="created")
+    @patch("tagteam.cli.run_init", return_value=False)
+    @patch("tagteam.setup.run_setup")
     def test_init_failure_returns_error(
         self, mock_setup, mock_init, mock_session, tmp_path
     ):
@@ -169,13 +169,13 @@ class TestQuickstart:
 # --- ensure_session tests ---
 
 class TestEnsureSession:
-    @patch("ai_handoff.session._tmux_supported", return_value=True)
-    @patch("ai_handoff.session.subprocess")
-    @patch("ai_handoff.session.session_exists", return_value=True)
+    @patch("tagteam.session._tmux_supported", return_value=True)
+    @patch("tagteam.session.subprocess")
+    @patch("tagteam.session.session_exists", return_value=True)
     def test_existing_tmux_attaches_and_returns_exists(
         self, mock_exists, mock_subprocess, mock_tmux_supported
     ):
-        from ai_handoff.session import ensure_session
+        from tagteam.session import ensure_session
         result = ensure_session(".", "tmux", launch=False)
         assert result == "exists"
         # Verify tmux attach was called
@@ -183,85 +183,85 @@ class TestEnsureSession:
         call_args = mock_subprocess.run.call_args[0][0]
         assert "attach" in call_args
 
-    @patch("ai_handoff.session._tmux_supported", return_value=True)
-    @patch("ai_handoff.session.create_tmux_session", return_value=True)
-    @patch("ai_handoff.session.session_exists", return_value=False)
+    @patch("tagteam.session._tmux_supported", return_value=True)
+    @patch("tagteam.session.create_tmux_session", return_value=True)
+    @patch("tagteam.session.session_exists", return_value=False)
     def test_new_tmux_returns_created(self, mock_exists, mock_create, mock_tmux_supported):
-        from ai_handoff.session import ensure_session
+        from tagteam.session import ensure_session
         result = ensure_session(".", "tmux", launch=False)
         assert result == "created"
 
-    @patch("ai_handoff.session._iterm2_supported", return_value=True)
-    @patch("ai_handoff.iterm._any_session_alive", return_value=True)
+    @patch("tagteam.session._iterm2_supported", return_value=True)
+    @patch("tagteam.iterm._any_session_alive", return_value=True)
     @patch(
-        "ai_handoff.iterm._read_session_file",
+        "tagteam.iterm._read_session_file",
         return_value={"tabs": {"lead": {"session_id": "x"}}},
     )
     def test_existing_iterm_returns_exists(
         self, mock_read, mock_alive, mock_iterm_supported
     ):
-        from ai_handoff.session import ensure_session
+        from tagteam.session import ensure_session
         result = ensure_session(".", "iterm2", launch=False)
         assert result == "exists"
 
-    @patch("ai_handoff.session.create_manual_session", return_value=True)
+    @patch("tagteam.session.create_manual_session", return_value=True)
     def test_manual_backend_returns_manual(self, mock_manual):
-        from ai_handoff.session import ensure_session
+        from tagteam.session import ensure_session
         result = ensure_session(".", "manual", launch=False)
         assert result == "manual"
 
     def test_invalid_backend_returns_error(self):
-        from ai_handoff.session import ensure_session
+        from tagteam.session import ensure_session
         result = ensure_session(".", "invalid", launch=False)
         assert result == "error"
 
-    @patch("ai_handoff.session.shutil.which", return_value=None)
+    @patch("tagteam.session.shutil.which", return_value=None)
     def test_unavailable_tmux_returns_error(self, mock_which):
-        from ai_handoff.session import ensure_session
+        from tagteam.session import ensure_session
         result = ensure_session(".", "tmux", launch=False)
         assert result == "error"
 
 
 class TestSessionBackendDetection:
-    @patch("ai_handoff.session.sys.platform", "win32")
-    @patch("ai_handoff.session.shutil.which", return_value=None)
+    @patch("tagteam.session.sys.platform", "win32")
+    @patch("tagteam.session.shutil.which", return_value=None)
     def test_default_backend_falls_back_to_manual(self, mock_which):
-        from ai_handoff.session import default_backend
+        from tagteam.session import default_backend
         assert default_backend() == "manual"
 
-    @patch("ai_handoff.session._tmux", side_effect=FileNotFoundError)
+    @patch("tagteam.session._tmux", side_effect=FileNotFoundError)
     def test_session_exists_returns_false_without_tmux(self, mock_tmux):
-        from ai_handoff.session import session_exists
+        from tagteam.session import session_exists
         assert session_exists() is False
 
-    @patch("ai_handoff.session._ITERM_APP_PATHS", ("/nonexistent/iTerm.app",))
-    @patch("ai_handoff.session.sys.platform", "darwin")
-    @patch("ai_handoff.session.shutil.which", return_value="/usr/bin/osascript")
+    @patch("tagteam.session._ITERM_APP_PATHS", ("/nonexistent/iTerm.app",))
+    @patch("tagteam.session.sys.platform", "darwin")
+    @patch("tagteam.session.shutil.which", return_value="/usr/bin/osascript")
     def test_iterm2_unsupported_when_app_not_installed(self, mock_which):
         """On macOS without iTerm2.app, _iterm2_supported must return False."""
-        from ai_handoff.session import _iterm2_supported
+        from tagteam.session import _iterm2_supported
         assert _iterm2_supported() is False
 
-    @patch("ai_handoff.session.sys.platform", "darwin")
-    @patch("ai_handoff.session.shutil.which", return_value="/usr/bin/osascript")
+    @patch("tagteam.session.sys.platform", "darwin")
+    @patch("tagteam.session.shutil.which", return_value="/usr/bin/osascript")
     def test_iterm2_supported_when_app_installed(self, mock_which, tmp_path):
         """When iTerm2.app exists, _iterm2_supported returns True."""
         fake_app = tmp_path / "iTerm.app"
         fake_app.mkdir()
         with patch(
-            "ai_handoff.session._ITERM_APP_PATHS", (str(fake_app),)
+            "tagteam.session._ITERM_APP_PATHS", (str(fake_app),)
         ):
-            from ai_handoff.session import _iterm2_supported
+            from tagteam.session import _iterm2_supported
             assert _iterm2_supported() is True
 
-    @patch("ai_handoff.session._ITERM_APP_PATHS", ("/nonexistent/iTerm.app",))
-    @patch("ai_handoff.session.sys.platform", "darwin")
-    @patch("ai_handoff.session.shutil.which", return_value="/usr/bin/osascript")
+    @patch("tagteam.session._ITERM_APP_PATHS", ("/nonexistent/iTerm.app",))
+    @patch("tagteam.session.sys.platform", "darwin")
+    @patch("tagteam.session.shutil.which", return_value="/usr/bin/osascript")
     def test_default_backend_picks_tmux_on_mac_without_iterm2(self, mock_which):
         """Mac with tmux but no iTerm2 → default_backend() returns tmux."""
-        from ai_handoff.session import default_backend
+        from tagteam.session import default_backend
         with patch(
-            "ai_handoff.session._tmux_supported", return_value=True
+            "tagteam.session._tmux_supported", return_value=True
         ):
             assert default_backend() == "tmux"
 
@@ -303,7 +303,7 @@ class TestInitPrompts:
             os.chdir(original_dir)
 
         assert prompts_shown == ["Lead agent name: ", "Reviewer agent name: "]
-        config = (tmp_path / "ai-handoff.yaml").read_text()
+        config = (tmp_path / "tagteam.yaml").read_text()
         assert "name: alice" in config
         assert "name: bob" in config
         # No "role" prompt anywhere
@@ -312,7 +312,7 @@ class TestInitPrompts:
     def test_rejects_empty_agent_name(self, tmp_path, monkeypatch):
         """Empty name is re-prompted; first non-empty wins."""
         self._run_init_with_inputs(tmp_path, ["", "alice", "bob"], monkeypatch)
-        config = (tmp_path / "ai-handoff.yaml").read_text()
+        config = (tmp_path / "tagteam.yaml").read_text()
         assert "name: alice" in config
         assert "name: bob" in config
 
@@ -321,17 +321,17 @@ class TestInitPrompts:
         self._run_init_with_inputs(
             tmp_path, ["ClaudeCode", "CodexCLI"], monkeypatch
         )
-        config = (tmp_path / "ai-handoff.yaml").read_text()
+        config = (tmp_path / "tagteam.yaml").read_text()
         assert "name: ClaudeCode" in config
         assert "name: CodexCLI" in config
 
     def test_overwrite_confirm_no_aborts(self, tmp_path, monkeypatch):
         """Existing config + 'n' to overwrite → file unchanged."""
-        (tmp_path / "ai-handoff.yaml").write_text(
+        (tmp_path / "tagteam.yaml").write_text(
             "agents:\n  lead:\n    name: keep\n  reviewer:\n    name: me\n"
         )
         self._run_init_with_inputs(tmp_path, ["n"], monkeypatch)
-        config = (tmp_path / "ai-handoff.yaml").read_text()
+        config = (tmp_path / "tagteam.yaml").read_text()
         assert "name: keep" in config
         assert "name: me" in config
 
@@ -370,18 +370,18 @@ class TestQuickstartOutput:
 
     def _mock_quickstart(self, tmp_path, outcome, backend):
         """Helper: prewrite config + stub all mutating calls, return captured stdout."""
-        (tmp_path / "ai-handoff.yaml").write_text(
+        (tmp_path / "tagteam.yaml").write_text(
             "agents:\n  lead:\n    name: Alice\n  reviewer:\n    name: Bob\n"
         )
 
         with patch(
-            "ai_handoff.session.ensure_session", return_value=outcome
+            "tagteam.session.ensure_session", return_value=outcome
         ) as _m1, patch(
-            "ai_handoff.cli.run_init", return_value=True
+            "tagteam.cli.run_init", return_value=True
         ) as _m2, patch(
-            "ai_handoff.setup.run_setup"
+            "tagteam.setup.run_setup"
         ) as _m3, patch(
-            "ai_handoff.session.default_backend", return_value=backend
+            "tagteam.session.default_backend", return_value=backend
         ) as _m4:
             return quickstart_command(["--dir", str(tmp_path)])
 
