@@ -15,7 +15,7 @@ State is tracked in `handoff-state.json` (current turn) and `docs/handoffs/<phas
 ## Quick Start
 
 ```bash
-pip install git+https://github.com/jblacketter/tagteam.git
+pip install tagteam
 cd ~/projects/myproject
 tagteam quickstart
 ```
