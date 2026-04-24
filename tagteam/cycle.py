@@ -35,20 +35,25 @@ _TRANSITIONS = {
     "NEED_HUMAN":        {"state": "needs-human",  "ready_for": "human"},
 }
 
-# Handoff state transitions keyed by action (handoff-state.json)
-_STATE_TRANSITIONS = {
-    "SUBMIT_FOR_REVIEW": {"turn": "reviewer", "status": "ready"},
-    "REQUEST_CHANGES":   {"turn": "lead",     "status": "ready"},
-    "APPROVE":           {"status": "done",   "result": "approved"},
-    "ESCALATE":          {"status": "escalated"},
-    "NEED_HUMAN":        {"status": "escalated"},
-}
-
 _STATE_COMMAND = "Read .claude/skills/handoff/SKILL.md and handoff-state.json, then act on your turn"
 
 
+def _resolve(project_dir: str) -> str:
+    """Resolve "." to the git repo root so cycle writes always target the
+    repo's docs/handoffs/ regardless of cwd. Explicit paths are honored.
+
+    Fixes the nested-project silent-write bug (Issue #1, 2026-04-24): running
+    `tagteam cycle init` from a subdir of a tagteam project used to write
+    into that subdir instead of the repo root.
+    """
+    if project_dir == ".":
+        from tagteam.state import _resolve_project_root
+        return _resolve_project_root()
+    return project_dir
+
+
 def _handoffs_dir(project_dir: str) -> Path:
-    return Path(project_dir) / "docs" / "handoffs"
+    return Path(_resolve(project_dir)) / "docs" / "handoffs"
 
 
 def _status_path(phase: str, cycle_type: str, project_dir: str) -> Path:
@@ -97,9 +102,11 @@ def init_cycle(phase: str, cycle_type: str, lead: str, reviewer: str,
                updated_by: str | None = None) -> dict:
     """Create a new cycle atomically with the lead's first submission.
 
-    Writes both status JSON and the first JSONL round entry together.
-    If updated_by is provided, also updates handoff-state.json.
+    Writes rounds JSONL + status JSON, then derives handoff-state.json
+    from the cycle status so the top-level state is always in sync.
+    `updated_by` defaults to `lead` (since init always submits as lead).
     """
+    project_dir = _resolve(project_dir)
     handoffs = _handoffs_dir(project_dir)
     handoffs.mkdir(parents=True, exist_ok=True)
 
@@ -124,18 +131,15 @@ def init_cycle(phase: str, cycle_type: str, lead: str, reviewer: str,
         "ts": now,
     }
 
-    # Write both files
     sp = _status_path(phase, cycle_type, project_dir)
     rp = _rounds_path(phase, cycle_type, project_dir)
     rp.write_text(json.dumps(entry) + "\n", encoding="utf-8")
     sp.write_text(json.dumps(status, indent=2) + "\n", encoding="utf-8")
 
-    # Optionally update handoff-state.json
-    if updated_by:
-        _update_handoff_state(
-            phase, cycle_type, "SUBMIT_FOR_REVIEW", 1,
-            updated_by, project_dir,
-        )
+    _derive_top_level_state(
+        phase, cycle_type, project_dir,
+        updated_by=updated_by or lead,
+    )
 
     return status
 
@@ -143,16 +147,20 @@ def init_cycle(phase: str, cycle_type: str, lead: str, reviewer: str,
 def add_round(phase: str, cycle_type: str, role: str, action: str,
               round_num: int, content: str, project_dir: str = ".",
               updated_by: str | None = None) -> dict:
-    """Append a round entry to the JSONL log and update status.
+    """Append a round entry to the JSONL log, update cycle status,
+    and derive handoff-state.json from the new cycle status.
 
-    If updated_by is provided, also updates handoff-state.json.
-    Returns the updated status dict.
+    If `updated_by` is not provided, it is inferred from the cycle
+    status (`lead` field for role=lead, `reviewer` field for
+    role=reviewer). This keeps the top-level state in sync even when
+    a caller forgets to pass `--updated-by`.
     """
     if action not in VALID_ACTIONS:
         raise ValueError(f"Invalid action: {action}. Must be one of: {', '.join(sorted(VALID_ACTIONS))}")
     if role not in VALID_ROLES:
         raise ValueError(f"Invalid role: {role}. Must be one of: {', '.join(sorted(VALID_ROLES))}")
 
+    project_dir = _resolve(project_dir)
     now = datetime.now(timezone.utc).isoformat()
 
     entry = {
@@ -191,93 +199,114 @@ def add_round(phase: str, cycle_type: str, role: str, action: str,
     sp = _status_path(phase, cycle_type, project_dir)
     sp.write_text(json.dumps(status, indent=2) + "\n", encoding="utf-8")
 
-    # Optionally update handoff-state.json
-    if updated_by:
-        _update_handoff_state(
-            phase, cycle_type, action, round_num,
-            updated_by, project_dir,
-            auto_escalate=auto_escalate,
-        )
+    # Infer updated_by from the cycle roster when the caller didn't supply it,
+    # so the top-level state always stays in sync with the per-cycle source
+    # of truth.
+    resolved_updated_by = updated_by
+    if not resolved_updated_by:
+        if role == "lead":
+            resolved_updated_by = status.get("lead") or role
+        else:
+            resolved_updated_by = status.get("reviewer") or role
+
+    _derive_top_level_state(
+        phase, cycle_type, project_dir,
+        updated_by=resolved_updated_by,
+    )
 
     return status
+
+
+_CYCLE_STATE_TO_TOP_LEVEL = {
+    # Maps per-cycle (state, ready_for) → (turn, status, result)
+    # `None` for turn means leave unset (e.g. escalated, done).
+    ("in-progress", "reviewer"):  ("reviewer", "ready",     None),
+    ("in-progress", "lead"):      ("lead",     "ready",     None),
+    ("approved",    None):        (None,       "done",      "approved"),
+    ("escalated",   "human"):     (None,       "escalated", None),
+    ("needs-human", "human"):     (None,       "escalated", None),
+}
+
+
+def _derive_top_level_state(phase: str, cycle_type: str,
+                            project_dir: str,
+                            updated_by: str | None = None) -> dict | None:
+    """Rewrite handoff-state.json to reflect the given cycle's current status.
+
+    Per-cycle status is the source of truth. This reads the cycle's
+    status JSON, maps it into top-level fields via the invertible
+    mapping above, preserves roadmap context when the phase matches the
+    active roadmap phase, and writes atomically. Uses replace=True so
+    stale fields from prior cycles cannot leak via shallow merge.
+
+    Returns the new state dict, or None if the cycle status is missing.
+    """
+    from tagteam.state import (
+        read_state, update_state, normalize_phase_key, VALID_TURNS,
+    )
+
+    project_dir = _resolve(project_dir)
+    cycle_status = read_status(phase, cycle_type, project_dir)
+    if cycle_status is None:
+        return None
+
+    cstate = cycle_status.get("state")
+    ready_for = cycle_status.get("ready_for")
+    mapping = _CYCLE_STATE_TO_TOP_LEVEL.get((cstate, ready_for))
+    if mapping is None:
+        # Unknown combination — fail safe: leave state alone, surface via
+        # diagnose rather than writing a broken top-level.
+        return None
+    turn, status, result = mapping
+
+    updates: dict = {
+        "phase": phase,
+        "type": cycle_type,
+        "round": cycle_status.get("round"),
+        "status": status,
+        "command": _STATE_COMMAND,
+    }
+    if turn in VALID_TURNS:
+        updates["turn"] = turn
+    if result is not None:
+        updates["result"] = result
+    if updated_by:
+        updates["updated_by"] = updated_by
+
+    # Preserve roadmap context only when this phase is the current roadmap phase.
+    current_state = read_state(project_dir) or {}
+    roadmap = current_state.get("roadmap")
+    if roadmap and current_state.get("run_mode") == "full-roadmap":
+        queue = roadmap.get("queue") or []
+        idx = roadmap.get("current_index", 0)
+        if 0 <= idx < len(queue):
+            if normalize_phase_key(phase) == normalize_phase_key(queue[idx]):
+                updates["roadmap"] = roadmap
+                updates["run_mode"] = "full-roadmap"
+
+    if "run_mode" not in updates:
+        updates["run_mode"] = "single-phase"
+
+    return update_state(updates, project_dir, replace=True)
 
 
 def _update_handoff_state(phase: str, cycle_type: str, action: str,
                           round_num: int, updated_by: str,
                           project_dir: str = ".",
                           auto_escalate: bool = False) -> None:
-    """Update handoff-state.json based on cycle action.
+    """Update handoff-state.json to match the current per-cycle status.
 
-    When auto_escalate is True, REQUEST_CHANGES escalates to human
-    arbiter instead of handing back to lead (triggered by stale-round
-    detection in add_round).
-
-    Normalizes state to prevent stale completion metadata from
-    previous cycles from persisting.
+    Thin wrapper around _derive_top_level_state. Kept for call-site
+    compatibility; action/round_num/auto_escalate are no longer needed
+    for the derivation itself (the cycle status file already reflects
+    the outcome) but remain for backward compatibility with callers.
     """
-    from tagteam.state import update_state, read_state, normalize_phase_key
-
-    transition = dict(_STATE_TRANSITIONS[action])
-
-    # Stale-round auto-escalation (passed from add_round)
-    if auto_escalate:
-        transition = {"status": "escalated"}
-
-    updates = {
-        "phase": phase,
-        "type": cycle_type,
-        "round": round_num,
-        "updated_by": updated_by,
-        "command": _STATE_COMMAND,
-    }
-    updates.update(transition)
-
-    # Explicitly clear stale completion state for in-progress transitions
-    # to prevent result="approved" or result="roadmap-complete" from previous
-    # cycles from persisting when a new cycle begins.
-    if action in ("SUBMIT_FOR_REVIEW", "REQUEST_CHANGES"):
-        if not auto_escalate:
-            updates["result"] = None
-
-    # Normalize run_mode and roadmap context based on current state.
-    # When starting a new cycle, check if we're continuing an active roadmap
-    # or starting fresh.
-    current_state = read_state(project_dir)
-    should_preserve_roadmap = False
-    clear_keys = []
-
-    if current_state and "roadmap" in current_state and "run_mode" in current_state:
-        # Preserve roadmap context only if this cycle matches the active roadmap phase
-        roadmap = current_state["roadmap"]
-        is_roadmap_mode = current_state.get("run_mode") == "full-roadmap"
-        current_roadmap_phase = None
-        if is_roadmap_mode and roadmap.get("queue"):
-            idx = roadmap.get("current_index", 0)
-            if 0 <= idx < len(roadmap["queue"]):
-                current_roadmap_phase = roadmap["queue"][idx]
-
-        # Preserve roadmap state only if this phase matches the current roadmap phase
-        # Normalize both sides since queue may store slugs while phase param may be full name
-        if is_roadmap_mode and current_roadmap_phase:
-            phase_normalized = normalize_phase_key(phase)
-            roadmap_phase_normalized = normalize_phase_key(current_roadmap_phase)
-            if phase_normalized == roadmap_phase_normalized:
-                updates["roadmap"] = roadmap
-                updates["run_mode"] = "full-roadmap"
-                should_preserve_roadmap = True
-
-    if not should_preserve_roadmap:
-        # Clear stale roadmap context when starting a new single-phase cycle
-        # or when the phase doesn't match the active roadmap.
-        updates["run_mode"] = "single-phase"
-        if current_state and "roadmap" in current_state:
-            clear_keys.append("roadmap")
-
-    update_state(updates, project_dir, clear_keys=clear_keys or None)
+    _derive_top_level_state(phase, cycle_type, project_dir, updated_by)
 
 
 def read_status(phase: str, cycle_type: str, project_dir: str = ".") -> dict | None:
     """Read status JSON for a cycle. Returns None if not found."""
+    project_dir = _resolve(project_dir)
     sp = _status_path(phase, cycle_type, project_dir)
     if not sp.exists():
         return None
@@ -289,6 +318,7 @@ def read_status(phase: str, cycle_type: str, project_dir: str = ".") -> dict | N
 
 def read_rounds(phase: str, cycle_type: str, project_dir: str = ".") -> list[dict]:
     """Read all round entries from JSONL. Returns empty list if not found."""
+    project_dir = _resolve(project_dir)
     rp = _rounds_path(phase, cycle_type, project_dir)
     if not rp.exists():
         return []
@@ -361,6 +391,7 @@ def list_cycles(project_dir: str = ".") -> list[dict]:
     JSONL takes precedence when both formats exist for the same cycle.
     Returns list of {id, format, phase, type} dicts.
     """
+    project_dir = _resolve(project_dir)
     handoffs = _handoffs_dir(project_dir)
     if not handoffs.is_dir():
         return []
@@ -470,10 +501,8 @@ def _cli_init(args: list[str]) -> int:
     content = _read_content(parsed)
     status = init_cycle(phase, cycle_type, lead, reviewer, content,
                         updated_by=updated_by)
-    msg = f"Cycle created: {phase}_{cycle_type} (round 1, ready_for: reviewer)"
-    if updated_by:
-        msg += " + state updated"
-    print(msg)
+    print(f"Cycle created: {phase}_{cycle_type} (round 1, ready_for: reviewer)"
+          " + state updated")
     return 0
 
 
@@ -509,11 +538,9 @@ def _cli_add(args: list[str]) -> int:
     content = _read_content(parsed)
     status = add_round(phase, cycle_type, role, action, round_num, content,
                        updated_by=updated_by)
-    msg = (f"Round added: {phase}_{cycle_type} round={status['round']} "
-           f"state={status['state']} ready_for={status.get('ready_for')}")
-    if updated_by:
-        msg += " + state updated"
-    print(msg)
+    print(f"Round added: {phase}_{cycle_type} round={status['round']} "
+          f"state={status['state']} ready_for={status.get('ready_for')}"
+          " + state updated")
     return 0
 
 

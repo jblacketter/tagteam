@@ -108,7 +108,8 @@ def write_state(state: dict, project_dir: str | None = None) -> None:
 
 def update_state(updates: dict, project_dir: str | None = None,
                  expected_seq: int | None = None,
-                 clear_keys: list[str] | None = None) -> dict | None:
+                 clear_keys: list[str] | None = None,
+                 replace: bool = False) -> dict | None:
     """Read current state, record history, apply updates, write back.
 
     If expected_seq is provided, only write if the current sequence number
@@ -116,21 +117,22 @@ def update_state(updates: dict, project_dir: str | None = None,
 
     If clear_keys is provided, those keys will be deleted from the state
     before applying updates.
+
+    If replace is True, the new state consists of exactly `updates` plus
+    seq, history, and updated_at. No fields from the previous state carry
+    forward. Use this when rewriting state authoritatively (e.g. `state sync`)
+    so stale fields cannot leak via shallow merge.
     """
     state = read_state(project_dir) or {}
 
     current_seq = state.get("seq", 0)
     if expected_seq is not None and current_seq != expected_seq:
-        # Log mismatch to side-channel (does NOT modify live state)
         _log_seq_mismatch(expected_seq, current_seq,
                           updates.get("updated_by", "unknown"),
                           project_dir)
-        return None  # State has moved on
+        return None
 
-    if "history" not in state:
-        state["history"] = []
-
-    # Record the previous state in history before overwriting
+    history = state.get("history", [])
     prev = {
         "turn": state.get("turn"),
         "status": state.get("status"),
@@ -140,16 +142,20 @@ def update_state(updates: dict, project_dir: str | None = None,
         "updated_by": state.get("updated_by"),
     }
     if any(v is not None for v in prev.values()):
-        state["history"].append(prev)
+        history.append(prev)
+    history = history[-20:]
 
-    # Keep history bounded
-    state["history"] = state["history"][-20:]
+    if replace:
+        new_state = dict(updates)
+        new_state["history"] = history
+        new_state["seq"] = current_seq + 1
+        write_state(new_state, project_dir)
+        return new_state
 
-    # Clear specified keys before applying updates
+    state["history"] = history
     if clear_keys:
         for key in clear_keys:
             state.pop(key, None)
-
     state["seq"] = current_seq + 1
     state.update(updates)
     write_state(state, project_dir)
@@ -502,9 +508,84 @@ def state_command(args: list[str]) -> int:
     if subcmd == "set":
         return _state_set(args[1:])
 
+    if subcmd == "sync":
+        return _state_sync(args[1:])
+
     print(f"Unknown state subcommand: {subcmd}")
-    print("Usage: python -m tagteam state [set|reset|diagnose]")
+    print("Usage: python -m tagteam state [set|reset|diagnose|sync]")
     return 1
+
+
+def _state_sync(args: list[str]) -> int:
+    """Rewrite handoff-state.json from per-cycle status (source of truth).
+
+    Escape hatch when top-level state has drifted out of sync with the
+    active cycle (e.g. because a tool edited cycle files without going
+    through tagteam). Picks a cycle, derives the correct top-level
+    state from its status JSON, and writes it.
+
+    Usage:
+        tagteam state sync                        # most recently modified cycle
+        tagteam state sync --phase P --type T     # specific cycle
+    """
+    from tagteam.cycle import (
+        _derive_top_level_state, _handoffs_dir, list_cycles,
+    )
+
+    allowed = {"--phase", "--type"}
+    parsed: dict[str, str] = {}
+    i = 0
+    while i < len(args):
+        if args[i] in allowed and i + 1 < len(args):
+            parsed[args[i]] = args[i + 1]
+            i += 2
+        else:
+            print(f"Unknown or malformed flag: {args[i]}")
+            return 1
+
+    project_dir = _resolve_project_root()
+
+    phase = parsed.get("--phase")
+    cycle_type = parsed.get("--type")
+
+    if phase and cycle_type:
+        target = (phase, cycle_type)
+    elif phase or cycle_type:
+        print("--phase and --type must be passed together")
+        return 1
+    else:
+        # Pick the most recently modified cycle status file.
+        handoffs = _handoffs_dir(project_dir)
+        if not handoffs.is_dir():
+            print("No docs/handoffs/ directory found.")
+            return 1
+        cycles = list_cycles(project_dir)
+        jsonl_cycles = [c for c in cycles if c["format"] == "jsonl"]
+        if not jsonl_cycles:
+            print("No JSONL-format cycles found to sync from.")
+            return 1
+
+        def mtime(c: dict) -> float:
+            p = handoffs / f"{c['phase']}_{c['type']}_status.json"
+            return p.stat().st_mtime if p.exists() else 0.0
+
+        latest = max(jsonl_cycles, key=mtime)
+        target = (latest["phase"], latest["type"])
+
+    new_state = _derive_top_level_state(
+        target[0], target[1], project_dir,
+        updated_by="state-sync",
+    )
+    if new_state is None:
+        print(f"Cycle {target[0]}_{target[1]} not found or has an "
+              "unrecognized state/ready_for combination.")
+        return 1
+
+    print(f"Synced from {target[0]}_{target[1]}: "
+          f"turn={new_state.get('turn')} "
+          f"status={new_state.get('status')} "
+          f"round={new_state.get('round')}")
+    return 0
 
 
 def _state_set(args: list[str]) -> int:
