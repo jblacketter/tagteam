@@ -230,14 +230,32 @@ class TestUpdatedByStateIntegration:
         assert state["status"] == "done"
         assert state["result"] == "approved"
 
-    def test_no_state_update_without_flag(self, project):
+    def test_state_updates_even_without_explicit_updated_by(self, project):
+        """Top-level state must sync from cycle regardless of --updated-by.
+
+        Regression for handoff-drift bug: previously, omitting
+        --updated-by caused per-cycle status to move but top-level to
+        stay stale. Now top-level is always derived from per-cycle.
+        """
         from tagteam.state import read_state
-        init_cycle("p", "plan", "A", "B", "init", project)
+        init_cycle("p", "plan", "Claude", "Codex", "init", project)
         state = read_state(project)
-        # State file should not have been created/updated by cycle init
-        # (it may exist from prior test state, so check it wasn't updated by us)
-        if state:
-            assert state.get("updated_by") != "A"
+        assert state is not None
+        assert state["turn"] == "reviewer"
+        assert state["status"] == "ready"
+        # updated_by defaults to the lead's name when not given
+        assert state["updated_by"] == "Claude"
+
+    def test_add_round_infers_updated_by_from_role(self, project):
+        """add_round without updated_by should infer from role and roster."""
+        from tagteam.state import read_state
+        init_cycle("p", "plan", "Claude", "Codex", "init", project)
+        add_round("p", "plan", "reviewer", "REQUEST_CHANGES", 1, "Fix.", project)
+        state = read_state(project)
+        assert state["turn"] == "lead"
+        assert state["status"] == "ready"
+        # Inferred from cycle.reviewer field
+        assert state["updated_by"] == "Codex"
 
     def test_round5_with_progress_does_not_escalate(self, project):
         """Cycles with progress (changing content) should NOT auto-escalate at round 5."""
@@ -263,18 +281,22 @@ class TestUpdatedByStateIntegration:
 
     def test_stale_rounds_auto_escalate(self, project):
         """Cycles with no progress (identical submissions) SHOULD auto-escalate."""
+        from tagteam.cycle import STALE_ROUND_LIMIT
         from tagteam.state import read_state
         init_cycle("p", "plan", "A", "B", "same content", project, updated_by="A")
-        # Simulate rounds where the lead keeps submitting identical content
-        for r in range(1, 6):
+        # Simulate rounds where the lead keeps submitting identical content.
+        # Need at least STALE_ROUND_LIMIT stale rounds before the next
+        # REQUEST_CHANGES trips the auto-escalate guard.
+        stale_rounds = STALE_ROUND_LIMIT + 1
+        for r in range(1, stale_rounds + 1):
             add_round("p", "plan", "reviewer", "REQUEST_CHANGES", r, f"Fix {r}.",
                       project, updated_by="B")
             add_round("p", "plan", "lead", "SUBMIT_FOR_REVIEW", r + 1,
-                      "same content",  # identical every time = no progress
+                      "same content",
                       project, updated_by="A")
-        # Round 6: REQUEST_CHANGES should auto-escalate (5 stale submissions)
-        status = add_round("p", "plan", "reviewer", "REQUEST_CHANGES", 6,
-                           "Still the same.", project, updated_by="B")
+        status = add_round("p", "plan", "reviewer", "REQUEST_CHANGES",
+                           stale_rounds + 1, "Still the same.",
+                           project, updated_by="B")
 
         # Handoff state should be escalated
         state = read_state(project)
@@ -507,6 +529,47 @@ class TestCLILegacyFallback:
         assert result == 0
         captured = capsys.readouterr()
         assert "Legacy lead submission." in captured.out
+
+
+class TestGitRootResolution:
+    """Running cycle CLI from a nested subdir should write to the repo
+    root's docs/handoffs/, not cwd. Regression for Issue #1
+    (2026-04-24): `tagteam cycle init` used to silently target cwd.
+    """
+
+    @pytest.fixture
+    def reset_root_cache(self):
+        """_resolve_project_root caches; reset around each test."""
+        import tagteam.state as st
+        saved = st._cached_project_root
+        st._cached_project_root = None
+        yield
+        st._cached_project_root = saved
+
+    def test_init_from_subdir_writes_to_git_root(self, tmp_path, monkeypatch, reset_root_cache):
+        import subprocess
+        subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+        subdir = tmp_path / "subproject"
+        subdir.mkdir()
+        monkeypatch.chdir(subdir)
+
+        # Default project_dir="." should resolve to the git root (tmp_path),
+        # not the subdir cwd.
+        init_cycle("p", "plan", "A", "B", "init")
+
+        # Files land at the root
+        assert (tmp_path / "docs" / "handoffs" / "p_plan_status.json").exists()
+        assert (tmp_path / "handoff-state.json").exists()
+        # Not in the subdir
+        assert not (subdir / "docs" / "handoffs").exists()
+        assert not (subdir / "handoff-state.json").exists()
+
+    def test_explicit_project_dir_still_honored(self, tmp_path, reset_root_cache):
+        """Explicit project_dir must not be overridden by git-root resolution."""
+        other = tmp_path / "explicit"
+        other.mkdir()
+        init_cycle("p", "plan", "A", "B", "init", str(other))
+        assert (other / "docs" / "handoffs" / "p_plan_status.json").exists()
 
 
 class TestExtractLastRoundWithProjectDir:
