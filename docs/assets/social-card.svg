@@ -1,0 +1,148 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" role="img" aria-label="tagteam — two AIs hand off the work, one human breaks the tie">
+  <title>tagteam</title>
+  <desc>A collaboration framework for structured AI-to-AI handoffs with human oversight.</desc>
+
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#0d131f"/>
+      <stop offset="55%" stop-color="#1a2236"/>
+      <stop offset="100%" stop-color="#263451"/>
+    </linearGradient>
+
+    <radialGradient id="glow" cx="50%" cy="48%" r="55%">
+      <stop offset="0%"  stop-color="#9fb8d8" stop-opacity="0.20"/>
+      <stop offset="60%" stop-color="#9fb8d8" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#9fb8d8" stop-opacity="0"/>
+    </radialGradient>
+
+    <radialGradient id="leadGrad" cx="35%" cy="35%" r="70%">
+      <stop offset="0%"  stop-color="#6fd9bb"/>
+      <stop offset="60%" stop-color="#3aaf8f"/>
+      <stop offset="100%" stop-color="#1f6e58"/>
+    </radialGradient>
+
+    <radialGradient id="reviewerGrad" cx="35%" cy="35%" r="70%">
+      <stop offset="0%"  stop-color="#a8c8ff"/>
+      <stop offset="60%" stop-color="#6fa8ff"/>
+      <stop offset="100%" stop-color="#3a64a8"/>
+    </radialGradient>
+
+    <radialGradient id="arbiterGrad" cx="35%" cy="35%" r="70%">
+      <stop offset="0%"  stop-color="#f3d99a"/>
+      <stop offset="60%" stop-color="#e8c170"/>
+      <stop offset="100%" stop-color="#a3863f"/>
+    </radialGradient>
+
+    <linearGradient id="batonGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"  stop-color="#3aaf8f"/>
+      <stop offset="50%" stop-color="#9fb8d8"/>
+      <stop offset="100%" stop-color="#6fa8ff"/>
+    </linearGradient>
+
+    <pattern id="dots" x="0" y="0" width="32" height="32" patternUnits="userSpaceOnUse">
+      <circle cx="1.4" cy="1.4" r="1.4" fill="#9fb8d8" fill-opacity="0.06"/>
+    </pattern>
+
+    <filter id="nodeShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="8"/>
+      <feOffset dx="0" dy="6" result="offsetblur"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.55"/></feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background layers -->
+  <rect width="1280" height="640" fill="url(#bgGrad)"/>
+  <rect width="1280" height="640" fill="url(#dots)"/>
+  <rect width="1280" height="640" fill="url(#glow)"/>
+
+  <rect x="0" y="0" width="1280" height="2" fill="#9fb8d8" fill-opacity="0.30"/>
+  <rect x="0" y="638" width="1280" height="2" fill="#9fb8d8" fill-opacity="0.20"/>
+
+  <!-- ===== Handoff diagram (upper portion) ===== -->
+  <g transform="translate(0, 150)">
+    <!-- Connector / baton between Lead and Reviewer -->
+    <line x1="450" y1="90" x2="830" y2="90"
+          stroke="url(#batonGrad)" stroke-width="4" stroke-linecap="round"/>
+
+    <!-- Motion ticks -->
+    <g stroke="#9fb8d8" stroke-opacity="0.55" stroke-width="2.5" stroke-linecap="round">
+      <line x1="525" y1="80" x2="540" y2="100"/>
+      <line x1="575" y1="80" x2="590" y2="100"/>
+      <line x1="625" y1="80" x2="640" y2="100"/>
+      <line x1="690" y1="80" x2="705" y2="100"/>
+      <line x1="740" y1="80" x2="755" y2="100"/>
+    </g>
+
+    <!-- Center "tag" pill -->
+    <g transform="translate(640, 90)">
+      <rect x="-44" y="-19" width="88" height="38" rx="19" ry="19"
+            fill="#0d131f" stroke="#9fb8d8" stroke-width="1.8"/>
+      <text x="0" y="6" text-anchor="middle"
+            font-family="Georgia, 'Times New Roman', serif"
+            font-size="18" font-style="italic" fill="#e6eaf2"
+            letter-spacing="2">tag</text>
+    </g>
+
+    <!-- Lead node -->
+    <g filter="url(#nodeShadow)">
+      <circle cx="450" cy="90" r="56" fill="url(#leadGrad)"/>
+      <circle cx="450" cy="90" r="56" fill="none" stroke="#e6eaf2" stroke-opacity="0.20" stroke-width="1.2"/>
+    </g>
+    <text x="450" y="98" text-anchor="middle"
+          font-family="Georgia, 'Times New Roman', serif"
+          font-size="28" font-weight="bold" fill="#0d131f"
+          letter-spacing="1">L</text>
+    <text x="450" y="180" text-anchor="middle"
+          font-family="Georgia, 'Times New Roman', serif"
+          font-size="16" fill="#8996a8" letter-spacing="3">LEAD</text>
+
+    <!-- Reviewer node -->
+    <g filter="url(#nodeShadow)">
+      <circle cx="830" cy="90" r="56" fill="url(#reviewerGrad)"/>
+      <circle cx="830" cy="90" r="56" fill="none" stroke="#e6eaf2" stroke-opacity="0.20" stroke-width="1.2"/>
+    </g>
+    <text x="830" y="98" text-anchor="middle"
+          font-family="Georgia, 'Times New Roman', serif"
+          font-size="28" font-weight="bold" fill="#0d131f"
+          letter-spacing="1">R</text>
+    <text x="830" y="180" text-anchor="middle"
+          font-family="Georgia, 'Times New Roman', serif"
+          font-size="16" fill="#8996a8" letter-spacing="3">REVIEWER</text>
+
+    <!-- Arbiter (human) above the tag pill -->
+    <line x1="640" y1="20" x2="640" y2="64"
+          stroke="#e8c170" stroke-opacity="0.55"
+          stroke-width="1.8" stroke-dasharray="3 5"/>
+    <g filter="url(#nodeShadow)">
+      <circle cx="640" cy="-10" r="28" fill="url(#arbiterGrad)"/>
+      <circle cx="640" cy="-10" r="28" fill="none" stroke="#e6eaf2" stroke-opacity="0.20" stroke-width="1.2"/>
+    </g>
+    <g fill="#0d131f">
+      <circle cx="640" cy="-18" r="5"/>
+      <path d="M 630 2 q 10 -12 20 0 v 4 h -20 z"/>
+    </g>
+    <text x="640" y="-50" text-anchor="middle"
+          font-family="Georgia, 'Times New Roman', serif"
+          font-size="14" fill="#8996a8" letter-spacing="3">ARBITER</text>
+  </g>
+
+  <!-- ===== Wordmark + tagline (lower portion) ===== -->
+  <g transform="translate(640, 480)">
+    <text x="0" y="0" text-anchor="middle"
+          font-family="Georgia, 'Times New Roman', serif"
+          font-size="108" font-weight="bold" fill="#e6eaf2"
+          letter-spacing="3">
+      tag<tspan fill="#9fb8d8">team</tspan>
+    </text>
+    <text x="0" y="56" text-anchor="middle"
+          font-family="Georgia, 'Times New Roman', serif"
+          font-size="22" font-style="italic" fill="#8996a8"
+          letter-spacing="4">
+      Two AIs hand off the work. One human breaks the tie.
+    </text>
+  </g>
+</svg>
