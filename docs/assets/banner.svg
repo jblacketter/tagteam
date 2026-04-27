@@ -1,0 +1,158 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 400" role="img" aria-label="tagteam — two AIs hand off the work, one human breaks the tie">
+  <title>tagteam</title>
+  <desc>A collaboration framework for structured AI-to-AI handoffs with human oversight.</desc>
+
+  <defs>
+    <!-- Background gradient: matches the Saloon dashboard palette -->
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#0d131f"/>
+      <stop offset="55%" stop-color="#1a2236"/>
+      <stop offset="100%" stop-color="#263451"/>
+    </linearGradient>
+
+    <!-- Soft radial highlight behind the wordmark -->
+    <radialGradient id="glow" cx="50%" cy="55%" r="55%">
+      <stop offset="0%"  stop-color="#9fb8d8" stop-opacity="0.18"/>
+      <stop offset="60%" stop-color="#9fb8d8" stop-opacity="0.04"/>
+      <stop offset="100%" stop-color="#9fb8d8" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Lead node (teal-green) -->
+    <radialGradient id="leadGrad" cx="35%" cy="35%" r="70%">
+      <stop offset="0%"  stop-color="#6fd9bb"/>
+      <stop offset="60%" stop-color="#3aaf8f"/>
+      <stop offset="100%" stop-color="#1f6e58"/>
+    </radialGradient>
+
+    <!-- Reviewer node (cool blue) -->
+    <radialGradient id="reviewerGrad" cx="35%" cy="35%" r="70%">
+      <stop offset="0%"  stop-color="#a8c8ff"/>
+      <stop offset="60%" stop-color="#6fa8ff"/>
+      <stop offset="100%" stop-color="#3a64a8"/>
+    </radialGradient>
+
+    <!-- Arbiter node (amber) -->
+    <radialGradient id="arbiterGrad" cx="35%" cy="35%" r="70%">
+      <stop offset="0%"  stop-color="#f3d99a"/>
+      <stop offset="60%" stop-color="#e8c170"/>
+      <stop offset="100%" stop-color="#a3863f"/>
+    </radialGradient>
+
+    <!-- Baton gradient running between Lead and Reviewer -->
+    <linearGradient id="batonGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"  stop-color="#3aaf8f"/>
+      <stop offset="50%" stop-color="#9fb8d8"/>
+      <stop offset="100%" stop-color="#6fa8ff"/>
+    </linearGradient>
+
+    <!-- Subtle dot grid pattern -->
+    <pattern id="dots" x="0" y="0" width="28" height="28" patternUnits="userSpaceOnUse">
+      <circle cx="1.2" cy="1.2" r="1.2" fill="#9fb8d8" fill-opacity="0.06"/>
+    </pattern>
+
+    <!-- Soft drop-shadow for nodes -->
+    <filter id="nodeShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="6"/>
+      <feOffset dx="0" dy="4" result="offsetblur"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.5"/></feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1280" height="400" fill="url(#bgGrad)"/>
+  <rect width="1280" height="400" fill="url(#dots)"/>
+  <rect width="1280" height="400" fill="url(#glow)"/>
+
+  <!-- Thin top + bottom accent rules -->
+  <rect x="0" y="0" width="1280" height="1" fill="#9fb8d8" fill-opacity="0.25"/>
+  <rect x="0" y="399" width="1280" height="1" fill="#9fb8d8" fill-opacity="0.15"/>
+
+  <!-- ===== Handoff diagram (top half) ===== -->
+  <g transform="translate(0, 70)">
+    <!-- Connector / baton path between Lead and Reviewer -->
+    <line x1="500" y1="70" x2="780" y2="70"
+          stroke="url(#batonGrad)" stroke-width="3" stroke-linecap="round"/>
+
+    <!-- Baton ticks (motion marks) -->
+    <g stroke="#9fb8d8" stroke-opacity="0.55" stroke-width="2" stroke-linecap="round">
+      <line x1="560" y1="62" x2="572" y2="78"/>
+      <line x1="600" y1="62" x2="612" y2="78"/>
+      <line x1="640" y1="62" x2="652" y2="78"/>
+      <line x1="680" y1="62" x2="692" y2="78"/>
+      <line x1="720" y1="62" x2="732" y2="78"/>
+    </g>
+
+    <!-- Center "tag" pill (the moment of handoff) -->
+    <g transform="translate(640, 70)">
+      <rect x="-34" y="-15" width="68" height="30" rx="15" ry="15"
+            fill="#0d131f" stroke="#9fb8d8" stroke-width="1.5"/>
+      <text x="0" y="5" text-anchor="middle"
+            font-family="Georgia, 'Times New Roman', serif"
+            font-size="14" font-style="italic" fill="#e6eaf2"
+            letter-spacing="1.5">tag</text>
+    </g>
+
+    <!-- Lead node (left) -->
+    <g filter="url(#nodeShadow)">
+      <circle cx="500" cy="70" r="42" fill="url(#leadGrad)"/>
+      <circle cx="500" cy="70" r="42" fill="none" stroke="#e6eaf2" stroke-opacity="0.18" stroke-width="1"/>
+    </g>
+    <text x="500" y="76" text-anchor="middle"
+          font-family="Georgia, 'Times New Roman', serif"
+          font-size="20" font-weight="bold" fill="#0d131f"
+          letter-spacing="1">L</text>
+    <text x="500" y="145" text-anchor="middle"
+          font-family="Georgia, 'Times New Roman', serif"
+          font-size="14" fill="#8996a8" letter-spacing="2">LEAD</text>
+
+    <!-- Reviewer node (right) -->
+    <g filter="url(#nodeShadow)">
+      <circle cx="780" cy="70" r="42" fill="url(#reviewerGrad)"/>
+      <circle cx="780" cy="70" r="42" fill="none" stroke="#e6eaf2" stroke-opacity="0.18" stroke-width="1"/>
+    </g>
+    <text x="780" y="76" text-anchor="middle"
+          font-family="Georgia, 'Times New Roman', serif"
+          font-size="20" font-weight="bold" fill="#0d131f"
+          letter-spacing="1">R</text>
+    <text x="780" y="145" text-anchor="middle"
+          font-family="Georgia, 'Times New Roman', serif"
+          font-size="14" fill="#8996a8" letter-spacing="2">REVIEWER</text>
+
+    <!-- Arbiter (human) above the tag pill, dotted line down -->
+    <line x1="640" y1="20" x2="640" y2="50"
+          stroke="#e8c170" stroke-opacity="0.55"
+          stroke-width="1.5" stroke-dasharray="3 4"/>
+    <g filter="url(#nodeShadow)">
+      <circle cx="640" cy="0" r="22" fill="url(#arbiterGrad)"/>
+      <circle cx="640" cy="0" r="22" fill="none" stroke="#e6eaf2" stroke-opacity="0.18" stroke-width="1"/>
+    </g>
+    <!-- Tiny human glyph inside the arbiter node -->
+    <g fill="#0d131f">
+      <circle cx="640" cy="-6" r="4"/>
+      <path d="M 632 8 q 8 -10 16 0 v 4 h -16 z"/>
+    </g>
+    <text x="640" y="-32" text-anchor="middle"
+          font-family="Georgia, 'Times New Roman', serif"
+          font-size="12" fill="#8996a8" letter-spacing="2">ARBITER</text>
+  </g>
+
+  <!-- ===== Wordmark + tagline (bottom half) ===== -->
+  <g transform="translate(640, 290)">
+    <text x="0" y="0" text-anchor="middle"
+          font-family="Georgia, 'Times New Roman', serif"
+          font-size="76" font-weight="bold" fill="#e6eaf2"
+          letter-spacing="2">
+      tag<tspan fill="#9fb8d8">team</tspan>
+    </text>
+    <text x="0" y="42" text-anchor="middle"
+          font-family="Georgia, 'Times New Roman', serif"
+          font-size="18" font-style="italic" fill="#8996a8"
+          letter-spacing="3">
+      Two AIs hand off the work. One human breaks the tie.
+    </text>
+  </g>
+</svg>
