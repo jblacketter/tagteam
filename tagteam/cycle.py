@@ -9,11 +9,38 @@ File structure per cycle:
     docs/handoffs/{phase}_{type}_rounds.jsonl   — append-only round log
 """
 
+import copy
 import json
 import re
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+# git's well-known empty-tree object SHA. Diffing HEAD against this lists
+# every path in HEAD — used by `scope-diff` when baseline.sha is null
+# (plan-init happened in a no-commit repo).
+_GIT_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+# Tagteam-managed paths that scope-diff must exclude. These are
+# bookkeeping artifacts of the review system itself, not phase work,
+# and they are written by `init_cycle` / `add_round` / state updates
+# AFTER baseline capture — so they would otherwise appear in current_dirty
+# without being in baseline_dirty.
+_TAGTEAM_ARTIFACT_FILES = frozenset({
+    "handoff-state.json",
+    ".handoff-state.tmp",
+    "handoff-diagnostics.jsonl",
+})
+_TAGTEAM_ARTIFACT_PREFIXES = ("docs/handoffs/",)
+
+
+def _is_tagteam_artifact(path: str) -> bool:
+    """True if `path` (project-relative, forward-slash) is a tagteam
+    bookkeeping file that should be excluded from `scope-diff` output."""
+    if path in _TAGTEAM_ARTIFACT_FILES:
+        return True
+    return any(path.startswith(p) for p in _TAGTEAM_ARTIFACT_PREFIXES)
 
 VALID_ACTIONS = {
     "SUBMIT_FOR_REVIEW", "REQUEST_CHANGES", "APPROVE",
@@ -64,6 +91,59 @@ def _rounds_path(phase: str, cycle_type: str, project_dir: str) -> Path:
     return _handoffs_dir(project_dir) / f"{phase}_{cycle_type}_rounds.jsonl"
 
 
+def _git(project_dir: str, *args: str) -> tuple[int, str]:
+    """Run a git command and return (returncode, stdout). Never raises."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", project_dir, *args],
+            capture_output=True, text=True, timeout=5,
+        )
+        return r.returncode, r.stdout
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return 1, ""
+
+
+def _capture_baseline(project_dir: str, source: str) -> dict | None:
+    """Snapshot git HEAD + working-tree drift for use in impl scope audits.
+
+    Returns a dict with keys {sha, dirty_paths, captured_at, source}, or
+    None if the directory is not a git repo. Never raises; on any error
+    returns None or partial data with sha=None.
+
+    `dirty_paths` preserves the porcelain status prefix (e.g. " M docs/foo.md")
+    so reviewers can see staged/unstaged distinctions. `scope-diff` strips
+    the prefix when doing path comparisons.
+    """
+    sha_rc, sha_out = _git(project_dir, "rev-parse", "HEAD")
+    porc_rc, porc_out = _git(project_dir, "status", "--porcelain")
+    if sha_rc != 0 and porc_rc != 0:
+        return None
+    sha = sha_out.strip() if sha_rc == 0 else None
+    dirty = sorted(line for line in porc_out.splitlines() if line) if porc_rc == 0 else []
+    return {
+        "sha": sha,
+        "dirty_paths": dirty,
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "source": source,
+    }
+
+
+def _porcelain_path(line: str) -> str:
+    """Strip the leading 3-char status prefix from a porcelain status line.
+
+    For rename entries (`R  old -> new`), returns the new-path side, since
+    that's the post-rename path that will appear in subsequent diffs.
+    """
+    body = line[3:] if len(line) > 3 else line
+    if " -> " in body:
+        body = body.split(" -> ", 1)[1]
+    # Git quotes paths with special chars; strip surrounding quotes
+    # without trying to fully decode escape sequences (rare edge case).
+    if len(body) >= 2 and body.startswith('"') and body.endswith('"'):
+        body = body[1:-1]
+    return body
+
+
 # --- Core functions ---
 
 def _count_stale_rounds(phase: str, cycle_type: str, project_dir: str) -> int:
@@ -97,6 +177,41 @@ def _count_stale_rounds(phase: str, cycle_type: str, project_dir: str) -> int:
     return stale
 
 
+def _resolve_baseline_for_cycle(phase: str, cycle_type: str,
+                                project_dir: str) -> dict | None:
+    """Decide the baseline value to record on `init_cycle`.
+
+    Plan cycles capture fresh. Impl cycles propagate forward from the
+    matching plan cycle's status JSON when its `baseline` block is
+    non-null (regardless of whether `baseline.sha` inside is null).
+    Falls back to fresh capture only when the plan status is missing,
+    has no `baseline` key, or has `baseline == None` (plan ran outside
+    a git repo).
+    """
+    if cycle_type == "plan":
+        return _capture_baseline(project_dir, source="plan-init")
+
+    plan_status_path = _status_path(phase, "plan", project_dir)
+    if plan_status_path.exists():
+        try:
+            plan_status = json.loads(plan_status_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            plan_status = {}
+        plan_baseline = plan_status.get("baseline")
+        if isinstance(plan_baseline, dict):
+            propagated = copy.deepcopy(plan_baseline)
+            propagated["source"] = "copied-from-plan"
+            return propagated
+
+    print(
+        f"[tagteam] warning: no plan-cycle baseline for phase '{phase}'; "
+        f"capturing impl baseline from current state. This may include "
+        f"changes already made during implementation.",
+        file=sys.stderr,
+    )
+    return _capture_baseline(project_dir, source="impl-init-fallback")
+
+
 def init_cycle(phase: str, cycle_type: str, lead: str, reviewer: str,
                content: str, project_dir: str = ".",
                updated_by: str | None = None) -> dict:
@@ -112,6 +227,8 @@ def init_cycle(phase: str, cycle_type: str, lead: str, reviewer: str,
 
     now = datetime.now(timezone.utc).isoformat()
 
+    baseline = _resolve_baseline_for_cycle(phase, cycle_type, project_dir)
+
     status = {
         "state": "in-progress",
         "ready_for": "reviewer",
@@ -121,6 +238,7 @@ def init_cycle(phase: str, cycle_type: str, lead: str, reviewer: str,
         "lead": lead,
         "reviewer": reviewer,
         "date": now[:10],
+        "baseline": baseline,
     }
 
     entry = {
@@ -433,7 +551,7 @@ def list_cycles(project_dir: str = ".") -> list[dict]:
 def cycle_command(args: list[str]) -> int:
     """Handle `python -m tagteam cycle <subcommand>`."""
     if not args:
-        print("Usage: python -m tagteam cycle <init|add|status|rounds|render>")
+        print("Usage: python -m tagteam cycle <init|add|status|rounds|render|scope-diff>")
         return 1
 
     from tagteam.state import _resolve_project_root
@@ -450,6 +568,8 @@ def cycle_command(args: list[str]) -> int:
         return _cli_rounds(args[1:])
     elif subcmd == "render":
         return _cli_render(args[1:])
+    elif subcmd == "scope-diff":
+        return _cli_scope_diff(args[1:])
     else:
         print(f"Unknown cycle subcommand: {subcmd}")
         return 1
@@ -635,3 +755,78 @@ def _cli_render(args: list[str]) -> int:
 
     print(f"No cycle found: {phase}_{cycle_type}")
     return 1
+
+
+def _cli_scope_diff(args: list[str]) -> int:
+    """Print paths attributable to this phase, filtering out pre-existing drift.
+
+    Reads the cycle's `baseline` block (captured at plan-init, copied into
+    impl on init), then computes:
+      committed_since_baseline ∪ (current_dirty − baseline_dirty)
+
+    Committed paths always surface, even if dirty at baseline (they are
+    provably phase work). Uncommitted paths surface only if they were not
+    already dirty at baseline.
+
+    When baseline.sha is null (plan-init in a no-commit repo), the
+    committed-side comparison is against git's empty-tree object.
+    """
+    allowed = {"--phase", "--type"}
+    parsed = _parse_args(args, allowed)
+    phase = parsed.get("--phase")
+    cycle_type = parsed.get("--type")
+    if not phase or not cycle_type:
+        print("Required: --phase, --type")
+        return 1
+
+    project_dir = _resolve(".")
+    sp = _status_path(phase, cycle_type, project_dir)
+    if not sp.exists():
+        print(f"No cycle found: {phase}_{cycle_type}")
+        return 1
+
+    try:
+        status = json.loads(sp.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"Failed to read cycle status: {e}")
+        return 1
+
+    if "baseline" not in status or status["baseline"] is None:
+        print(
+            "Cycle has no baseline (created before phase: "
+            "cycle-baseline-snapshot). Cannot compute scope-diff."
+        )
+        return 1
+
+    baseline = status["baseline"]
+    baseline_sha = baseline.get("sha")
+    baseline_dirty_lines = baseline.get("dirty_paths") or []
+    baseline_dirty = {_porcelain_path(line) for line in baseline_dirty_lines}
+
+    # Determine if HEAD resolves now.
+    head_rc, _ = _git(project_dir, "rev-parse", "--verify", "HEAD")
+    head_resolves = (head_rc == 0)
+
+    committed: set[str] = set()
+    if head_resolves:
+        diff_base = baseline_sha if baseline_sha else _GIT_EMPTY_TREE
+        rc, out = _git(project_dir, "diff", "--name-only", diff_base, "HEAD")
+        if rc == 0:
+            committed = {p for p in out.splitlines() if p}
+
+    rc, porc_out = _git(project_dir, "status", "--porcelain")
+    current_dirty: set[str] = set()
+    if rc == 0:
+        current_dirty = {
+            _porcelain_path(line) for line in porc_out.splitlines() if line
+        }
+
+    attributable_uncommitted = current_dirty - baseline_dirty
+    attributable = (committed | attributable_uncommitted)
+    # Strip tagteam's own bookkeeping artifacts; they are review-system
+    # output, not phase work.
+    attributable = sorted(p for p in attributable if not _is_tagteam_artifact(p))
+
+    for path in attributable:
+        print(path)
+    return 0
