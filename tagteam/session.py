@@ -328,27 +328,35 @@ def _parse_backend(args: list[str]) -> tuple[str | None, list[str]]:
     return backend, remaining
 
 
+def _print_session_usage() -> None:
+    print("Usage: python -m tagteam session <command> [options]")
+    print()
+    print("Commands:")
+    print("  start   Create or describe an orchestration session")
+    print("  kill    Kill the managed tmux/iTerm2 session")
+    print("  attach  Attach to an existing tmux session")
+    print()
+    print("Options:")
+    print(
+        "  --backend iterm2|tmux|manual  Backend to use"
+        " (default: auto-detect)"
+    )
+    print("  --dir PATH                    Project directory (default: .)")
+    print("  --no-launch                   Skip auto-starting agents")
+
+
 def session_command(args: list[str]) -> int:
     """Handle `python -m tagteam session [subcommand]`."""
     if not args:
-        print("Usage: python -m tagteam session <command> [options]")
-        print()
-        print("Commands:")
-        print("  start   Create or describe an orchestration session")
-        print("  kill    Kill the managed tmux/iTerm2 session")
-        print("  attach  Attach to an existing tmux session")
-        print()
-        print("Options:")
-        print(
-            "  --backend iterm2|tmux|manual  Backend to use"
-            " (default: auto-detect)"
-        )
-        print("  --dir PATH                    Project directory (default: .)")
-        print("  --no-launch                   Skip auto-starting agents")
+        _print_session_usage()
         return 1
 
     backend, remaining = _parse_backend(args)
     subcmd = remaining[0] if remaining else ""
+
+    if subcmd in ("--help", "-h"):
+        _print_session_usage()
+        return 0
 
     if subcmd == "start":
         project_dir = None
