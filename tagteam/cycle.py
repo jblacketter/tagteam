@@ -44,7 +44,7 @@ def _is_tagteam_artifact(path: str) -> bool:
 
 VALID_ACTIONS = {
     "SUBMIT_FOR_REVIEW", "REQUEST_CHANGES", "APPROVE",
-    "ESCALATE", "NEED_HUMAN",
+    "ESCALATE", "NEED_HUMAN", "AMEND",
 }
 VALID_ROLES = {"lead", "reviewer"}
 VALID_TYPES = {"plan", "impl"}
@@ -280,6 +280,33 @@ def add_round(phase: str, cycle_type: str, role: str, action: str,
 
     project_dir = _resolve(project_dir)
     now = datetime.now(timezone.utc).isoformat()
+
+    # AMEND: lead-only mid-review update. No round advance, no state
+    # transition, no top-level state derive (turn/round/status are stable),
+    # no stale-round detection (AMENDs are progress, not staleness).
+    if action == "AMEND":
+        if role != "lead":
+            raise ValueError("AMEND requires role=lead")
+        status = read_status(phase, cycle_type, project_dir) or {}
+        if status.get("state") != "in-progress" or status.get("ready_for") != "reviewer":
+            raise ValueError(
+                "AMEND only valid mid-review (after SUBMIT_FOR_REVIEW, "
+                "before REQUEST_CHANGES/APPROVE)."
+            )
+        active_round = status.get("round")
+        if round_num != active_round:
+            raise ValueError(
+                f"AMEND --round {round_num} does not match the active round "
+                f"({active_round}). Pass --round {active_round}."
+            )
+        entry = {
+            "round": round_num, "role": role, "action": action,
+            "content": content, "ts": now,
+        }
+        rp = _rounds_path(phase, cycle_type, project_dir)
+        with open(rp, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+        return status
 
     entry = {
         "round": round_num,
@@ -659,8 +686,12 @@ def _cli_add(args: list[str]) -> int:
 
     updated_by = parsed.get("--updated-by")
     content = _read_content(parsed)
-    status = add_round(phase, cycle_type, role, action, round_num, content,
-                       updated_by=updated_by)
+    try:
+        status = add_round(phase, cycle_type, role, action, round_num, content,
+                           updated_by=updated_by)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
     print(f"Round added: {phase}_{cycle_type} round={status['round']} "
           f"state={status['state']} ready_for={status.get('ready_for')}"
           " + state updated")

@@ -169,7 +169,10 @@ def parse_jsonl_rounds(jsonl_path: Path) -> list[dict] | None:
     """Parse JSONL round entries into the same structure as extract_all_rounds().
 
     Returns a list of dicts with keys: round, lead_text, reviewer_text,
-    lead_summary, reviewer_summary, action, lead_action
+    lead_summary, reviewer_summary, action, lead_action, lead_amendments.
+
+    `lead_amendments` is a list of `{"content": str, "ts": str}` dicts for
+    AMEND entries attached to that round (always present, possibly empty).
     """
     if not jsonl_path.exists():
         return None
@@ -186,13 +189,21 @@ def parse_jsonl_rounds(jsonl_path: Path) -> list[dict] | None:
     if not entries:
         return None
 
-    # Group by round number
+    # Group by round number; keep the canonical lead SUBMIT_FOR_REVIEW and
+    # the reviewer's response separately, and accumulate AMENDs per round.
     by_round: dict[int, dict] = {}
+    amendments_by_round: dict[int, list[dict]] = {}
     for e in entries:
         r = e.get("round", 0)
         if r not in by_round:
             by_round[r] = {"lead": None, "reviewer": None}
-        by_round[r][e.get("role", "lead")] = e
+        if e.get("action") == "AMEND" and e.get("role") == "lead":
+            amendments_by_round.setdefault(r, []).append({
+                "content": e.get("content", ""),
+                "ts": e.get("ts", ""),
+            })
+        else:
+            by_round[r][e.get("role", "lead")] = e
 
     rounds = []
     for round_num in sorted(by_round.keys()):
@@ -213,6 +224,7 @@ def parse_jsonl_rounds(jsonl_path: Path) -> list[dict] | None:
             "reviewer_summary": _content_summary(reviewer_text) if reviewer_text else None,
             "lead_action": lead_action,
             "action": action,
+            "lead_amendments": amendments_by_round.get(round_num, []),
         })
 
     return rounds if rounds else None
@@ -238,11 +250,21 @@ def read_cycle_rounds(phase: str, cycle_type: str,
     # Check JSONL first
     jsonl_path = handoffs / f"{phase}_{cycle_type}_rounds.jsonl"
     if jsonl_path.exists():
-        return parse_jsonl_rounds(jsonl_path)
+        rounds = parse_jsonl_rounds(jsonl_path)
+        if rounds:
+            for r in rounds:
+                r.setdefault("lead_amendments", [])
+        return rounds
 
-    # Fall back to legacy markdown
+    # Fall back to legacy markdown. Markdown predates the AMEND action
+    # and cannot represent amendments — backfill an empty list per round
+    # so consumers can rely on the schema regardless of source format.
     md_path = handoffs / f"{phase}_{cycle_type}_cycle.md"
     if md_path.exists():
-        return extract_all_rounds(md_path)
+        rounds = extract_all_rounds(md_path)
+        if rounds:
+            for r in rounds:
+                r["lead_amendments"] = []
+        return rounds
 
     return None

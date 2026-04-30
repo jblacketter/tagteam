@@ -65,6 +65,14 @@ If there is no state file, show: `Phase: — | Type: — | Round: — | Turn: �
 2. Address the feedback: update the plan or implementation files
 3. Add your round and update state in one command: `tagteam cycle add --phase [phase] --type [plan|impl] --role lead --action SUBMIT_FOR_REVIEW --round [N+1] --updated-by [your-agent-name] --content "summary of changes"`
 
+**Mid-review amendment.** If new info arrives (e.g., the human arbiter answers an open question) while the reviewer is still on your submission and you haven't been handed back the turn, run:
+
+```
+tagteam cycle add --phase [phase] --type [plan|impl] --role lead --action AMEND --round [N] --updated-by [your-agent-name] --content "<what changed and why>"
+```
+
+This appends an amendment to the active round without bumping the round number or returning the turn. The reviewer sees the amendment in the `tagteam cycle rounds` output on their next `/handoff`. AMEND only works when the cycle is mid-review (`ready_for: reviewer`) and the `--round` matches the active round; mismatches error.
+
 #### As Reviewer (your turn)
 1. Read the lead's submission: `tagteam cycle rounds --phase [phase] --type [plan|impl]`
 2. Review the referenced plan/implementation files
