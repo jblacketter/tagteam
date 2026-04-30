@@ -436,6 +436,9 @@ def cycle_command(args: list[str]) -> int:
         print("Usage: python -m tagteam cycle <init|add|status|rounds|render>")
         return 1
 
+    from tagteam.state import _resolve_project_root
+    print(f"[tagteam] project root: {_resolve_project_root()}", file=sys.stderr)
+
     subcmd = args[0]
     if subcmd == "init":
         return _cli_init(args[1:])

@@ -22,18 +22,42 @@ VALID_RUN_MODES = {"single-phase", "full-roadmap"}
 
 # Cache the resolved project root so we only shell out once per process.
 _cached_project_root: str | None = None
+_warned_outer: bool = False
 
 
 def _resolve_project_root() -> str:
-    """Resolve the git repository root, falling back to cwd.
+    """Resolve the tagteam project root.
 
-    Uses `git rev-parse --show-toplevel` so that state operations always
-    target the repo-root handoff-state.json regardless of the caller's
-    working directory (e.g. running from a subdirectory like python-behave/).
+    Discovery order:
+      1. Walk up from cwd looking for the nearest `tagteam.yaml`.
+      2. Fall back to `git rev-parse --show-toplevel`.
+      3. Fall back to cwd (".").
+
+    The walk-up rule fixes the silent nested-project-write bug from
+    docs/handoff-cycle-issues-2026-04-24.md (Issue #1): a nested git repo
+    that shadows the outer tagteam project would otherwise capture all
+    cycle/state writes via `git rev-parse`.
+
+    If a parent of the resolved root also contains `tagteam.yaml`, a
+    one-time warning is emitted to stderr.
     """
+    import sys
     global _cached_project_root
     if _cached_project_root is not None:
         return _cached_project_root
+
+    cwd = Path.cwd().resolve()
+    found: Path | None = None
+    for ancestor in [cwd, *cwd.parents]:
+        if (ancestor / "tagteam.yaml").exists():
+            found = ancestor
+            break
+
+    if found is not None:
+        _warn_outer_tagteam(found)
+        _cached_project_root = str(found)
+        return _cached_project_root
+
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
@@ -44,8 +68,28 @@ def _resolve_project_root() -> str:
             return _cached_project_root
     except (FileNotFoundError, subprocess.TimeoutExpired):
         pass
+
     _cached_project_root = "."
     return _cached_project_root
+
+
+def _warn_outer_tagteam(root: Path) -> None:
+    """If any ancestor of `root` also has tagteam.yaml, warn once to stderr."""
+    import sys
+    global _warned_outer
+    if _warned_outer:
+        return
+    for ancestor in root.parents:
+        if (ancestor / "tagteam.yaml").exists():
+            print(
+                f"[tagteam] warning: resolved project root {root} is nested "
+                f"inside another tagteam project at {ancestor}.\n"
+                f"          Cycle/state writes will go to {root}. "
+                f"cd to {ancestor} if that is wrong.",
+                file=sys.stderr,
+            )
+            _warned_outer = True
+            return
 
 
 def normalize_phase_key(phase: str) -> str:

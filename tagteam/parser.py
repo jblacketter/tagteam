@@ -224,7 +224,15 @@ def read_cycle_rounds(phase: str, cycle_type: str,
 
     Single entry point for all round reading. Returns the same structure
     regardless of underlying format.
+
+    When `project_dir == "."`, the project root is resolved via
+    `tagteam.state._resolve_project_root()` so the read path matches the
+    write path (init/add) and works from subdirectories. Explicit paths
+    are honored verbatim.
     """
+    if project_dir == ".":
+        from tagteam.state import _resolve_project_root
+        project_dir = _resolve_project_root()
     handoffs = Path(project_dir) / "docs" / "handoffs"
 
     # Check JSONL first
