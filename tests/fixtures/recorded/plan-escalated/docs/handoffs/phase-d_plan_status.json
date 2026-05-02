@@ -1,0 +1,11 @@
+{
+  "state": "escalated",
+  "ready_for": "human",
+  "round": 2,
+  "phase": "phase-d",
+  "type": "plan",
+  "lead": "Lead",
+  "reviewer": "Reviewer",
+  "date": "2026-01-01",
+  "baseline": null
+}

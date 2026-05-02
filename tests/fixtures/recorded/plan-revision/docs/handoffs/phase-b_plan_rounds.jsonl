@@ -1,0 +1,4 @@
+{"round": 1, "role": "lead", "action": "SUBMIT_FOR_REVIEW", "content": "v1 draft.", "ts": "2026-01-01T00:00:00+00:00"}
+{"round": 1, "role": "reviewer", "action": "REQUEST_CHANGES", "content": "Please address: scope creep, missing rollback story.", "ts": "2026-01-01T00:00:02+00:00"}
+{"round": 2, "role": "lead", "action": "SUBMIT_FOR_REVIEW", "content": "v2 \u2014 scope tightened, rollback added.", "ts": "2026-01-01T00:00:04+00:00"}
+{"round": 2, "role": "reviewer", "action": "APPROVE", "content": "Approved.", "ts": "2026-01-01T00:00:06+00:00"}

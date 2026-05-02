@@ -1,0 +1,4 @@
+{"round": 1, "role": "lead", "action": "SUBMIT_FOR_REVIEW", "content": "First proposal.", "ts": "2026-01-01T00:00:00+00:00"}
+{"round": 1, "role": "reviewer", "action": "REQUEST_CHANGES", "content": "Blockers in scope.", "ts": "2026-01-01T00:00:02+00:00"}
+{"round": 2, "role": "lead", "action": "SUBMIT_FOR_REVIEW", "content": "Revised but the same disagreement on scope persists.", "ts": "2026-01-01T00:00:04+00:00"}
+{"round": 2, "role": "reviewer", "action": "ESCALATE", "content": "Cannot reach agreement on scope; needs human arbiter.", "ts": "2026-01-01T00:00:06+00:00"}

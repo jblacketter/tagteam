@@ -1,0 +1,11 @@
+{
+  "state": "approved",
+  "ready_for": null,
+  "round": 1,
+  "phase": "phase-e",
+  "type": "plan",
+  "lead": "Lead",
+  "reviewer": "Reviewer",
+  "date": "2026-01-01",
+  "baseline": null
+}
