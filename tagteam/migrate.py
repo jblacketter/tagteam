@@ -173,7 +173,7 @@ def migrate_to_sqlite_command(args: list[str]) -> int:
         if (n_cycles or n_rounds) and force:
             # --force on a populated DB: delete and rebuild, since
             # re-importing on top would duplicate every row.
-            db_path.unlink()
+            _remove_sqlite_db_files(db_path)
             print(f"--force: removed existing DB ({n_cycles} cycles, "
                   f"{n_rounds} rounds) and rebuilding.")
 
@@ -183,7 +183,7 @@ def migrate_to_sqlite_command(args: list[str]) -> int:
         import sqlite3
         conn = sqlite3.connect(":memory:")
         conn.executescript(db._SCHEMA_V1)
-        conn.execute("PRAGMA user_version = 1")
+        conn.execute(f"PRAGMA user_version = {db.SCHEMA_VERSION}")
         report = db.import_from_files(project_path, conn)
         conn.close()
         print("Dry run — nothing written.")
@@ -219,3 +219,9 @@ def _arg_value(args: list[str], flag: str) -> str | None:
         if a.startswith(flag + "="):
             return a.split("=", 1)[1]
     return None
+
+
+def _remove_sqlite_db_files(db_path: Path) -> None:
+    """Remove a SQLite DB and its WAL sidecars if present."""
+    for path in (db_path, Path(f"{db_path}-wal"), Path(f"{db_path}-shm")):
+        path.unlink(missing_ok=True)

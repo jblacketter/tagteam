@@ -21,7 +21,7 @@ import sqlite3
 from pathlib import Path
 
 # Bump when the schema changes; add a migration step in `_migrate`.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 VALID_ACTIONS = {
     "SUBMIT_FOR_REVIEW", "REQUEST_CHANGES", "APPROVE",
@@ -29,6 +29,15 @@ VALID_ACTIONS = {
 }
 VALID_ROLES = {"lead", "reviewer"}
 VALID_TYPES = {"plan", "impl"}
+TERMINAL_CYCLE_STATES = {"approved", "escalated", "aborted"}
+_ACTION_TO_STATUS = {
+    "SUBMIT_FOR_REVIEW": ("in-progress", "reviewer"),
+    "REQUEST_CHANGES": ("in-progress", "lead"),
+    "APPROVE": ("approved", None),
+    "ESCALATE": ("escalated", "human"),
+    "NEED_HUMAN": ("needs-human", "human"),
+    "AMEND": ("in-progress", "reviewer"),
+}
 
 DEFAULT_DB_RELPATH = Path(".tagteam") / "tagteam.db"
 
@@ -42,6 +51,7 @@ CREATE TABLE IF NOT EXISTS cycles (
     reviewer    TEXT,
     state       TEXT NOT NULL,
     ready_for   TEXT,
+    ready_for_present INTEGER NOT NULL DEFAULT 1,
     round       INTEGER NOT NULL DEFAULT 0,
     date        TEXT,
     created_at  TEXT,
@@ -122,6 +132,17 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.executescript(_SCHEMA_V1)
         conn.execute(f"PRAGMA user_version = 1")
         current = 1
+    if current < 2:
+        cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(cycles)").fetchall()
+        }
+        if "ready_for_present" not in cols:
+            conn.execute(
+                "ALTER TABLE cycles "
+                "ADD COLUMN ready_for_present INTEGER NOT NULL DEFAULT 1"
+            )
+        conn.execute("PRAGMA user_version = 2")
+        current = 2
     # Future migrations land here.
     if current < SCHEMA_VERSION:
         raise RuntimeError(
@@ -160,6 +181,7 @@ def upsert_cycle(
     reviewer: str | None = None,
     state: str = "in-progress",
     ready_for: str | None = None,
+    ready_for_present: bool = True,
     round_: int = 0,
     date: str | None = None,
     created_at: str | None = None,
@@ -178,20 +200,23 @@ def upsert_cycle(
         cycle_id = row[0]
         conn.execute(
             """UPDATE cycles SET lead=?, reviewer=?, state=?, ready_for=?,
-                   round=?, date=?,
+                   ready_for_present=?, round=?, date=?,
                    created_at=COALESCE(created_at, ?),
                    closed_at=?,
                    baseline_json=COALESCE(?, baseline_json)
                WHERE id=?""",
-            (lead, reviewer, state, ready_for, round_, date,
+            (lead, reviewer, state, ready_for, int(ready_for_present),
+             round_, date,
              created_at, closed_at, baseline_json, cycle_id),
         )
         return cycle_id
     cur = conn.execute(
         """INSERT INTO cycles (phase, type, lead, reviewer, state, ready_for,
-                               round, date, created_at, closed_at, baseline_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                               ready_for_present, round, date, created_at,
+                               closed_at, baseline_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (phase, cycle_type, lead, reviewer, state, ready_for,
+         int(ready_for_present),
          round_, date, created_at, closed_at, baseline_json),
     )
     return cur.lastrowid
@@ -201,8 +226,9 @@ def get_cycle(
     conn: sqlite3.Connection, phase: str, cycle_type: str
 ) -> dict | None:
     cur = conn.execute(
-        """SELECT phase, type, lead, reviewer, state, ready_for, round, date,
-                  created_at, closed_at, baseline_json
+        """SELECT phase, type, lead, reviewer, state, ready_for,
+                  ready_for_present, round, date, created_at, closed_at,
+                  baseline_json
              FROM cycles WHERE phase=? AND type=?""",
         (phase, cycle_type),
     )
@@ -403,6 +429,7 @@ def import_from_files(project_dir: Path, conn: sqlite3.Connection) -> dict:
             reviewer=s.get("reviewer"),
             state=s.get("state", "unknown"),
             ready_for=s.get("ready_for"),
+            ready_for_present="ready_for" in s,
             round_=s.get("round", 0),
             date=s.get("date"),
             baseline=s.get("baseline"),
@@ -421,10 +448,12 @@ def import_from_files(project_dir: Path, conn: sqlite3.Connection) -> dict:
             (phase, cycle_type),
         )
         row = cur.fetchone()
+        created_from_rounds = row is None
         cycle_id = row[0] if row else upsert_cycle(conn, phase, cycle_type)
 
         ts_min = ts_max = None
         last_action = None
+        max_round = None
         for line in f.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if not line:
@@ -442,13 +471,26 @@ def import_from_files(project_dir: Path, conn: sqlite3.Connection) -> dict:
                 summary=r.get("summary"),
             )
             rounds_imported += 1
+            last_action = r.get("action")
+            round_num = r["round"]
+            if max_round is None or round_num > max_round:
+                max_round = round_num
             ts = r["ts"]
+            # tagteam writes UTC ISO 8601 strings; lexical order matches time.
             if ts_min is None or ts < ts_min:
                 ts_min = ts
             if ts_max is None or ts > ts_max:
                 ts_max = ts
-            last_action = r.get("action")
-        closed = ts_max if last_action == "APPROVE" else None
+        if created_from_rounds and last_action in _ACTION_TO_STATUS:
+            state, ready_for = _ACTION_TO_STATUS[last_action]
+            conn.execute(
+                "UPDATE cycles SET state=?, ready_for=?, round=? WHERE id=?",
+                (state, ready_for, max_round or 0, cycle_id),
+            )
+        cycle_state = conn.execute(
+            "SELECT state FROM cycles WHERE id=?", (cycle_id,)
+        ).fetchone()[0]
+        closed = ts_max if cycle_state in TERMINAL_CYCLE_STATES else None
         conn.execute(
             """UPDATE cycles
                   SET created_at = COALESCE(created_at, ?),
@@ -539,7 +581,11 @@ def render_cycle(
     lines.append("---")
     lines.append("")
     lines.append("<!-- CYCLE_STATUS -->")
-    lines.append(f"READY_FOR: {cycle.get('ready_for') or 'None'}")
+    ready_for = (
+        "?" if not cycle.get("ready_for_present", True)
+        else cycle.get("ready_for")
+    )
+    lines.append(f"READY_FOR: {ready_for}")
     lines.append(f"ROUND: {cycle.get('round')}")
     lines.append(f"STATE: {cycle.get('state')}")
 

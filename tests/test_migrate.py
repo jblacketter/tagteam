@@ -168,14 +168,23 @@ class TestMigrateToSqlite:
             ["--to-sqlite", "--dir", str(populated_project)]
         ) == 0
         capsys.readouterr()
+        db_path = populated_project / ".tagteam" / "tagteam.db"
+        stale_wal = Path(f"{db_path}-wal")
+        stale_shm = Path(f"{db_path}-shm")
+        stale_wal.write_bytes(b"stale-wal")
+        stale_shm.write_bytes(b"stale-shm")
         rc = migrate_to_sqlite_command(
             ["--to-sqlite", "--force", "--dir", str(populated_project)]
         )
         assert rc == 0
         out = capsys.readouterr().out
         assert "removed existing DB" in out
+        if stale_wal.exists():
+            assert stale_wal.read_bytes() != b"stale-wal"
+        if stale_shm.exists():
+            assert stale_shm.read_bytes() != b"stale-shm"
         # Final DB has the right counts (not doubled).
-        conn = db.connect(db_path=populated_project / ".tagteam" / "tagteam.db")
+        conn = db.connect(db_path=db_path)
         try:
             n_rounds = conn.execute("SELECT COUNT(*) FROM rounds").fetchone()[0]
         finally:

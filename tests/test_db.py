@@ -239,9 +239,31 @@ class TestRenderParity:
              "content": "Stuck.", "ts": "2026-05-01T00:04:00+00:00"},
         ]
         self._build_files_cycle(project, "p", "impl", status, rounds)
-        db_md = self._import_then_render(project, "p", "impl").rstrip("\n")
+        c = db.connect(db_path=Path(project) / "tmp.db")
+        db.import_from_files(Path(project), c)
+        db_md = db.render_cycle(c, "p", "impl").rstrip("\n")
+        cycle = db.get_cycle(c, "p", "impl")
+        c.close()
         files_md = self._files_render(project, "p", "impl").rstrip("\n")
         assert db_md == files_md
+        assert cycle["closed_at"] == "2026-05-01T00:04:00+00:00"
+
+    def test_parity_missing_ready_for_key(self, tmp_path):
+        project = str(tmp_path)
+        status = {
+            "state": "in-progress", "round": 1,
+            "phase": "p", "type": "plan",
+            "lead": "L", "reviewer": "R", "date": "2026-05-01",
+        }
+        rounds = [
+            {"round": 1, "role": "lead", "action": "SUBMIT_FOR_REVIEW",
+             "content": "draft", "ts": "2026-05-01T00:00:00+00:00"},
+        ]
+        self._build_files_cycle(project, "p", "plan", status, rounds)
+        db_md = self._import_then_render(project, "p", "plan").rstrip("\n")
+        files_md = self._files_render(project, "p", "plan").rstrip("\n")
+        assert db_md == files_md
+        assert "READY_FOR: ?" in db_md
 
     def test_parity_amend_mid_round(self, tmp_path):
         """Multiple entries on the same round number must render in
@@ -341,6 +363,27 @@ class TestImporter:
         cycle = db.get_cycle(c, "p", "plan")
         assert cycle["created_at"] == "2026-05-01T10:00:00+00:00"
         # closed_at gets set when last round was APPROVE
+        assert cycle["closed_at"] == "2026-05-01T11:00:00+00:00"
+        c.close()
+
+    def test_terminal_escalated_cycle_gets_closed_at(self, project_dir):
+        handoffs = project_dir / "docs" / "handoffs"
+        (handoffs / "p_plan_status.json").write_text(json.dumps({
+            "state": "escalated", "ready_for": "human", "round": 2,
+            "phase": "p", "type": "plan",
+            "lead": "L", "reviewer": "R", "date": "2026-05-01",
+        }))
+        (handoffs / "p_plan_rounds.jsonl").write_text(
+            json.dumps({"round": 1, "role": "lead",
+                        "action": "SUBMIT_FOR_REVIEW", "content": "x",
+                        "ts": "2026-05-01T10:00:00+00:00"}) + "\n" +
+            json.dumps({"round": 2, "role": "reviewer",
+                        "action": "ESCALATE", "content": "stuck",
+                        "ts": "2026-05-01T11:00:00+00:00"}) + "\n"
+        )
+        c = db.connect(db_path=project_dir / "tmp.db")
+        db.import_from_files(project_dir, c)
+        cycle = db.get_cycle(c, "p", "plan")
         assert cycle["closed_at"] == "2026-05-01T11:00:00+00:00"
         c.close()
 
