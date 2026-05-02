@@ -212,6 +212,71 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
   - Backend-aware priming box (tab/pane/terminal) at end of quickstart
 - **Phase Plan:** `docs/phases/public-onboarding.md`
 
+### Phase 20: Tail-only reads (token efficiency) — ABSORBED BY PHASE 28
+- **Status:** Absorbed — see Phase 28 / `docs/phases/sqlite-spike-findings.md`
+- **Description:** Track `last_round_seen` per agent so `tagteam cycle rounds` returns only new rounds since last read. With SQLite this is `WHERE round > ?` — trivially supported by the Phase 28 schema, no separate phase needed.
+- **Source:** `docs/tagteam-2.0-proposal.md` §8 Phase A
+
+### Phase 21: Round summary field (token efficiency) — ABSORBED BY PHASE 28
+- **Status:** Absorbed — see Phase 28 / `docs/phases/sqlite-spike-findings.md`
+- **Description:** Writer emits a short `summary` on every round. Already present as a nullable column in the Phase 28 schema (`rounds.summary`).
+- **Source:** `docs/tagteam-2.0-proposal.md` §8 Phase B
+
+### Phase 22: Structured round schema — ABSORBED BY PHASE 28
+- **Status:** Absorbed — see Phase 28 / `docs/phases/sqlite-spike-findings.md`
+- **Description:** Native columns in the Phase 28 `rounds` table replace JSON-in-JSON. Decision/blockers/unresolved_threads/resolved should be added as columns when the production port lands.
+- **Source:** `docs/tagteam-2.0-proposal.md` §8 Phase C
+
+### Phase 23: Per-round files (optional, defer if 20–22 suffice)
+- **Status:** Not started — defer pending experiment
+- **Description:** Split each round into its own file instead of an append-only JSONL. Only worth doing if 20–22 don't sufficiently shrink per-turn token cost. §9 of the proposal flags this as needing a small experiment first to verify the prompt-cache-not-shared assumption.
+- **Source:** `docs/tagteam-2.0-proposal.md` §8 Phase D
+
+### Phase 24: Event-driven watcher (optional polish)
+- **Status:** Not started
+- **Description:** Replace the polling loop in `watcher.py` with `watchdog`/`fswatch` filesystem events. Cuts idle CPU and tightens turn-flip latency. Inspired by ax-platform.com's `messages(wait=true, wait_mode=mentions)` blocking pattern.
+- **Source:** `docs/tagteam-2.0-proposal.md` §8 Phase E
+
+### Phase 25: Drift / out-of-sync audit — ABSORBED BY PHASE 28
+- **Status:** Absorbed — see Phase 28 / `docs/phases/sqlite-spike-findings.md`
+- **Description:** Drift between `handoff-state.json` / `_status.json` / `_rounds.jsonl` is impossible by construction with a single SQLite store: `state` is a singleton row, cycle status is derived from the round log. The audit phase becomes a one-time migration check rather than ongoing work.
+- **Source:** `docs/tagteam-2.0-proposal.md` §8 Phase F
+
+### Phase 26: Workspace cleanup — ABSORBED BY PHASE 28
+- **Status:** Absorbed — see Phase 28 / `docs/phases/sqlite-spike-findings.md`
+- **Description:** `.tagteam/tagteam.db` *is* the workspace cleanup. Runtime state collapses to one gitignored file. The auto-rendered markdown export (`docs/handoffs/<phase>_<type>.md` written on every DB write, byte-identical to today's `tagteam cycle render` output per the spike) preserves git-visible audit history.
+
+### Phase 27: Cycle health & stale-state detection — ABSORBED BY PHASE 28
+- **Status:** Absorbed — see Phase 28 / `docs/phases/sqlite-spike-findings.md`
+- **Description:** The user-facing health surface (`tagteam state health [--stale-days N]`) reduces to a few SELECT queries over the Phase 28 schema. Should ship as part of the production port, not as a separate phase — the queries are trivial once the DB exists.
+
+### Phase 28: SQLite as canonical runtime store
+- **Status:** Spike complete (2026-05-01) — production port pending. See `docs/phases/sqlite-spike-findings.md` for go/no-go writeup. Verdict: **go**, with 24/24 byte-identical round-trip on rankr corpus.
+- **Description:** Move runtime state (handoff state, cycle status, rounds, diagnostics) from a constellation of JSON/JSONL files to a single SQLite database at `.tagteam/tagteam.db`. Auto-render a synthesized markdown view to `docs/handoffs/<phase>_<type>.md` on every write so PR-reviewable conversation history is preserved. Eliminates by construction the multi-file drift class of bugs that motivated Phases 25 and 27, absorbs Phases 20/21/22/26 as well.
+- **Why this is its own phase, not just an implementation detail of 26:** It changes the *canonical* data store, not just its location. The 2.0 proposal stayed file-based by default; this phase is the explicit revisit, scoped to runtime state only (not the round log's role as audit artifact — the markdown render covers that).
+- **Schema sketch:**
+  - `cycles(id, phase, type, lead, reviewer, state, ready_for, created_at, closed_at)`
+  - `rounds(cycle_id, round, role, action, content, summary, decision, blockers_json, unresolved_json, resolved, updated_by, ts)` — collapses Phases 21 and 22 into native columns
+  - `state(singleton, turn, status, phase, type, round, run_mode, roadmap_queue, roadmap_index, command, updated_by, ts)`
+  - `diagnostics(ts, kind, payload_json)`
+- **Migration plan:**
+  - Stage 1: `tagteam migrate --to-sqlite` builds `.tagteam/tagteam.db` from existing files; old files remain
+  - Stage 2: Dual-write release — write to both files and DB, but read from DB. One release cycle of soak.
+  - Stage 3: DB-only — files become opt-in export via `tagteam cycle render`
+- **What this absorbs if it lands:**
+  - Phase 20 (tail reads) — `WHERE round > last_seen`
+  - Phase 21 (summary field) — a column
+  - Phase 22 (structured round schema) — native columns
+  - Phase 25 (drift audit) — mostly obsolete; drift impossible by construction
+  - Phase 26 (workspace cleanup) — `.tagteam/tagteam.db` is the cleanup
+  - Phase 27 (cycle health) — collapses to a few SELECT queries
+- **What it does NOT absorb:** Phase 23 (per-round files — different concern), Phase 24 (event-driven watcher — orthogonal).
+- **Pre-commit experiment:** Before scheduling Stages 2–3, run a small spike that builds the schema, ports `cycle add`/`cycle rounds` against it, and measures (a) write latency on a realistic round burst, (b) read latency for `cycle rounds` against a 100-round cycle, (c) the size of the diff between auto-rendered markdown and current `cycle render` output. Decision criterion: if the spike doesn't surface a blocking issue and the markdown render is byte-identical or trivially aligned, proceed. If the spike reveals real friction, fall back to executing 20–27 incrementally.
+- **Open questions:**
+  - Does the auto-rendered markdown cover the full set of git-visible properties Jack actually relies on (PR review, `git blame`, archaeology against historical commits)? Worth asking explicitly during the experiment.
+  - How are schema migrations versioned and rolled forward? (Probably: `PRAGMA user_version` + migration scripts in `tagteam/migrations/`.)
+  - Concurrent access between watcher daemon and CLI commands — WAL mode should handle it, but worth load-testing.
+
 ## Backlog
 
 ### Terminal.app backend (macOS, optional)
