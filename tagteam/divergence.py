@@ -49,8 +49,14 @@ CHECK_RENDER_MISMATCH = "render_mismatch"
 # (present only for impl cycles that captured one) and explicitly not
 # required here.
 REQUIRED_STATUS_FIELDS = {
-    "state", "ready_for", "round", "phase", "type", "lead", "reviewer",
+    "state", "round", "phase", "type", "lead", "reviewer",
 }
+# `ready_for` is intentionally NOT required: the file renderer treats
+# a missing key as "?" (cycle.py:526 `status.get('ready_for', '?')`)
+# and the DB schema has `ready_for_present` to preserve the same
+# missing-vs-null distinction at parity. Treating missing
+# `ready_for` as `file_inconsistent` would block the parity checker
+# from exercising a supported legacy/edge shape.
 
 ENV_FULL_DIFF = "TAGTEAM_DIVERGENCE_FULL_DIFF"
 
@@ -186,12 +192,37 @@ def file_side_sanity(
             if not line:
                 continue
             try:
-                rounds.append(json.loads(line))
+                parsed = json.loads(line)
             except json.JSONDecodeError as e:
                 return {
                     "check": "rounds_jsonl_parseable",
                     "detail": f"line {line_num}: {e}",
                 }
+            # `1`, `"x"`, `[]` are valid JSON but not round entries.
+            # Catch them explicitly so downstream code (which calls
+            # `.get` and uses `round` in `max()`) doesn't crash on
+            # malformed input.
+            if not isinstance(parsed, dict):
+                return {
+                    "check": "rounds_jsonl_object_shape",
+                    "detail": (
+                        f"line {line_num}: expected JSON object, "
+                        f"got {type(parsed).__name__}"
+                    ),
+                }
+            # `round` must be an int — `bool` is an int subclass in
+            # Python, so exclude it explicitly. Strings or floats
+            # would break downstream `max()` comparisons.
+            round_val = parsed.get("round")
+            if not isinstance(round_val, int) or isinstance(round_val, bool):
+                return {
+                    "check": "rounds_jsonl_round_type",
+                    "detail": (
+                        f"line {line_num}: round must be an integer, "
+                        f"got {type(round_val).__name__}: {round_val!r}"
+                    ),
+                }
+            rounds.append(parsed)
 
     # Check 2 + 3: status.json parseable and complete.
     status: dict[str, Any] | None = None
