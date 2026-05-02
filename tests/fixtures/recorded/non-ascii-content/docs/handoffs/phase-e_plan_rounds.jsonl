@@ -1,0 +1,2 @@
+{"round": 1, "role": "lead", "action": "SUBMIT_FOR_REVIEW", "content": "\u30d7\u30e9\u30f3: \u304a\u6bcd\u3055\u3093 API \u2014 \u975eASCII content shouldn't break parity.", "ts": "2026-01-01T00:00:00+00:00"}
+{"round": 1, "role": "reviewer", "action": "APPROVE", "content": "\u4e86\u89e3 \u2713", "ts": "2026-01-01T00:00:02+00:00"}

@@ -1,0 +1,2 @@
+{"round": 1, "role": "lead", "action": "SUBMIT_FOR_REVIEW", "content": "First draft of the plan.", "ts": "2026-01-01T00:00:00+00:00"}
+{"round": 1, "role": "reviewer", "action": "APPROVE", "content": "Approved.", "ts": "2026-01-01T00:00:02+00:00"}
