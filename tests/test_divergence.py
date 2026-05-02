@@ -239,6 +239,76 @@ class TestFileSideSanity:
         assert result is not None
         assert result["check"] == "status_type_matches_filename"
 
+    @pytest.mark.parametrize("bad_line,expected_check", [
+        ("1", "rounds_jsonl_object_shape"),           # int
+        ('"x"', "rounds_jsonl_object_shape"),         # string
+        ("[1,2,3]", "rounds_jsonl_object_shape"),     # array
+        ("null", "rounds_jsonl_object_shape"),        # null
+    ])
+    def test_rounds_jsonl_non_object_lines_caught(
+        self, project, bad_line, expected_check
+    ):
+        """Regression: a JSON-valid but non-object line used to crash
+        downstream `r.get("round")`. file_side_sanity must classify
+        it as file_inconsistent with a specific check name, not
+        propagate the AttributeError."""
+        _write_status(project, "p", "plan")
+        path = project / "docs" / "handoffs" / "p_plan_rounds.jsonl"
+        path.write_text(bad_line + "\n")
+        result = divergence.file_side_sanity(project, "p", "plan")
+        assert result is not None
+        assert result["check"] == expected_check
+
+    @pytest.mark.parametrize("bad_round", [
+        '"1"',     # string
+        "1.5",     # float
+        "true",    # bool
+        "null",    # null (missing in object)
+    ])
+    def test_rounds_jsonl_non_int_round_caught(self, project, bad_round):
+        """Regression: round must be an integer. String/float/bool/null
+        would break downstream max() comparisons."""
+        _write_status(project, "p", "plan")
+        path = project / "docs" / "handoffs" / "p_plan_rounds.jsonl"
+        # Use a dict with the bad round value.
+        path.write_text(
+            '{"round": ' + bad_round + ', "role": "lead", '
+            '"action": "SUBMIT_FOR_REVIEW", "content": "x", '
+            '"ts": "2026-05-01T00:00:00+00:00"}\n'
+        )
+        result = divergence.file_side_sanity(project, "p", "plan")
+        assert result is not None
+        assert result["check"] == "rounds_jsonl_round_type"
+
+    def test_rounds_jsonl_missing_round_field_caught(self, project):
+        """A round entry with no `round` key fails the int check
+        (since the default `None` is not an int)."""
+        _write_status(project, "p", "plan")
+        path = project / "docs" / "handoffs" / "p_plan_rounds.jsonl"
+        path.write_text(
+            '{"role": "lead", "action": "SUBMIT_FOR_REVIEW", '
+            '"content": "x", "ts": "2026-05-01T00:00:00+00:00"}\n'
+        )
+        result = divergence.file_side_sanity(project, "p", "plan")
+        assert result is not None
+        assert result["check"] == "rounds_jsonl_round_type"
+
+    def test_status_with_missing_ready_for_passes_sanity(self, project):
+        """Regression: the file renderer treats missing `ready_for`
+        as `?`, and the DB schema preserves the missing-vs-null
+        distinction via `ready_for_present`. file_side_sanity must
+        not flag missing `ready_for` as `file_inconsistent` — it's a
+        supported shape, and the render parity check is the right
+        place to exercise it."""
+        path = project / "docs" / "handoffs" / "p_plan_status.json"
+        # Status with no ready_for key at all.
+        path.write_text(json.dumps({
+            "state": "approved", "round": 1,
+            "phase": "p", "type": "plan",
+            "lead": "L", "reviewer": "R", "date": "2026-05-01",
+        }))
+        assert divergence.file_side_sanity(project, "p", "plan") is None
+
 
 # ---------- check_state_file_integrity ----------
 

@@ -132,19 +132,24 @@ def lock_holder(project_dir: str | Path) -> tuple[int, str] | None:
 def mark_db_invalid(
     project_dir: str | Path,
     reason: str,
-    *,
-    db_conn=None,
 ) -> None:
     """Mark the shadow DB as invalid.
 
-    Writes the flag file authoritatively. If `db_conn` is supplied,
-    also tries to record `db_invalid_since` in the `state` table for
-    observability. DB-side write failure is silently swallowed — the
-    flag file is sufficient to gate readers.
+    Writes the flag file authoritatively. The flag file is sufficient
+    to gate readers and works when SQLite is unavailable.
 
     Idempotent: calling on an already-invalid DB updates the flag
     file's `since` to the earlier timestamp (preserves "first failure"
     semantics) and replaces `reason`.
+
+    Note: the design originally proposed a parallel DB-side
+    observability write to `state.extra_json`. The schema doesn't
+    have a dedicated column today, and writing a no-op
+    `UPDATE state SET extra_json = COALESCE(extra_json, '{}')` would
+    make the code look like it's recording observability info when
+    it isn't. Add a real schema column (e.g. `state.db_invalid_since`)
+    and store `since`/`reason` there if/when DB-side observability
+    becomes load-bearing.
     """
     flag_path = _db_invalid_flag_path(project_dir)
     _ensure_tagteam_dir(project_dir)
@@ -164,19 +169,6 @@ def mark_db_invalid(
         "updated_at": now_iso,
     }
     flag_path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
-
-    if db_conn is not None:
-        try:
-            db_conn.execute(
-                "UPDATE state SET extra_json = COALESCE(extra_json, '{}') WHERE id=1"
-            )
-            # The schema doesn't have a dedicated db_invalid_since
-            # column today; the design notes it as informational only
-            # and we don't add it now. Future schema bump can promote
-            # this if needed. For now: no-op DB write — flag file is
-            # the only authoritative signal.
-        except Exception:
-            pass
 
 
 def clear_db_invalid(project_dir: str | Path) -> None:

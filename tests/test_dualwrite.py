@@ -141,15 +141,16 @@ class TestDbInvalidSentinel:
         assert dualwrite.is_db_invalid(project) is True
         # No SQLite errors raised even though no DB exists.
 
-    def test_db_conn_failure_does_not_break_flag(self, project):
-        """If the DB-side observability write fails, the flag file
-        write must still succeed."""
-        class BrokenConn:
-            def execute(self, *a, **kw):
-                raise RuntimeError("DB unavailable")
-
-        dualwrite.mark_db_invalid(project, reason="x", db_conn=BrokenConn())
+    def test_mark_does_not_require_db(self, project):
+        """`mark_db_invalid` writes only the flag file. No DB
+        connection is needed — the whole point is that this works
+        when SQLite is unavailable."""
+        # No tagteam.db exists at all.
+        assert not (project / ".tagteam" / "tagteam.db").exists()
+        dualwrite.mark_db_invalid(project, reason="DB completely unavailable")
         assert dualwrite.is_db_invalid(project) is True
+        info = dualwrite.get_db_invalid_info(project)
+        assert info["reason"] == "DB completely unavailable"
 
 
 # ---------- skip_inner_dualwrite layering helper ----------
