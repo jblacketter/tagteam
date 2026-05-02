@@ -28,6 +28,27 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
+# Per-project threading.RLock cache. RLock allows the same thread to
+# re-enter the lock without blocking; this is the in-process layer
+# that complements the file-system-level fcntl lock for cross-process
+# serialization.
+_thread_locks: dict[str, threading.RLock] = {}
+_thread_locks_mutex = threading.Lock()
+
+# Per-thread depth counter per project. Tells `writer_lock` whether
+# this is the outermost acquisition (which must take the fcntl lock)
+# or a re-entry (which already holds it).
+_lock_depth = threading.local()
+
+
+def _get_thread_lock(project_key: str) -> threading.RLock:
+    with _thread_locks_mutex:
+        lock = _thread_locks.get(project_key)
+        if lock is None:
+            lock = threading.RLock()
+            _thread_locks[project_key] = lock
+        return lock
+
 # File-system layout (all relative to project root).
 TAGTEAM_DIR = ".tagteam"
 WRITE_LOCK_FILENAME = ".write.lock"
@@ -65,36 +86,68 @@ def writer_lock(project_dir: str | Path) -> Iterator[None]:
     + divergence check + sentinel update. Repair runs under the same
     lock — that is the whole point of using one lock, not two.
 
+    Reentrant within a thread. A nested call from the same thread
+    re-acquires (no-op) and decrements on exit. Cross-thread
+    serialization comes from a per-project `threading.RLock`;
+    cross-process serialization from `fcntl.flock(LOCK_EX)`. The
+    fcntl lock is taken only on the outermost acquisition; nested
+    calls don't try to re-acquire the OS lock (which on most platforms
+    would either block the process against itself or silently
+    convert).
+
     Reads do NOT acquire this lock. They are allowed to race against
     in-flight writes, matching today's file-system semantics.
 
     fcntl.flock is per-process on POSIX; the design explicitly does not
     support multi-host concurrency on a network drive.
     """
-    _ensure_tagteam_dir(project_dir)
-    lock_path = _write_lock_path(project_dir)
-    # Open r+ so we can write the holder PID for diagnostics. Create if
-    # missing.
-    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o644)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        # Best-effort: stamp PID + timestamp into the lock file so a
-        # diagnostics tool can see who's holding it. Failure is benign.
+    project_key = str(Path(project_dir).resolve())
+    thread_lock = _get_thread_lock(project_key)
+
+    with thread_lock:
+        if not hasattr(_lock_depth, "depths"):
+            _lock_depth.depths = {}
+        depths = _lock_depth.depths
+
+        is_outermost = depths.get(project_key, 0) == 0
+        depths[project_key] = depths.get(project_key, 0) + 1
+
         try:
-            os.lseek(fd, 0, os.SEEK_SET)
-            os.ftruncate(fd, 0)
-            os.write(
-                fd,
-                f"{os.getpid()} {datetime.now(timezone.utc).isoformat()}\n".encode(),
-            )
-        except OSError:
-            pass
-        yield
-    finally:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            if is_outermost:
+                _ensure_tagteam_dir(project_dir)
+                lock_path = _write_lock_path(project_dir)
+                fd = os.open(
+                    lock_path, os.O_RDWR | os.O_CREAT, 0o644
+                )
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX)
+                    # Best-effort: stamp PID + timestamp into the lock
+                    # file so a diagnostics tool can see who's holding
+                    # it. Failure is benign.
+                    try:
+                        os.lseek(fd, 0, os.SEEK_SET)
+                        os.ftruncate(fd, 0)
+                        os.write(
+                            fd,
+                            f"{os.getpid()} "
+                            f"{datetime.now(timezone.utc).isoformat()}\n"
+                            .encode(),
+                        )
+                    except OSError:
+                        pass
+                    yield
+                finally:
+                    try:
+                        fcntl.flock(fd, fcntl.LOCK_UN)
+                    finally:
+                        os.close(fd)
+            else:
+                # Reentrant case — outer call already holds fcntl.
+                yield
         finally:
-            os.close(fd)
+            depths[project_key] -= 1
+            if depths[project_key] == 0:
+                del depths[project_key]
 
 
 def lock_holder(project_dir: str | Path) -> tuple[int, str] | None:
