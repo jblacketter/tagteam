@@ -234,6 +234,20 @@ def file_side_sanity(
         except OSError as e:
             return {"check": "status_json_readable", "detail": str(e)}
 
+        # `[]`, `"x"`, `42` are valid JSON but not status objects.
+        # Catch them explicitly so downstream `.keys()` / `.get(...)`
+        # don't raise AttributeError. Without this guard, repair's
+        # _check_all_files pre-check would crash and escape repair's
+        # backoff handling entirely.
+        if not isinstance(status, dict):
+            return {
+                "check": "status_json_object_shape",
+                "detail": (
+                    f"expected JSON object, got "
+                    f"{type(status).__name__}"
+                ),
+            }
+
         missing = REQUIRED_STATUS_FIELDS - set(status.keys())
         if missing:
             return {
@@ -301,6 +315,17 @@ def check_state_file_integrity(
         return {"check": "state_json_parseable", "detail": str(e)}
     except OSError as e:
         return {"check": "state_json_readable", "detail": str(e)}
+
+    # Same gotcha as status_json_object_shape: a valid-JSON-but-not-
+    # an-object state file would crash downstream `.get(...)` calls,
+    # potentially escaping repair's backoff handling.
+    if not isinstance(state, dict):
+        return {
+            "check": "state_json_object_shape",
+            "detail": (
+                f"expected JSON object, got {type(state).__name__}"
+            ),
+        }
 
     phase = state.get("phase")
     cycle_type = state.get("type")
