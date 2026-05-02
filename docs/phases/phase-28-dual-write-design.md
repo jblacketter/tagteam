@@ -381,8 +381,10 @@ paths that swap:
 that file is gone (moved to `.tagteam/legacy/`); after Step C it is
 not maintained. Update both copies during Step B activation:
 
-- Replace "Read `handoff-state.json`" with "Run `tagteam state show`"
-  (or equivalent CLI that reads from canonical store).
+- Replace "Read `handoff-state.json`" with "Run `tagteam state`"
+  (the existing bare-state subcommand prints the current state to
+  stdout). Reads from canonical store via `state.read_state`, so the
+  Step B reader-flip carries it along automatically.
 - Update the `--command` text in `/handoff start --roadmap` examples
   similarly.
 - The packaged copy is shipped to user projects via `tagteam setup`
