@@ -494,6 +494,33 @@ def watch(
 
     try:
         while True:
+            # Phase 28 Step A: opportunistic repair attempt. If the
+            # shadow DB is marked invalid and backoff allows, try to
+            # repair on this tick. Capped by repair's own bounded
+            # backoff schedule, so even with aggressive watcher
+            # intervals this won't retry-storm. The 24h louder-signal
+            # threshold escalates to a WARN log line.
+            try:
+                from tagteam import repair as _repair
+                if _repair.should_attempt_repair(project_dir):
+                    res = _repair.attempt_repair(project_dir)
+                    if res["success"]:
+                        _log("[repair] db_invalid cleared after successful "
+                             "rebuild + parity check")
+                    else:
+                        # Failure was already logged with a backoff
+                        # entry inside attempt_repair; don't double-log
+                        # at INFO. But surface louder if we're past
+                        # the 24h threshold.
+                        if _repair.needs_louder_signal(project_dir):
+                            _log(f"[repair] WARN: db_invalid set for >24h "
+                                 f"without recovery (last reason: "
+                                 f"{res.get('reason')})")
+            except Exception as e:
+                # Watcher must keep running even if repair plumbing
+                # itself glitches.
+                _log(f"[repair] error during opportunistic repair: {e}")
+
             state = read_state(project_dir)
 
             if state is None:

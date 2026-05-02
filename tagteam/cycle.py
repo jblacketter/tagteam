@@ -906,11 +906,21 @@ def _shadow_db_after_cycle_write(project_dir: str, phase: str,
     is added (db.add_round always inserts; existing rounds are
     untouched), and the cycle status fields are refreshed via upsert.
 
+    Retry-on-next-write: if `db_invalid` is set and backoff allows,
+    attempt repair before the shadow write. Successful repair
+    rebuilds the DB from files (which already include this write),
+    so we early-return; the shadow write would otherwise be redundant.
+
     Failures mark `db_invalid` and are swallowed — files are
     canonical during Step A. The divergence check produces a
     diagnostic row in the DB if files and DB renders disagree.
     """
-    from tagteam import db, divergence, dualwrite
+    from tagteam import db, divergence, dualwrite, repair
+
+    if dualwrite.is_db_invalid(project_dir) and \
+            repair.should_attempt_repair(project_dir):
+        if repair.attempt_repair(project_dir)["success"]:
+            return  # Repair rebuilt from files; nothing more to do.
 
     conn = None
     db_failed = False
@@ -987,9 +997,18 @@ def _shadow_db_after_amend(project_dir: str, phase: str, cycle_type: str,
     no top-level state derive. The DB write follows the same shape:
     `db.add_round` only, no `upsert_cycle` for status fields.
 
+    Retry-on-next-write: if `db_invalid` is set and backoff allows,
+    attempt repair first. Successful repair makes the shadow write
+    redundant (the rebuild includes our just-appended AMEND).
+
     Failures mark `db_invalid` and are swallowed.
     """
-    from tagteam import db, divergence, dualwrite
+    from tagteam import db, divergence, dualwrite, repair
+
+    if dualwrite.is_db_invalid(project_dir) and \
+            repair.should_attempt_repair(project_dir):
+        if repair.attempt_repair(project_dir)["success"]:
+            return
 
     conn = None
     db_failed = False
