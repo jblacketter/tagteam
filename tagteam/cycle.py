@@ -657,25 +657,74 @@ def _read_content(parsed: dict[str, str]) -> str:
 
 
 def _cli_init(args: list[str]) -> int:
-    allowed = {"--phase", "--type", "--lead", "--reviewer", "--content", "--updated-by"}
+    """Start a new cycle.
+
+    Required:
+      --phase     The phase slug (e.g. `feature-x`)
+      --content   The lead's initial submission text (or pipe via
+                  stdin)
+
+    Optional (defaults shown):
+      --type        plan       (or `impl`)
+      --lead        from tagteam.yaml `agents.lead.name`
+      --reviewer    from tagteam.yaml `agents.reviewer.name`
+      --updated-by  same as --lead
+
+    Skill callers (agents) typically pass everything explicitly;
+    humans driving the CLI can pass just `--phase` and `--content`.
+    """
+    allowed = {"--phase", "--type", "--lead", "--reviewer",
+               "--content", "--updated-by"}
     parsed = _parse_args(args, allowed)
 
     phase = parsed.get("--phase")
-    cycle_type = parsed.get("--type")
-    lead = parsed.get("--lead")
-    reviewer = parsed.get("--reviewer")
-    updated_by = parsed.get("--updated-by")
-
-    if not all([phase, cycle_type, lead, reviewer]):
-        print("Required: --phase, --type, --lead, --reviewer")
+    if not phase:
+        print("Required: --phase")
         return 1
+
+    # Type defaults to plan (the universally-first kind of cycle).
+    cycle_type = parsed.get("--type", "plan")
     if cycle_type not in VALID_TYPES:
         print(f"Invalid type: {cycle_type}. Must be 'plan' or 'impl'.")
         return 1
 
+    # Lead/reviewer default to tagteam.yaml values. Only fall through
+    # to the "required" error if neither flag nor config provides a
+    # name — which usually means an unconfigured project, where the
+    # right action is `tagteam init` first.
+    lead = parsed.get("--lead")
+    reviewer = parsed.get("--reviewer")
+    if not lead or not reviewer:
+        from tagteam.config import read_config, get_agent_names
+        from tagteam.state import _resolve_project_root
+        cfg = read_config(Path(_resolve_project_root()) / "tagteam.yaml")
+        if cfg is not None:
+            cfg_lead, cfg_reviewer = get_agent_names(cfg)
+            if not lead:
+                lead = cfg_lead
+            if not reviewer:
+                reviewer = cfg_reviewer
+
+    if not lead or not reviewer:
+        missing = []
+        if not lead:
+            missing.append("--lead")
+        if not reviewer:
+            missing.append("--reviewer")
+        print(
+            f"Required: {', '.join(missing)} "
+            "(no value found in tagteam.yaml — run `tagteam init` first, "
+            "or pass the flag explicitly)."
+        )
+        return 1
+
+    updated_by = parsed.get("--updated-by")
+    # init_cycle defaults updated_by to lead when None, so we can leave
+    # it unset here and let the underlying function handle it.
+
     content = _read_content(parsed)
-    status = init_cycle(phase, cycle_type, lead, reviewer, content,
-                        updated_by=updated_by)
+    init_cycle(phase, cycle_type, lead, reviewer, content,
+               updated_by=updated_by)
     print(f"Cycle created: {phase}_{cycle_type} (round 1, ready_for: reviewer)"
           " + state updated")
     return 0

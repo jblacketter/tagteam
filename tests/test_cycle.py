@@ -531,6 +531,133 @@ class TestCLILegacyFallback:
         assert "Legacy lead submission." in captured.out
 
 
+class TestCLIInitDefaults:
+    """`tagteam cycle init` should require only --phase and --content
+    when tagteam.yaml provides agent names. The verbose
+    --type/--lead/--reviewer/--updated-by form (used by SKILL.md)
+    must keep working too."""
+
+    @pytest.fixture
+    def configured_project(self, tmp_path, monkeypatch):
+        (tmp_path / "tagteam.yaml").write_text(
+            "agents:\n"
+            "  lead:\n    name: Alice\n"
+            "  reviewer:\n    name: Bob\n"
+        )
+        (tmp_path / "docs" / "handoffs").mkdir(parents=True)
+        # Reset state cache + cwd so _resolve_project_root finds tmp_path.
+        from tagteam import state as state_mod
+        monkeypatch.setattr(state_mod, "_cached_project_root",
+                            None, raising=False)
+        monkeypatch.chdir(tmp_path)
+        return tmp_path
+
+    def test_minimal_invocation_uses_yaml_defaults(
+        self, configured_project, capsys
+    ):
+        rc = cycle_command([
+            "init",
+            "--phase", "feat-x",
+            "--content", "First draft.",
+        ])
+        assert rc == 0
+
+        # Cycle was created with the right names from tagteam.yaml.
+        status = read_status("feat-x", "plan", str(configured_project))
+        assert status is not None
+        assert status["lead"] == "Alice"
+        assert status["reviewer"] == "Bob"
+        assert status["state"] == "in-progress"
+        assert status["round"] == 1
+
+    def test_type_defaults_to_plan(self, configured_project):
+        cycle_command([
+            "init",
+            "--phase", "feat-y",
+            "--content", "Plan first.",
+        ])
+        status = read_status("feat-y", "plan", str(configured_project))
+        assert status is not None  # plan cycle exists
+        # No impl cycle was created
+        assert read_status("feat-y", "impl", str(configured_project)) is None
+
+    def test_explicit_flags_override_yaml(self, configured_project):
+        cycle_command([
+            "init",
+            "--phase", "feat-z",
+            "--lead", "Charlie",
+            "--reviewer", "Dana",
+            "--content", "Custom roster.",
+        ])
+        status = read_status("feat-z", "plan", str(configured_project))
+        assert status["lead"] == "Charlie"
+        assert status["reviewer"] == "Dana"
+
+    def test_explicit_type_impl_works(self, configured_project):
+        cycle_command([
+            "init",
+            "--phase", "feat-w",
+            "--type", "impl",
+            "--content", "Implementation.",
+        ])
+        assert read_status("feat-w", "impl", str(configured_project)) is not None
+        assert read_status("feat-w", "plan", str(configured_project)) is None
+
+    def test_skill_form_still_works(self, configured_project):
+        """Agents drive cycle init via SKILL.md, which passes
+        every flag explicitly. That call shape must still work."""
+        rc = cycle_command([
+            "init",
+            "--phase", "feat-skill",
+            "--type", "plan",
+            "--lead", "Alice",
+            "--reviewer", "Bob",
+            "--updated-by", "Alice",
+            "--content", "Submitted via skill.",
+        ])
+        assert rc == 0
+        status = read_status("feat-skill", "plan", str(configured_project))
+        assert status["lead"] == "Alice"
+
+    def test_missing_phase_errors(self, configured_project, capsys):
+        rc = cycle_command(["init", "--content", "x"])
+        assert rc == 1
+        out = capsys.readouterr().out
+        assert "--phase" in out
+
+    def test_invalid_type_errors(self, configured_project, capsys):
+        rc = cycle_command([
+            "init",
+            "--phase", "x",
+            "--type", "design",
+            "--content", "x",
+        ])
+        assert rc == 1
+        out = capsys.readouterr().out
+        assert "Invalid type" in out
+
+    def test_unconfigured_project_falls_through_to_required_error(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        """No tagteam.yaml + no flags → the error message names which
+        flags are missing and points the user at `tagteam init`."""
+        (tmp_path / "docs" / "handoffs").mkdir(parents=True)
+        from tagteam import state as state_mod
+        monkeypatch.setattr(state_mod, "_cached_project_root",
+                            None, raising=False)
+        monkeypatch.chdir(tmp_path)
+        rc = cycle_command([
+            "init",
+            "--phase", "x",
+            "--content", "y",
+        ])
+        assert rc == 1
+        out = capsys.readouterr().out
+        assert "--lead" in out
+        assert "--reviewer" in out
+        assert "tagteam init" in out
+
+
 class TestGitRootResolution:
     """Running cycle CLI from a nested subdir should write to the repo
     root's docs/handoffs/, not cwd. Regression for Issue #1
