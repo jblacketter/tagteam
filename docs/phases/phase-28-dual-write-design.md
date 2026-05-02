@@ -1,6 +1,6 @@
 # Phase 28 Dual-Write Design Note
 
-**Status:** Draft for review (rev 2 — incorporates first-round review).
+**Status:** Draft for review (rev 3 — addresses second-round review).
 **Predecessor:** `docs/phases/sqlite-spike-findings.md` (spike + go decision).
 **Successor:** Implementation PR — not yet open.
 
@@ -12,8 +12,21 @@ decisions for review *before* code lands.
 The first review caught real defects in rev 1: an undercounted writer
 inventory, an invalid status name in the gating expression, and a
 "self-healing" failure-mode story that would silently leave the shadow
-DB stale. This rev addresses those plus several gaps (concurrent writers,
+DB stale. Rev 2 addressed those plus several gaps (concurrent writers,
 AMEND specifics, file-internal atomicity, backward compatibility).
+
+Rev 3 (this revision) addresses the second-round review: tightens the
+`db_invalid` gate to apply to all DB readers (not just the divergence
+detector); makes repair semantics concrete (same writer lock, bounded
+backoff, sentinel-not-cleared-on-failure); fills out the reader
+inventory with `tui/handoff_reader.py` and `tui/review_replay.py`;
+classifies file vs. DB read race windows instead of asserting
+equivalence; operationalizes the file-side atomicity caveat into the
+divergence detector; strengthens Step C gates to two projects with
+complex history; resolves the `update_state`/`write_state` layering
+trap; flags the `SKILL.md` agent-facing instructions; adds a sentinel
+authority rule; specifies the `--reverse` export-from-DB path; and
+locks in a deterministic CI recorder script.
 
 ## Goal
 
@@ -98,6 +111,27 @@ place. Each of these gets its own dual-write wrapper, sharing the
 ordering/locking/repair logic via a small helper module
 (`tagteam/dualwrite.py`).
 
+**Layering ownership for `update_state` and `write_state`.**
+`state.update_state` calls `state.write_state` internally to perform
+the actual file write (state.py:140-204). Naively wrapping both with
+dual-write would issue two DB writes per `update_state` call and
+double-append to `state_history`. The rule:
+
+- `update_state` owns the DB state-history append. Its dual-write
+  wrapper does `db.set_state` + `db.add_history_entry`.
+- `write_state`'s dual-write wrapper does `db.set_state` only — no
+  history. This is the right behavior for direct callers of
+  `write_state` (e.g. admin replace paths) which intentionally bypass
+  the history-tracking merge.
+- The `update_state` → `write_state` internal call is special-cased:
+  the inner `write_state` invocation skips its own dual-write hook to
+  avoid double-writing. Implemented via a thread-local flag set by
+  `update_state` before calling `write_state`.
+
+This is the only place in the design where the dual-write helper
+needs to know about call-site context. Worth a comment in the
+implementation pointing here.
+
 ### Ordering and failure modes
 
 The asymmetry is deliberate: a DB-write failure must not break the
@@ -130,16 +164,61 @@ finally:
 
 `mark_db_invalid` writes a sentinel field in the `state` table
 (`db_invalid_since` timestamp) plus a `.tagteam/DB_INVALID` flag file.
-While set, the divergence detector reports `db_invalid` (not
-`render_mismatch`) and the repair path is the only thing that may
-write to the DB.
+**Authority rule:** the flag file is authoritative. The DB column is
+informational and serves observability — when SQLite is unavailable
+or corrupt, the column may be unreadable, but the flag file always
+works. Any code path checking the sentinel reads the flag file first;
+the DB column is only consulted when the flag file is present and
+the writer wants the original failure timestamp.
 
-Repair re-runs `db.import_from_files` against the project, then
-clears the sentinel. Triggered by:
+**Universal gate.** While the sentinel is set, **all DB reads outside
+the repair path** must refuse and return a `db_invalid` indication
+(either an exception or a sentinel value, depending on call site).
+This applies to: the divergence detector, the Saloon dashboard, any
+diagnostic CLI that reads cycle/state from the DB, and Step B+
+readers. The single exception is the repair path itself, which
+intentionally reads the DB to produce a delta against the file
+truth. Practically: every `db.connect()`-using reader checks the
+sentinel before issuing its first SELECT and short-circuits if set.
+
+**Repair semantics.** Repair must:
+
+1. Acquire the **same project writer lock** that excludes file-side
+   writers (not a separate lock). Otherwise repair could import
+   while `cycle.add_round` is mid-write on the file side, capturing
+   a torn state.
+2. Run `db.import_from_files` with `--force` semantics (rebuild the
+   shadow DB from the canonical files).
+3. After the import succeeds, run a parity check across all cycles.
+   If any `render_mismatch` survives, repair has not actually
+   recovered — leave the sentinel set, log a `repair_failed`
+   diagnostic, schedule a retry.
+4. Only clear the sentinel after both import and parity check
+   succeed.
+
+**Repair failure handling.** If repair itself fails (DB write error,
+parity mismatch, etc.):
+
+- Sentinel remains set.
+- Log `repair_failed` diagnostic with the failure reason.
+- Schedule the next retry with bounded exponential backoff: 1 min,
+  2 min, 4 min, 8 min, capped at 1 hour. Do not retry indefinitely
+  silently.
+- After 24 hours of continuous repair failure, surface a louder
+  signal (Saloon dashboard banner, watcher log line at WARN). This
+  is the "operator must intervene" threshold.
+- Manual override: `tagteam state repair-db --force-clear` clears
+  the sentinel without running repair. Documented as last-resort
+  with the explicit caveat that it makes the DB officially trusted
+  without parity verification.
+
+**Triggers for repair attempts:**
+
 - A periodic check in the watcher (poll every minute for a stale
-  sentinel).
+  sentinel; subject to the backoff above).
 - `tagteam state repair-db` CLI for explicit invocation.
-- A retry-on-next-write hook (best-effort, single attempt).
+- A retry-on-next-write hook (best-effort, single attempt before
+  falling back to "file-write succeeded, DB write failed again").
 
 For Step B+, this changes: DB write failures must raise, because the
 DB is canonical and silently degraded reads are not acceptable.
@@ -161,10 +240,30 @@ entire dual-write critical section. Implementation: a POSIX
 DB write + divergence check.
 
 Reads do **not** acquire the lock — they're allowed to race against
-in-flight writes. Today's behavior is the same.
+in-flight writes. The race semantics are not uniform across storage
+backends, however; rev 2's "today's behavior is the same" was too
+broad. Classification:
+
+| Read source | Atomicity | Race window |
+|---|---|---|
+| `handoff-state.json` | tmp+replace via `Path.replace` (atomic on POSIX/NTFS) | reader sees pre-write or post-write, never torn |
+| `_status.json` | direct `write_text` | small torn-write window during rewrite |
+| `_rounds.jsonl` | append | new line might be partially visible mid-append; existing lines stable |
+| SQLite reads | WAL transactional consistency | reader sees a consistent snapshot, may lag latest commit |
+
+During Step A (file authority), readers maintain today's mixed
+semantics. During Step B+ (DB authority), readers gain
+serializability for free — a quiet improvement, but worth knowing
+that pre-Step-B test cases observing torn `_status.json` reads
+will not reproduce against the DB.
 
 The lock is per-project. Multiple tagteam projects on the same
 machine don't contend.
+
+Out of scope: multi-host concurrency. The fcntl lock is
+per-machine; if a project lives on a network drive accessed from
+two hosts, the lock does not serialize. Tagteam doesn't support
+this configuration today and the design doesn't add it.
 
 ### AMEND specifics
 
@@ -190,12 +289,31 @@ A failure between (1) and (2) leaves the file side internally
 inconsistent — a round exists in the JSONL with no corresponding
 status update. This pre-dates Phase 28 and is **not solved by**
 dual-write; the dual write inherits the same atomicity gap on the
-file side. Worth knowing during Step A debugging: if a parity check
-flags a divergence and the file side looks half-written, it might be
-this pre-existing hazard, not a dual-write bug.
+file side.
 
-The flip to DB-canonical (Step C) actually closes this gap — DB
-writes within `cycle.add_round` happen in a single transaction.
+To distinguish "file side was already inconsistent" from
+"dual-write divergence" during debugging, the divergence detector
+runs a **file-side sanity pre-check** before declaring
+`render_mismatch`:
+
+1. `_rounds.jsonl` parseable as line-delimited JSON (every line a
+   valid object).
+2. `_status.json` parseable, has the required fields (`state`,
+   `round`, `phase`, `type`, `lead`, `reviewer`).
+3. `_status.json.round == max(round) in _rounds.jsonl`.
+4. Top-level `handoff-state.json.phase` and `.type` reference a
+   cycle that exists in `docs/handoffs/`.
+
+If any check fails, the diagnostic is classified as
+`file_inconsistent` with the failing check named — **not**
+`render_mismatch`. This prevents pre-existing file hazards from
+producing false positives in dual-write monitoring. Operators
+investigating `file_inconsistent` events look at file recovery
+first, not dual-write logic.
+
+The flip to DB-canonical (Step C) actually closes the underlying
+gap — DB writes within `cycle.add_round` happen in a single
+transaction.
 
 ### What we measure during Step A
 
@@ -243,10 +361,33 @@ paths that swap:
   Likely a small refactor in Step A so Step B is "swap the backend,"
   not "rewrite the parser."
 - **`tagteam.tui.state_watcher`** — currently does its own
-  `path.read_text` of `handoff-state.json`. Must be migrated to
-  share a reader with `state.read_state`, or its file-path read
-  will silently keep working until the legacy file is moved aside,
-  then start returning `None`.
+  `path.read_text` of `handoff-state.json` (tui/state_watcher.py:93).
+  Must be migrated to share a reader with `state.read_state`.
+- **`tagteam.tui.handoff_reader`** — locates and reads cycle round
+  files directly (tui/handoff_reader.py:25 constructs
+  `f"{phase}_{step_type}_rounds.jsonl"` paths). At Step B these files
+  no longer exist in `docs/handoffs/`. Migrate to read via DB or via
+  the auto-rendered markdown (depending on which makes more sense
+  for the TUI's structured-data needs — likely DB).
+- **`tagteam.tui.review_replay`** — depends on `handoff_reader`
+  (tui/review_replay.py:10) plus a direct call to
+  `parser.read_cycle_rounds`. Both transitively path-bound; both need
+  the Step B migration.
+
+**Agent-facing instructions.**
+`.claude/skills/handoff/SKILL.md` (and the packaged copy at
+`tagteam/data/.claude/skills/handoff/SKILL.md`) tell agents to "Read
+`handoff-state.json`" directly (lines 12, 30, 39, 149+). After Step B
+that file is gone (moved to `.tagteam/legacy/`); after Step C it is
+not maintained. Update both copies during Step B activation:
+
+- Replace "Read `handoff-state.json`" with "Run `tagteam state show`"
+  (or equivalent CLI that reads from canonical store).
+- Update the `--command` text in `/handoff start --roadmap` examples
+  similarly.
+- The packaged copy is shipped to user projects via `tagteam setup`
+  — the change reaches existing users only after they re-run setup
+  or upgrade.
 
 The "reader inventory" lives next to the writer inventory above —
 both must be tracked through the migration.
@@ -335,6 +476,24 @@ release notes. The safety valve: `tagteam migrate --to-sqlite-step-b
 --reverse` (added in Step B) restores files from the DB for users
 who need to roll back at the project level.
 
+**`--reverse` implementation.** Older versions of tagteam can't
+auto-detect a Step-B-era project (they don't know what to look for),
+so the reverse path is an explicit user-run command. It needs:
+
+1. A new helper `db.export_to_files(conn, project_dir)` that walks
+   the DB and writes `_rounds.jsonl` + `_status.json` per cycle plus
+   `handoff-state.json`. Output must round-trip (re-import gives the
+   same DB).
+2. After export, run a parity check: re-import the just-exported
+   files into a fresh DB, render both, assert byte-identity. Refuse
+   to declare success if parity fails.
+3. After parity passes, restore `.tagteam/legacy/` files if they
+   exist (tie-breaker: prefer the freshly exported files; legacy is
+   the older snapshot from before any Step A activity).
+4. Print a summary of cycles exported plus a note that the user
+   should `pip install tagteam==<older-version>` if they want to
+   actually downgrade.
+
 ## Step C — File removal
 
 The `cycle.read_status` / `cycle.read_rounds` / `state.read_state`
@@ -352,13 +511,19 @@ All of the following must hold:
 2. **Zero divergence events** in real use during the soak window —
    from the Saloon dashboard's diagnostics view across the projects
    that adopted Step B early.
-3. **Successful downgrade rehearsal** — at least one project must
-   have run `--reverse` end-to-end and used the restored files
-   without issue, proving the rollback path works.
+3. **Successful downgrade rehearsal across at least two projects.**
+   At least one of those projects must exercise *complex history*:
+   AMEND rounds, ESCALATE / aborted cycles, NEED_HUMAN if applicable,
+   non-ASCII content, empty content, AND cycles imported from older
+   versions of tagteam. A simple-cycle-only rehearsal does not
+   satisfy this gate. Each rehearsal: run `--reverse`, verify the
+   restored files match parity, run an actual handoff against the
+   restored state, confirm no regressions.
 4. **Documented backup/restore path** in `docs/` covering: how to
-   back up `.tagteam/tagteam.db`, how to restore from a corrupted
-   DB, how to run `db.export_to_files` against a backup. Tested as
-   part of the rehearsal.
+   back up `.tagteam/tagteam.db` (`sqlite3 .backup`), how to restore
+   from a corrupted DB, how to run `db.export_to_files` against a
+   backup, how to clear `db_invalid` sentinels. Tested as part of
+   the rehearsal — the docs are exercised, not just written.
 
 These are not polite suggestions — Step C is gated on all four,
 verified by the maintainer at release time.
@@ -389,10 +554,9 @@ A pytest test covering two corpora:
 
 1. **Recorded synthetic project corpus** — a small project's
    `docs/handoffs/` and `handoff-state.json` checked into
-   `tests/fixtures/recorded/`, generated once via a small recording
-   script that drives `tagteam.cycle` through every action × state
-   combination. Re-recorded if the renderers' output legitimately
-   changes (rare).
+   `tests/fixtures/recorded/`, generated by a deterministic recorder
+   script (`tests/fixtures/recorder.py`) that drives `tagteam.cycle`
+   through a defined matrix of action × state combinations.
 2. **Hand-written edge fixtures** — short JSON files for cases the
    recording can't easily produce: missing keys, empty content,
    non-ASCII, malformed-but-recoverable rounds.
@@ -401,6 +565,24 @@ Hand-written-only is rejected as too self-confirming — the recording
 catches bugs the author didn't anticipate. External-repo imports
 (originally proposed) are also rejected — couples this project's
 test suite to another repo's contents.
+
+**Recorder script requirements:**
+
+- Checked into the repo (`tests/fixtures/recorder.py`), not run ad
+  hoc by maintainers.
+- Deterministic output: fixed timestamps (e.g.
+  `2026-01-01T00:00:00+00:00` + offsets per round), fixed agent
+  names (Lead/Reviewer), no system entropy.
+- Re-runnable: `python tests/fixtures/recorder.py
+  tests/fixtures/recorded/` regenerates the corpus byte-identically
+  given the same tagteam version. CI can run it as a smoke check
+  to confirm no drift.
+- Documented matrix at the top of the script: which cycle states
+  and actions are covered, which intentionally aren't.
+- The corpus is committed; re-recording is an explicit author
+  action that produces a reviewable diff. This means a renderer
+  bug fix that changes output legitimately requires re-recording —
+  the diff is the proof.
 
 The CI test runs both renderers against every fixture and asserts
 byte-identity. Failure blocks merge.
@@ -425,8 +607,20 @@ must pass **all** of the following before running:
 4. **Migration lock acquired.** Create a sentinel file
    `.tagteam/MIGRATION_IN_PROGRESS` with a PID + timestamp at the
    start of the migration. Other migrate / dual-write paths refuse
-   to run while this exists. Removed on success or on explicit
-   `tagteam migrate --abort`.
+   to run while this exists. Stale-lock handling:
+
+   - **PID liveness check.** On encountering the lock, attempt
+     `os.kill(pid, 0)` (signal 0). If the process no longer exists,
+     the lock is stale and may be cleared automatically with a log
+     line.
+   - **Timeout.** Lock files older than 1 hour are considered stale
+     regardless of PID liveness, on the assumption that a real
+     migration completes well under that.
+   - **Forced abort.** `tagteam migrate --abort` removes the lock
+     after a confirmation prompt ("Are you sure no migration is in
+     progress? [y/N]"). Useful for stuck-process recovery on
+     non-POSIX systems where signal-0 is unreliable.
+   - Removed automatically on migration success.
 5. **Clean parity check.** Run the divergence detector across
    every cycle. Any `render_mismatch` blocks with an actionable
    message ("run `tagteam state repair-db` first").
@@ -485,6 +679,18 @@ Rev 1 proposed "mirror unbounded for now." Refined for this rev:
   writes.
 - New: AMEND-specific test — confirm DB-side mutation is
   rounds-only, no state derive, divergence check passes.
+- New: `db_invalid` sentinel test — set the flag file, attempt a
+  read via every reader path (cycle.read_status,
+  state.read_state, db.render_cycle, the divergence detector),
+  confirm each refuses or returns `db_invalid`. Then run repair,
+  confirm sentinel clears and reads resume.
+- New: repair-failure backoff test — inject a persistent DB error,
+  confirm repair retries with exponential backoff up to 1 hour,
+  sentinel never clears prematurely, the 24-hour louder-signal
+  threshold fires.
+- New: `update_state`/`write_state` no-double-write test — call
+  `update_state`, confirm exactly one DB state-history entry is
+  added (not two from the inner `write_state` call).
 
 ### Step B
 
@@ -492,8 +698,23 @@ Rev 1 proposed "mirror unbounded for now." Refined for this rev:
   full read-path test suite — proves both paths return equivalent
   shape during the migration window.
 - Test for `--reverse` migration: after Step B, run reverse, confirm
-  rounds.jsonl / status.json restored byte-equal to pre-migration.
-- Test for `tui/state_watcher` reading via shared reader.
+  rounds.jsonl / status.json restored byte-equal to pre-migration,
+  and the post-export parity check passes.
+- Tests for `tui/state_watcher`, `tui/handoff_reader`, and
+  `tui/review_replay` reading via the shared backend (covers the
+  full TUI reader inventory, not just the state watcher).
+- **Migration gate tests.** One test per gate:
+  1. `state.status == "ready"` blocks the migration.
+  2. A non-terminal cycle (`in-progress`) blocks the migration.
+  3. A recent `state.updated_at` (< 30s) blocks the migration.
+  4. Stale lock: PID alive blocks; PID dead clears automatically.
+  5. Stale lock: file > 1 hour old clears automatically.
+  6. `tagteam migrate --abort` clears the lock after confirmation.
+  7. A `render_mismatch` divergence diagnostic blocks the
+     migration with a "run repair-db first" message.
+- SKILL.md update test (in `tests/test_setup.py`): after
+  `tagteam setup`, the installed SKILL.md does not contain
+  "Read `handoff-state.json`" as user-facing instruction.
 
 ### Step C
 
@@ -502,35 +723,37 @@ Rev 1 proposed "mirror unbounded for now." Refined for this rev:
   reads (a regression guard for accidental re-introduction of file
   reading).
 
-## Open questions (remaining after rev 2)
+## Open questions (remaining after rev 3)
 
-Most of rev 1's open questions resolved during this revision (see
-inline body). Two remain genuinely open:
+Rev 2's first open question (repair scheduling cadence) resolved
+into the body — the answer is "both periodic poll and
+retry-on-next-write, with bounded exponential backoff capped at 1
+hour and a 24-hour louder-signal threshold."
 
-1. **Repair scheduling cadence.** The watcher polls for the
-   `db_invalid` sentinel every minute. Is that frequent enough?
-   Too frequent? Should we instead trigger repair off the *next*
-   write attempt rather than on a timer? The risk of timer-based:
-   a project not running the watcher will sit invalid forever. The
-   risk of write-triggered: the next write retries DB write,
-   creating a retry storm if the underlying problem is persistent.
-   Probably want both: best-effort retry-on-next-write *and* the
-   periodic poll, with exponential backoff on the periodic side.
+One question remains genuinely open:
 
-2. **Step B rollout cadence vs. soak time.** The doc says "soak in
+1. **Step B rollout cadence vs. soak time.** The doc says "soak in
    real use" without naming a duration. Two weeks? One release
    cycle? The right answer depends on usage volume — if only
    `tagteam-on-tagteam` adopts Step B initially, even a month might
    not produce enough divergence-check coverage. Open question for
-   release planning, not for design freeze.
+   release planning, not for design freeze. **Provisional answer:**
+   minimum 14 days of continuous use across at least one project,
+   with no `render_mismatch` events, before Step C even enters the
+   gate-checking phase. Maintainer can extend if usage volume is
+   too low to be confident.
 
 ## Estimated scope
 
-- Step A: ~500 LOC of new code + tests (was ~300 in rev 1; expanded
-  for locking, repair, AMEND specifics, and the larger writer
-  inventory). About 1.5 days of focused work after design freeze.
-- Step B: ~200 LOC of read-path swaps + auto-export hook + the
-  step-b migrate command + the `--reverse` path. About a day.
+- Step A: ~600 LOC of new code + tests (rev 1: ~300; rev 2: ~500;
+  rev 3: +100 for sentinel hard-gate plumbing across all readers,
+  the repair-failure backoff state machine, and the
+  `update_state`/`write_state` ownership special case). About 2 days
+  of focused work after design freeze.
+- Step B: ~250 LOC of read-path swaps (now including
+  `tui/handoff_reader` and `tui/review_replay`) + auto-export hook +
+  the step-b migrate command + the `--reverse` path with parity
+  check + SKILL.md updates. About 1.5 days.
 - Step C: ~100 LOC of deletions + a regression-guard test. An hour.
 
 The risk distribution remains heavily front-loaded into Step A's
