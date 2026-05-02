@@ -78,6 +78,80 @@ class TestWriterLock:
         (project / ".tagteam" / ".write.lock").write_text("garbage no spaces")
         assert dualwrite.lock_holder(project) is None
 
+    def test_reentrant_same_thread(self, project):
+        """A nested call from the same thread must not deadlock — the
+        outer call already holds the OS lock, the inner call is a
+        no-op acquisition."""
+        with dualwrite.writer_lock(project):
+            with dualwrite.writer_lock(project):
+                with dualwrite.writer_lock(project):
+                    pass
+
+    def test_reentrant_inner_exception_releases_outer_correctly(self, project):
+        """An exception in a nested call must not corrupt the depth
+        counter. After the outer call exits, a fresh acquisition must
+        succeed."""
+        try:
+            with dualwrite.writer_lock(project):
+                try:
+                    with dualwrite.writer_lock(project):
+                        raise RuntimeError("inner boom")
+                except RuntimeError:
+                    pass
+                # Still inside outer, lock still held by us.
+                with dualwrite.writer_lock(project):
+                    pass
+        except Exception:
+            pytest.fail("outer should have completed cleanly")
+
+        # After outer exits, second top-level acquisition works.
+        # Use a thread to make a deadlock detectable.
+        acquired = threading.Event()
+
+        def try_acquire():
+            with dualwrite.writer_lock(project):
+                acquired.set()
+
+        t = threading.Thread(target=try_acquire)
+        t.start()
+        t.join(timeout=2)
+        assert acquired.is_set()
+
+    def test_cross_thread_serialization(self, project):
+        """Two threads must serialize. While thread A holds the lock,
+        thread B's acquisition blocks until A releases."""
+        b_acquired = threading.Event()
+        a_can_release = threading.Event()
+        order = []
+
+        def thread_a():
+            with dualwrite.writer_lock(project):
+                order.append("a_in")
+                a_can_release.wait(timeout=2)
+                order.append("a_out")
+
+        def thread_b():
+            with dualwrite.writer_lock(project):
+                order.append("b_in")
+                b_acquired.set()
+
+        ta = threading.Thread(target=thread_a)
+        ta.start()
+        # Let A get inside the critical section.
+        while "a_in" not in order:
+            pass
+        tb = threading.Thread(target=thread_b)
+        tb.start()
+        # B should NOT have acquired yet — A is still holding.
+        assert not b_acquired.wait(timeout=0.2)
+        # Release A; B should then proceed.
+        a_can_release.set()
+        ta.join(timeout=2)
+        tb.join(timeout=2)
+        assert b_acquired.is_set()
+        # Order proves serialization.
+        assert order == ["a_in", "a_out", "b_in"]
+
 
 # ---------- db_invalid sentinel ----------
 

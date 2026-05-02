@@ -138,7 +138,15 @@ def read_state(project_dir: str | None = None) -> dict | None:
 
 
 def write_state(state: dict, project_dir: str | None = None) -> None:
-    """Atomic write: write to temp file, then rename."""
+    """Atomic write: write to temp file, then rename.
+
+    Phase 28 Step A: also acquires the project writer lock and
+    mirrors the state to the shadow DB. The DB write is skipped when
+    called from inside `update_state` (via `skip_inner_dualwrite`)
+    so the outer `update_state` owns the state-history append.
+    """
+    from tagteam import dualwrite
+
     if project_dir is None:
         project_dir = _resolve_project_root()
     path = get_state_path(project_dir)
@@ -146,8 +154,19 @@ def write_state(state: dict, project_dir: str | None = None) -> None:
 
     state["updated_at"] = datetime.now(timezone.utc).isoformat()
 
-    tmp_path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
-    tmp_path.replace(path)
+    with dualwrite.writer_lock(project_dir):
+        tmp_path.write_text(
+            json.dumps(state, indent=2) + "\n", encoding="utf-8"
+        )
+        tmp_path.replace(path)
+
+        # Inner-call short-circuit: when update_state calls write_state,
+        # update_state will mirror state + history afterwards. write_state's
+        # own dual-write would otherwise double-write state.
+        if not dualwrite.should_skip_inner_dualwrite():
+            # Direct callers of write_state bypass history-tracking
+            # (it lives in update_state), so the DB side does the same.
+            _shadow_db_write_state(state, project_dir, history_entry=None)
 
 
 def update_state(updates: dict, project_dir: str | None = None,
@@ -166,56 +185,113 @@ def update_state(updates: dict, project_dir: str | None = None,
     seq, history, and updated_at. No fields from the previous state carry
     forward. Use this when rewriting state authoritatively (e.g. `state sync`)
     so stale fields cannot leak via shallow merge.
+
+    Phase 28 Step A: holds the project writer lock for the whole
+    operation, mirrors state + (one) history entry to the shadow DB
+    after the file write succeeds. The inner `write_state` call's
+    own dual-write hook is short-circuited via `skip_inner_dualwrite`
+    so we don't double-write state.
     """
-    state = read_state(project_dir) or {}
+    from tagteam import dualwrite
 
-    current_seq = state.get("seq", 0)
-    if expected_seq is not None and current_seq != expected_seq:
-        _log_seq_mismatch(expected_seq, current_seq,
-                          updates.get("updated_by", "unknown"),
-                          project_dir)
-        return None
+    if project_dir is None:
+        project_dir = _resolve_project_root()
 
-    history = state.get("history", [])
-    prev = {
-        "turn": state.get("turn"),
-        "status": state.get("status"),
-        "timestamp": state.get("updated_at"),
-        "phase": state.get("phase"),
-        "round": state.get("round"),
-        "updated_by": state.get("updated_by"),
-    }
-    if any(v is not None for v in prev.values()):
-        history.append(prev)
-    history = history[-20:]
+    with dualwrite.writer_lock(project_dir):
+        state = read_state(project_dir) or {}
 
-    if replace:
-        new_state = dict(updates)
-        new_state["history"] = history
-        new_state["seq"] = current_seq + 1
-        write_state(new_state, project_dir)
-        return new_state
+        current_seq = state.get("seq", 0)
+        if expected_seq is not None and current_seq != expected_seq:
+            _log_seq_mismatch(expected_seq, current_seq,
+                              updates.get("updated_by", "unknown"),
+                              project_dir)
+            return None
 
-    state["history"] = history
-    if clear_keys:
-        for key in clear_keys:
-            state.pop(key, None)
-    state["seq"] = current_seq + 1
-    state.update(updates)
-    write_state(state, project_dir)
-    return state
+        history = state.get("history", [])
+        prev = {
+            "turn": state.get("turn"),
+            "status": state.get("status"),
+            "timestamp": state.get("updated_at"),
+            "phase": state.get("phase"),
+            "round": state.get("round"),
+            "updated_by": state.get("updated_by"),
+        }
+        history_entry_added = any(v is not None for v in prev.values())
+        if history_entry_added:
+            history.append(prev)
+        history = history[-20:]
+
+        if replace:
+            new_state = dict(updates)
+            new_state["history"] = history
+            new_state["seq"] = current_seq + 1
+            with dualwrite.skip_inner_dualwrite():
+                write_state(new_state, project_dir)
+            _shadow_db_write_state(
+                new_state, project_dir,
+                history_entry=prev if history_entry_added else None,
+            )
+            return new_state
+
+        state["history"] = history
+        if clear_keys:
+            for key in clear_keys:
+                state.pop(key, None)
+        state["seq"] = current_seq + 1
+        state.update(updates)
+        with dualwrite.skip_inner_dualwrite():
+            write_state(state, project_dir)
+        _shadow_db_write_state(
+            state, project_dir,
+            history_entry=prev if history_entry_added else None,
+        )
+        return state
 
 
 def clear_state(project_dir: str | None = None) -> None:
-    """Delete the state file."""
+    """Delete the state file.
+
+    Phase 28 Step A: also removes the singleton state row from the
+    shadow DB and records a "cleared" history entry. The flag-file
+    `db_invalid` sentinel is NOT cleared by this call — clearing
+    state is unrelated to repair status.
+    """
+    from tagteam import db, dualwrite
+
     if project_dir is None:
         project_dir = _resolve_project_root()
-    path = get_state_path(project_dir)
-    if path.exists():
-        path.unlink()
-    tmp_path = Path(project_dir) / STATE_TMP
-    if tmp_path.exists():
-        tmp_path.unlink()
+
+    with dualwrite.writer_lock(project_dir):
+        path = get_state_path(project_dir)
+        if path.exists():
+            path.unlink()
+        tmp_path = Path(project_dir) / STATE_TMP
+        if tmp_path.exists():
+            tmp_path.unlink()
+
+        conn = None
+        try:
+            conn = db.connect(project_dir=project_dir)
+            conn.execute("DELETE FROM state WHERE id=1")
+            db.add_history_entry(conn, {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "turn": None,
+                "status": "cleared",
+                "phase": None,
+                "round": None,
+                "updated_by": None,
+            })
+            conn.commit()
+        except Exception as e:
+            dualwrite.mark_db_invalid(
+                project_dir, reason=f"clear_state dual-write failed: {e}"
+            )
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
 
 def _log_seq_mismatch(expected: int, actual: int, caller: str,
@@ -223,19 +299,53 @@ def _log_seq_mismatch(expected: int, actual: int, caller: str,
     """Append seq mismatch event to side-channel diagnostics log.
 
     Does NOT modify the live state file — no seq bump, no updated_at change.
+
+    Phase 28 Step A: also appends a `seq_mismatch` row to the shadow
+    DB's diagnostics table.
     """
+    from tagteam import db, dualwrite
+
     if project_dir is None:
         project_dir = _resolve_project_root()
     log_path = Path(project_dir) / DIAGNOSTICS_LOG
+    now_iso = datetime.now(timezone.utc).isoformat()
     entry = {
         "event": "seq_mismatch",
         "expected": expected,
         "actual": actual,
         "caller": caller,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": now_iso,
     }
-    with open(log_path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry) + "\n")
+
+    with dualwrite.writer_lock(project_dir):
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+
+        conn = None
+        try:
+            conn = db.connect(project_dir=project_dir)
+            db.add_diagnostic(
+                conn,
+                kind="seq_mismatch",
+                payload={
+                    "expected": expected,
+                    "actual": actual,
+                    "caller": caller,
+                },
+                ts=now_iso,
+            )
+            conn.commit()
+        except Exception as e:
+            dualwrite.mark_db_invalid(
+                project_dir,
+                reason=f"_log_seq_mismatch dual-write failed: {e}",
+            )
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
 
 def _read_diagnostics_log(project_dir: str | None = None) -> list[dict]:
@@ -257,12 +367,36 @@ def _read_diagnostics_log(project_dir: str | None = None) -> list[dict]:
 
 
 def clear_diagnostics_log(project_dir: str | None = None) -> None:
-    """Truncate the diagnostics side-channel log."""
+    """Truncate the diagnostics side-channel log.
+
+    Phase 28 Step A: also clears the shadow DB's diagnostics table.
+    """
+    from tagteam import db, dualwrite
+
     if project_dir is None:
         project_dir = _resolve_project_root()
     log_path = Path(project_dir) / DIAGNOSTICS_LOG
-    if log_path.exists():
-        log_path.write_text("", encoding="utf-8")
+
+    with dualwrite.writer_lock(project_dir):
+        if log_path.exists():
+            log_path.write_text("", encoding="utf-8")
+
+        conn = None
+        try:
+            conn = db.connect(project_dir=project_dir)
+            conn.execute("DELETE FROM diagnostics")
+            conn.commit()
+        except Exception as e:
+            dualwrite.mark_db_invalid(
+                project_dir,
+                reason=f"clear_diagnostics_log dual-write failed: {e}",
+            )
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
 
 def _check_agent_health(lines: list[str], project_dir: str) -> None:
@@ -720,3 +854,61 @@ def _state_set(args: list[str]) -> int:
     state = update_state(updates)
     print(f"State updated: turn={state.get('turn')}, status={state.get('status')}")
     return 0
+
+
+# --- Phase 28 Step A: shadow DB write helper for state writers ---
+
+def _shadow_db_write_state(state_dict: dict,
+                           project_dir: str,
+                           *,
+                           history_entry: dict | None = None) -> None:
+    """Mirror the just-written `handoff-state.json` to the shadow DB.
+
+    Called from `update_state` (with a history_entry — the row that
+    `update_state` just appended to the file's history array) and
+    from `write_state` (with no history_entry — direct callers of
+    `write_state` bypass the history machinery on the file side and
+    do the same on the DB side).
+
+    Failures mark `db_invalid` and are swallowed. File path is
+    canonical during Step A.
+    """
+    from tagteam import db, dualwrite
+
+    conn = None
+    try:
+        conn = db.connect(project_dir=project_dir)
+        known_top_level = {
+            "phase", "type", "round", "status", "command", "result",
+            "updated_by", "run_mode", "seq", "updated_at", "history",
+        }
+        extra = {
+            k: v for k, v in state_dict.items() if k not in known_top_level
+        }
+        db.set_state(
+            conn,
+            phase=state_dict.get("phase"),
+            type=state_dict.get("type"),
+            round=state_dict.get("round"),
+            status=state_dict.get("status"),
+            command=state_dict.get("command"),
+            result=state_dict.get("result"),
+            updated_by=state_dict.get("updated_by"),
+            run_mode=state_dict.get("run_mode"),
+            seq=state_dict.get("seq"),
+            updated_at=state_dict.get("updated_at"),
+            extra_json=json.dumps(extra) if extra else None,
+        )
+        if history_entry is not None:
+            db.add_history_entry(conn, history_entry)
+        conn.commit()
+    except Exception as e:
+        dualwrite.mark_db_invalid(
+            project_dir, reason=f"state dual-write failed: {e}"
+        )
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
