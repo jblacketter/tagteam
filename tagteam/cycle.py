@@ -220,7 +220,13 @@ def init_cycle(phase: str, cycle_type: str, lead: str, reviewer: str,
     Writes rounds JSONL + status JSON, then derives handoff-state.json
     from the cycle status so the top-level state is always in sync.
     `updated_by` defaults to `lead` (since init always submits as lead).
+
+    Phase 28 Step A: also performs a shadow DB write under the project
+    writer lock, then runs a divergence check. Files are canonical;
+    DB-write failures mark `db_invalid` and do not raise.
     """
+    from tagteam import dualwrite
+
     project_dir = _resolve(project_dir)
     handoffs = _handoffs_dir(project_dir)
     handoffs.mkdir(parents=True, exist_ok=True)
@@ -251,13 +257,19 @@ def init_cycle(phase: str, cycle_type: str, lead: str, reviewer: str,
 
     sp = _status_path(phase, cycle_type, project_dir)
     rp = _rounds_path(phase, cycle_type, project_dir)
-    rp.write_text(json.dumps(entry) + "\n", encoding="utf-8")
-    sp.write_text(json.dumps(status, indent=2) + "\n", encoding="utf-8")
 
-    _derive_top_level_state(
-        phase, cycle_type, project_dir,
-        updated_by=updated_by or lead,
-    )
+    with dualwrite.writer_lock(project_dir):
+        # File writes — canonical during Step A.
+        rp.write_text(json.dumps(entry) + "\n", encoding="utf-8")
+        sp.write_text(json.dumps(status, indent=2) + "\n", encoding="utf-8")
+
+        _derive_top_level_state(
+            phase, cycle_type, project_dir,
+            updated_by=updated_by or lead,
+        )
+
+        # Shadow DB write + divergence check.
+        _shadow_db_after_cycle_write(project_dir, phase, cycle_type)
 
     return status
 
@@ -273,6 +285,8 @@ def add_round(phase: str, cycle_type: str, role: str, action: str,
     role=reviewer). This keeps the top-level state in sync even when
     a caller forgets to pass `--updated-by`.
     """
+    from tagteam import dualwrite
+
     if action not in VALID_ACTIONS:
         raise ValueError(f"Invalid action: {action}. Must be one of: {', '.join(sorted(VALID_ACTIONS))}")
     if role not in VALID_ROLES:
@@ -304,8 +318,14 @@ def add_round(phase: str, cycle_type: str, role: str, action: str,
             "content": content, "ts": now,
         }
         rp = _rounds_path(phase, cycle_type, project_dir)
-        with open(rp, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry) + "\n")
+
+        with dualwrite.writer_lock(project_dir):
+            with open(rp, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry) + "\n")
+            # AMEND is rounds-only on the DB side too — no status
+            # mutation, no state derive.
+            _shadow_db_after_amend(project_dir, phase, cycle_type, entry)
+
         return status
 
     entry = {
@@ -318,46 +338,51 @@ def add_round(phase: str, cycle_type: str, role: str, action: str,
 
     # Append to JSONL
     rp = _rounds_path(phase, cycle_type, project_dir)
-    with open(rp, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry) + "\n")
 
-    # Update status
-    status = read_status(phase, cycle_type, project_dir) or {}
-    transition = _TRANSITIONS[action]
-    status["state"] = transition["state"]
-    status["ready_for"] = transition["ready_for"]
+    with dualwrite.writer_lock(project_dir):
+        with open(rp, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
 
-    # Auto-escalate only when the cycle is stuck (no progress),
-    # not merely because it reached a certain round number.
-    auto_escalate = False
-    if action == "REQUEST_CHANGES":
-        stale = _count_stale_rounds(phase, cycle_type, project_dir)
-        if stale >= STALE_ROUND_LIMIT:
-            auto_escalate = True
-            status["state"] = "escalated"
-            status["ready_for"] = "human"
+        # Update status
+        status = read_status(phase, cycle_type, project_dir) or {}
+        transition = _TRANSITIONS[action]
+        status["state"] = transition["state"]
+        status["ready_for"] = transition["ready_for"]
 
-    # Only advance round when caller provides a higher value
-    if round_num > status.get("round", 0):
-        status["round"] = round_num
+        # Auto-escalate only when the cycle is stuck (no progress),
+        # not merely because it reached a certain round number.
+        auto_escalate = False
+        if action == "REQUEST_CHANGES":
+            stale = _count_stale_rounds(phase, cycle_type, project_dir)
+            if stale >= STALE_ROUND_LIMIT:
+                auto_escalate = True
+                status["state"] = "escalated"
+                status["ready_for"] = "human"
 
-    sp = _status_path(phase, cycle_type, project_dir)
-    sp.write_text(json.dumps(status, indent=2) + "\n", encoding="utf-8")
+        # Only advance round when caller provides a higher value
+        if round_num > status.get("round", 0):
+            status["round"] = round_num
 
-    # Infer updated_by from the cycle roster when the caller didn't supply it,
-    # so the top-level state always stays in sync with the per-cycle source
-    # of truth.
-    resolved_updated_by = updated_by
-    if not resolved_updated_by:
-        if role == "lead":
-            resolved_updated_by = status.get("lead") or role
-        else:
-            resolved_updated_by = status.get("reviewer") or role
+        sp = _status_path(phase, cycle_type, project_dir)
+        sp.write_text(json.dumps(status, indent=2) + "\n", encoding="utf-8")
 
-    _derive_top_level_state(
-        phase, cycle_type, project_dir,
-        updated_by=resolved_updated_by,
-    )
+        # Infer updated_by from the cycle roster when the caller didn't supply it,
+        # so the top-level state always stays in sync with the per-cycle source
+        # of truth.
+        resolved_updated_by = updated_by
+        if not resolved_updated_by:
+            if role == "lead":
+                resolved_updated_by = status.get("lead") or role
+            else:
+                resolved_updated_by = status.get("reviewer") or role
+
+        _derive_top_level_state(
+            phase, cycle_type, project_dir,
+            updated_by=resolved_updated_by,
+        )
+
+        # Shadow DB write + divergence check.
+        _shadow_db_after_cycle_write(project_dir, phase, cycle_type)
 
     return status
 
@@ -861,3 +886,166 @@ def _cli_scope_diff(args: list[str]) -> int:
     for path in attributable:
         print(path)
     return 0
+
+
+# ----------------------------------------------------------------------
+
+# --- Phase 28 Step A: shadow DB write helpers ---
+
+def _shadow_db_after_cycle_write(project_dir: str, phase: str,
+                                 cycle_type: str) -> None:
+    """Mirror the just-written file state for a cycle to the shadow DB,
+    then run a divergence check.
+
+    Called from `init_cycle` and the non-AMEND path of `add_round`,
+    inside the writer lock. Reads the canonical file state (status +
+    rounds) and re-issues the equivalent DB writes.
+
+    For `init_cycle`, this populates the cycle row + round 1 from
+    scratch. For subsequent `add_round` calls, only the new round row
+    is added (db.add_round always inserts; existing rounds are
+    untouched), and the cycle status fields are refreshed via upsert.
+
+    Failures mark `db_invalid` and are swallowed — files are
+    canonical during Step A. The divergence check produces a
+    diagnostic row in the DB if files and DB renders disagree.
+    """
+    from tagteam import db, divergence, dualwrite
+
+    conn = None
+    db_failed = False
+    try:
+        conn = db.connect(project_dir=project_dir)
+        status = read_status(phase, cycle_type, project_dir) or {}
+        cycle_id = db.upsert_cycle(
+            conn, phase, cycle_type,
+            lead=status.get("lead"),
+            reviewer=status.get("reviewer"),
+            state=status.get("state", "in-progress"),
+            ready_for=status.get("ready_for"),
+            ready_for_present=("ready_for" in status),
+            round_=status.get("round", 0),
+            date=status.get("date"),
+            baseline=status.get("baseline"),
+        )
+
+        # Determine which rounds the DB does not yet have, and add
+        # only those. Compare by (round, role, action, ts) — the
+        # rounds table allows duplicates so we must avoid re-inserting.
+        existing_keys = set(
+            conn.execute(
+                "SELECT round, role, action, ts FROM rounds WHERE cycle_id=?",
+                (cycle_id,),
+            ).fetchall()
+        )
+        for r in read_rounds(phase, cycle_type, project_dir):
+            key = (r["round"], r["role"], r["action"], r["ts"])
+            if key in existing_keys:
+                continue
+            db.add_round(
+                conn, cycle_id,
+                round_=r["round"],
+                role=r["role"],
+                action=r["action"],
+                content=r.get("content", ""),
+                ts=r["ts"],
+                updated_by=r.get("updated_by"),
+                summary=r.get("summary"),
+            )
+        conn.commit()
+    except Exception as e:
+        db_failed = True
+        dualwrite.mark_db_invalid(
+            project_dir, reason=f"cycle dual-write failed: {e}"
+        )
+
+    if conn is not None and not db_failed:
+        try:
+            divergence.log_divergence_if_needed(
+                conn, project_dir, phase, cycle_type
+            )
+        except Exception:
+            # Divergence logging must never break the caller. The DB
+            # being broken is exactly the kind of thing this helper is
+            # supposed to surface; masking errors here would defeat
+            # the purpose, but the caller's file-side write has
+            # already succeeded so we still don't raise.
+            pass
+
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _shadow_db_after_amend(project_dir: str, phase: str, cycle_type: str,
+                           entry: dict) -> None:
+    """Mirror an AMEND round to the shadow DB.
+
+    AMEND only appends a round on the file side — no status change,
+    no top-level state derive. The DB write follows the same shape:
+    `db.add_round` only, no `upsert_cycle` for status fields.
+
+    Failures mark `db_invalid` and are swallowed.
+    """
+    from tagteam import db, divergence, dualwrite
+
+    conn = None
+    db_failed = False
+    try:
+        conn = db.connect(project_dir=project_dir)
+        cur = conn.execute(
+            "SELECT id FROM cycles WHERE phase=? AND type=?",
+            (phase, cycle_type),
+        )
+        row = cur.fetchone()
+        if row is None:
+            # Cycle missing from DB — shouldn't happen if previous
+            # dual-writes succeeded. Fall back to a status-driven
+            # upsert so the AMEND has somewhere to attach.
+            status = read_status(phase, cycle_type, project_dir) or {}
+            cycle_id = db.upsert_cycle(
+                conn, phase, cycle_type,
+                lead=status.get("lead"),
+                reviewer=status.get("reviewer"),
+                state=status.get("state", "in-progress"),
+                ready_for=status.get("ready_for"),
+                ready_for_present=("ready_for" in status),
+                round_=status.get("round", 0),
+                date=status.get("date"),
+                baseline=status.get("baseline"),
+            )
+        else:
+            cycle_id = row[0]
+
+        db.add_round(
+            conn, cycle_id,
+            round_=entry["round"],
+            role=entry["role"],
+            action=entry["action"],
+            content=entry.get("content", ""),
+            ts=entry["ts"],
+            updated_by=entry.get("updated_by"),
+            summary=entry.get("summary"),
+        )
+        conn.commit()
+    except Exception as e:
+        db_failed = True
+        dualwrite.mark_db_invalid(
+            project_dir, reason=f"amend dual-write failed: {e}"
+        )
+
+    if conn is not None and not db_failed:
+        try:
+            divergence.log_divergence_if_needed(
+                conn, project_dir, phase, cycle_type
+            )
+        except Exception:
+            pass
+
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
