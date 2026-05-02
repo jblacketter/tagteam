@@ -293,6 +293,28 @@ class TestFileSideSanity:
         assert result is not None
         assert result["check"] == "rounds_jsonl_round_type"
 
+    @pytest.mark.parametrize("bad_status,expected_kind", [
+        ("[]", "list"),
+        ('"x"', "str"),
+        ("42", "int"),
+        ("null", "NoneType"),
+        ("true", "bool"),
+    ])
+    def test_status_json_non_object_caught(self, project, bad_status, expected_kind):
+        """Regression: a status.json that's valid JSON but not an
+        object would crash downstream `.keys()` / `.get(...)`.
+        file_side_sanity must classify it as file_inconsistent with
+        a specific check name, not propagate AttributeError —
+        especially because repair._check_all_files runs this before
+        its import try block. A crash here would escape repair's
+        backoff handling entirely."""
+        path = project / "docs" / "handoffs" / "p_plan_status.json"
+        path.write_text(bad_status)
+        result = divergence.file_side_sanity(project, "p", "plan")
+        assert result is not None
+        assert result["check"] == "status_json_object_shape"
+        assert expected_kind in result["detail"]
+
     def test_status_with_missing_ready_for_passes_sanity(self, project):
         """Regression: the file renderer treats missing `ready_for`
         as `?`, and the DB schema preserves the missing-vs-null
@@ -328,6 +350,17 @@ class TestCheckStateFileIntegrity:
         result = divergence.check_state_file_integrity(project)
         assert result is not None
         assert result["check"] == "state_json_parseable"
+
+    @pytest.mark.parametrize("bad_state", ["[]", '"x"', "42", "null", "true"])
+    def test_state_json_non_object_caught(self, project, bad_state):
+        """Regression: handoff-state.json that's valid JSON but not
+        an object would crash `.get(...)` calls. Pre-fix this raised
+        AttributeError; post-fix it classifies as
+        state_json_object_shape."""
+        (project / "handoff-state.json").write_text(bad_state)
+        result = divergence.check_state_file_integrity(project)
+        assert result is not None
+        assert result["check"] == "state_json_object_shape"
 
     def test_state_references_missing_cycle(self, project):
         # State points at phase=p type=plan but no _status.json exists

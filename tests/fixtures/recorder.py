@@ -197,25 +197,88 @@ def _scenario_non_ascii_content(project: Path) -> None:
     )
 
 
+def _scenario_plan_needs_human(project: Path) -> None:
+    """SUBMIT → NEED_HUMAN. NEED_HUMAN renders STATE: needs-human
+    while ESCALATE renders STATE: escalated — they are NOT the same
+    parity state, contrary to a previous (now-fixed) recorder
+    comment that claimed they were."""
+    from tagteam import cycle
+    cycle.init_cycle(
+        "phase-f", "plan", "Lead", "Reviewer",
+        "Plan submission with one open question requiring human input.",
+        str(project),
+    )
+    cycle.add_round(
+        "phase-f", "plan", "reviewer", "NEED_HUMAN", 1,
+        "Need human decision on whether to use library X or Y.",
+        str(project),
+    )
+
+
+def _scenario_multi_cycle(project: Path) -> None:
+    """Plan + impl cycles for the same phase. Exercises
+    db.import_from_files walking multiple cycle file pairs in
+    docs/handoffs/ — a code path the single-cycle scenarios don't
+    reach."""
+    from tagteam import cycle
+    cycle.init_cycle(
+        "phase-g", "plan", "Lead", "Reviewer",
+        "Plan for phase g.", str(project),
+    )
+    cycle.add_round(
+        "phase-g", "plan", "reviewer", "APPROVE", 1,
+        "Plan approved.", str(project),
+    )
+    cycle.init_cycle(
+        "phase-g", "impl", "Lead", "Reviewer",
+        "Implementation matching the approved plan.",
+        str(project),
+    )
+    cycle.add_round(
+        "phase-g", "impl", "reviewer", "APPROVE", 1,
+        "Implementation approved.", str(project),
+    )
+
+
+def _scenario_empty_content(project: Path) -> None:
+    """SUBMIT with empty content → APPROVE. Validation allows empty
+    strings; the renderers must handle them without producing torn
+    or differing output."""
+    from tagteam import cycle
+    cycle.init_cycle(
+        "phase-h", "plan", "Lead", "Reviewer",
+        "",
+        str(project),
+    )
+    cycle.add_round(
+        "phase-h", "plan", "reviewer", "APPROVE", 1,
+        "",
+        str(project),
+    )
+
+
 SCENARIOS = {
     "plan-approve-direct":  _scenario_plan_approve_direct,
     "plan-revision":        _scenario_plan_revision,
     "plan-amend":           _scenario_plan_amend,
     "plan-escalated":       _scenario_plan_escalated,
+    "plan-needs-human":     _scenario_plan_needs_human,
+    "multi-cycle":          _scenario_multi_cycle,
+    "empty-content":        _scenario_empty_content,
     "non-ascii-content":    _scenario_non_ascii_content,
 }
 
 
-# Coverage matrix:
-#                              SUBMIT  REQ_CH  APPROVE  AMEND  ESCALATE  non-ASCII
-# plan-approve-direct            ✓                ✓
-# plan-revision                  ✓✓     ✓        ✓
-# plan-amend                     ✓               ✓       ✓
-# plan-escalated                 ✓✓     ✓                          ✓
-# non-ascii-content              ✓               ✓                              ✓
-#
-# NEED_HUMAN intentionally not in the corpus — its top-level state
-# transition is identical to ESCALATE for parity purposes.
+# Coverage matrix (✓ = present, ✓✓ = appears multiple times):
+#                       SUBMIT  REQ_CH  APPROVE  AMEND  ESCALATE  NEED_HUMAN  empty  non-ASCII  multi
+# plan-approve-direct     ✓               ✓
+# plan-revision           ✓✓     ✓        ✓
+# plan-amend              ✓               ✓        ✓
+# plan-escalated          ✓✓     ✓                            ✓
+# plan-needs-human        ✓                                                ✓
+# multi-cycle             ✓✓              ✓✓                                                              ✓
+# empty-content           ✓               ✓                                          ✓
+# non-ascii-content       ✓               ✓                                                    ✓
 
 
 # ---------- Driver ----------

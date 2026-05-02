@@ -203,6 +203,49 @@ class TestAttemptRepairFailurePath:
         assert "file_inconsistent" in result["reason"]
         assert "object_shape" in result["reason"]
 
+    @pytest.mark.parametrize("malformed_file,bad_content", [
+        ("p_plan_status.json", "[]"),
+        ("p_plan_status.json", '"not an object"'),
+        ("p_plan_status.json", "42"),
+    ])
+    def test_repair_handles_non_object_status_without_crashing(
+        self, project, malformed_file, bad_content
+    ):
+        """Regression for Codex round-2 review blocker: a status.json
+        that's valid JSON but not an object used to crash
+        file_side_sanity's `.keys()` call, which would escape repair's
+        backoff handling entirely. Repair must classify it as
+        file_inconsistent and record a bounded-backoff failure."""
+        _seed_clean_cycle(project)
+        (project / "docs" / "handoffs" / malformed_file).write_text(
+            bad_content
+        )
+        dualwrite.mark_db_invalid(project, reason="simulated")
+
+        # Must not raise.
+        result = repair.attempt_repair(project)
+        assert result["success"] is False
+        assert "file_inconsistent" in result["reason"]
+        assert "status_json_object_shape" in result["reason"]
+        # Sentinel remains set — backoff state advanced.
+        assert dualwrite.is_db_invalid(project)
+        info = dualwrite.get_db_invalid_info(project)
+        assert info["consecutive_failures"] >= 1
+
+    def test_repair_handles_non_object_state_without_crashing(self, project):
+        """Same regression but for handoff-state.json. Without the
+        fix, check_state_file_integrity would AttributeError on
+        `.get(...)` and escape repair."""
+        _seed_clean_cycle(project)
+        (project / "handoff-state.json").write_text("[]")
+        dualwrite.mark_db_invalid(project, reason="simulated")
+
+        result = repair.attempt_repair(project)
+        assert result["success"] is False
+        assert "file_inconsistent" in result["reason"]
+        assert "state_json_object_shape" in result["reason"]
+        assert dualwrite.is_db_invalid(project)
+
 
 # ---------- needs_louder_signal ----------
 

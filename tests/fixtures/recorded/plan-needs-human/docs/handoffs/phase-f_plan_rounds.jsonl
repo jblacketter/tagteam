@@ -1,0 +1,2 @@
+{"round": 1, "role": "lead", "action": "SUBMIT_FOR_REVIEW", "content": "Plan submission with one open question requiring human input.", "ts": "2026-01-01T00:00:00+00:00"}
+{"round": 1, "role": "reviewer", "action": "NEED_HUMAN", "content": "Need human decision on whether to use library X or Y.", "ts": "2026-01-01T00:00:02+00:00"}

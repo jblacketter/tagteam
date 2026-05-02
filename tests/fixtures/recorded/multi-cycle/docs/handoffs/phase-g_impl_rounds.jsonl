@@ -1,0 +1,2 @@
+{"round": 1, "role": "lead", "action": "SUBMIT_FOR_REVIEW", "content": "Implementation matching the approved plan.", "ts": "2026-01-01T00:00:04+00:00"}
+{"round": 1, "role": "reviewer", "action": "APPROVE", "content": "Implementation approved.", "ts": "2026-01-01T00:00:06+00:00"}
