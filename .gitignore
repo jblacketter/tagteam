@@ -32,3 +32,5 @@ handoff-state.json
 
 # User project artifacts (created by setup command or TUI, not part of this repo)
 projects/
+/.spike-output/
+/.tagteam/
