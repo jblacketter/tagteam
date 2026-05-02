@@ -689,8 +689,75 @@ def state_command(args: list[str]) -> int:
     if subcmd == "sync":
         return _state_sync(args[1:])
 
+    if subcmd == "repair-db":
+        return _state_repair_db(args[1:])
+
     print(f"Unknown state subcommand: {subcmd}")
-    print("Usage: python -m tagteam state [set|reset|diagnose|sync]")
+    print("Usage: python -m tagteam state "
+          "[set|reset|diagnose|sync|repair-db]")
+    return 1
+
+
+def _state_repair_db(args: list[str]) -> int:
+    """`tagteam state repair-db [--force-clear]`.
+
+    Default: re-build the shadow DB from canonical files and clear
+    the `db_invalid` sentinel only if a parity check passes. Honors
+    backoff state (returns non-zero if next_attempt_at is still
+    in the future).
+
+    --force-clear: clear the sentinel without running repair. LAST
+    RESORT — the DB is officially "trusted" without parity
+    verification. Documented for stuck-process recovery.
+    """
+    from tagteam import dualwrite, repair
+
+    project_dir = _resolve_project_root()
+    force_clear = "--force-clear" in args
+
+    if force_clear:
+        if not dualwrite.is_db_invalid(project_dir):
+            print("db_invalid sentinel is not set — nothing to clear.")
+            return 0
+        info = dualwrite.get_db_invalid_info(project_dir) or {}
+        dualwrite.clear_db_invalid(project_dir)
+        print("db_invalid sentinel cleared via --force-clear.")
+        print(f"  Original failure: {info.get('reason', '?')}")
+        print(f"  Original since:   {info.get('since', '?')}")
+        print(f"  Failures so far:  {info.get('consecutive_failures', 0)}")
+        print()
+        print("WARNING: --force-clear bypasses parity verification.")
+        print("The DB is now trusted without proof that it matches files.")
+        print("Run a manual parity check (e.g. tagteam cycle render) on")
+        print("important cycles to confirm.")
+        return 0
+
+    if not dualwrite.is_db_invalid(project_dir):
+        print("db_invalid sentinel is not set — DB is healthy.")
+        return 0
+
+    if not repair.should_attempt_repair(project_dir):
+        info = dualwrite.get_db_invalid_info(project_dir) or {}
+        next_at = info.get("next_attempt_at", "?")
+        print(f"Backoff in effect — next attempt at {next_at}.")
+        print("Use --force-clear to clear without repair, or wait.")
+        return 1
+
+    result = repair.attempt_repair(project_dir)
+    if result["success"]:
+        print("Repair succeeded — db_invalid cleared.")
+        return 0
+
+    print(f"Repair failed: {result.get('reason')}")
+    next_at = result.get("next_attempt_at")
+    if next_at:
+        print(f"Next attempt allowed at: {next_at}")
+    info = dualwrite.get_db_invalid_info(project_dir) or {}
+    print(f"Consecutive failures: {info.get('consecutive_failures', 0)}")
+    if repair.needs_louder_signal(project_dir):
+        print()
+        print("WARNING: db_invalid has been set for over 24 hours.")
+        print("Operator intervention is required.")
     return 1
 
 
@@ -872,8 +939,17 @@ def _shadow_db_write_state(state_dict: dict,
 
     Failures mark `db_invalid` and are swallowed. File path is
     canonical during Step A.
+
+    Retry-on-next-write: if the sentinel is set and backoff allows,
+    attempt repair first. Successful repair already rebuilt the DB
+    from files (including this write), so we early-return.
     """
-    from tagteam import db, dualwrite
+    from tagteam import db, dualwrite, repair
+
+    if dualwrite.is_db_invalid(project_dir) and \
+            repair.should_attempt_repair(project_dir):
+        if repair.attempt_repair(project_dir)["success"]:
+            return
 
     conn = None
     try:

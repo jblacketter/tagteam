@@ -260,3 +260,134 @@ class TestRepairReentrancy:
 
         assert result["success"] is True
         assert dualwrite.is_db_invalid(project) is False
+
+
+# ---------- CLI: tagteam state repair-db ----------
+
+class TestStateRepairDbCli:
+    @pytest.fixture
+    def cli_project(self, tmp_path, monkeypatch):
+        from tagteam import state
+        (tmp_path / "tagteam.yaml").write_text(
+            "agents:\n  lead: {name: L}\n  reviewer: {name: R}\n"
+        )
+        monkeypatch.setattr(state, "_cached_project_root", None,
+                            raising=False)
+        monkeypatch.chdir(tmp_path)
+        cycle.init_cycle("p", "plan", "L", "R", "v1", str(tmp_path))
+        return tmp_path
+
+    def test_no_op_when_sentinel_clear(self, cli_project, capsys):
+        from tagteam.state import _state_repair_db
+        rc = _state_repair_db([])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "DB is healthy" in out
+
+    def test_repair_succeeds(self, cli_project, capsys):
+        from tagteam.state import _state_repair_db
+        dualwrite.mark_db_invalid(cli_project, reason="test")
+        rc = _state_repair_db([])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "Repair succeeded" in out
+        assert dualwrite.is_db_invalid(cli_project) is False
+
+    def test_force_clear_skips_repair(self, cli_project, capsys):
+        from tagteam.state import _state_repair_db
+        dualwrite.mark_db_invalid(cli_project, reason="test")
+        rc = _state_repair_db(["--force-clear"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "force-clear" in out
+        assert "WARNING" in out
+        assert dualwrite.is_db_invalid(cli_project) is False
+
+    def test_force_clear_when_clear_is_no_op(self, cli_project, capsys):
+        from tagteam.state import _state_repair_db
+        rc = _state_repair_db(["--force-clear"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "nothing to clear" in out
+
+    def test_returns_nonzero_in_backoff(self, cli_project, capsys):
+        from tagteam.state import _state_repair_db
+        dualwrite.mark_db_invalid(cli_project, reason="test")
+        # Set next_attempt_at to the future
+        flag = cli_project / ".tagteam" / "DB_INVALID"
+        info = json.loads(flag.read_text())
+        future = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
+        info["next_attempt_at"] = future
+        flag.write_text(json.dumps(info))
+
+        rc = _state_repair_db([])
+        assert rc == 1
+        out = capsys.readouterr().out
+        assert "Backoff in effect" in out
+
+
+# ---------- Retry-on-next-write hook ----------
+
+class TestRetryOnNextWrite:
+    def test_cycle_write_triggers_repair(self, project):
+        """When a cycle write happens with sentinel set + backoff
+        elapsed, the shadow-write helper attempts repair before
+        proceeding."""
+        _seed_clean_cycle(project)
+        dualwrite.mark_db_invalid(project, reason="simulated")
+        assert dualwrite.is_db_invalid(project)
+
+        # Trigger another cycle write — should opportunistically repair.
+        cycle.add_round("p", "plan", "reviewer", "REQUEST_CHANGES",
+                        1, "fix", str(project))
+
+        # Sentinel cleared by the retry-on-next-write hook.
+        assert dualwrite.is_db_invalid(project) is False
+
+        # DB also has the new round (from the repair's rebuild).
+        conn = db.connect(project_dir=str(project))
+        try:
+            n_rounds = conn.execute(
+                "SELECT COUNT(*) FROM rounds"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        assert n_rounds == 2
+
+    def test_retry_skipped_when_in_backoff(self, project):
+        """If backoff hasn't elapsed, the shadow-write helper does
+        NOT attempt repair — sentinel stays set and the regular
+        shadow-write path runs (and likely re-marks invalid)."""
+        _seed_clean_cycle(project)
+        dualwrite.mark_db_invalid(project, reason="test")
+        # Manually advance backoff to the future
+        flag = project / ".tagteam" / "DB_INVALID"
+        info = json.loads(flag.read_text())
+        info["next_attempt_at"] = (
+            datetime.now(timezone.utc) + timedelta(minutes=10)
+        ).isoformat()
+        flag.write_text(json.dumps(info))
+
+        # Should not crash; sentinel stays set since repair is gated.
+        cycle.add_round("p", "plan", "reviewer", "REQUEST_CHANGES",
+                        1, "fix", str(project))
+        assert dualwrite.is_db_invalid(project) is True
+
+    def test_retry_amend_path(self, project):
+        """The AMEND shadow-write helper has its own retry hook."""
+        _seed_clean_cycle(project)
+        dualwrite.mark_db_invalid(project, reason="simulated")
+
+        cycle.add_round("p", "plan", "lead", "AMEND",
+                        1, "amendment", str(project))
+
+        assert dualwrite.is_db_invalid(project) is False
+        conn = db.connect(project_dir=str(project))
+        try:
+            actions = [
+                r["action"]
+                for r in db.get_rounds(conn, "p", "plan")
+            ]
+        finally:
+            conn.close()
+        assert "AMEND" in actions
