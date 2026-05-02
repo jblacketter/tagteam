@@ -532,6 +532,132 @@ def import_from_files(project_dir: Path, conn: sqlite3.Connection) -> dict:
     }
 
 
+# ---------- Exporter (inverse of import_from_files) ----------
+
+def export_to_files(conn: sqlite3.Connection, project_dir: Path) -> dict:
+    """Write the canonical file-side state from the DB.
+
+    Inverse of `import_from_files`. Used by Phase 28 Step B's
+    `--reverse` migration (to restore files when downgrading from
+    DB-canonical) and by post-rebuild auto-export hooks.
+
+    Output round-trips with `import_from_files`: re-importing the
+    just-exported files produces an equivalent DB. Round-trip
+    fidelity covers:
+
+      - `ready_for` missing-key vs explicit-null (preserved via the
+        `cycles.ready_for_present` flag).
+      - Round entries with optional `updated_by` / `summary` only
+        included when non-null, matching pre-Phase-28 file shape.
+      - Status `baseline` block written only when non-null.
+      - `state.extra_json` fields flattened back to top-level keys
+        in handoff-state.json.
+
+    The function does NOT delete files that exist on disk but not
+    in the DB — callers that want a true mirror must clean target
+    paths themselves. This is intentional: a partial export is
+    safer than silently dropping cycles the caller didn't know
+    about.
+    """
+    project_dir = Path(project_dir)
+    handoffs = project_dir / "docs" / "handoffs"
+    handoffs.mkdir(parents=True, exist_ok=True)
+
+    cycles_written = 0
+    rounds_written = 0
+
+    # Per-cycle status + rounds files.
+    for entry in list_cycles(conn):
+        phase, cycle_type = entry["phase"], entry["type"]
+        cycle = get_cycle(conn, phase, cycle_type)
+        if cycle is None:
+            continue  # listed but disappeared; race or test artifact
+        rounds = get_rounds(conn, phase, cycle_type)
+
+        status: dict = {
+            "state": cycle["state"],
+            "round": cycle.get("round") or 0,
+            "phase": phase,
+            "type": cycle_type,
+            "lead": cycle.get("lead"),
+            "reviewer": cycle.get("reviewer"),
+            "date": cycle.get("date"),
+        }
+        # Preserve ready_for missing-vs-null distinction.
+        cur = conn.execute(
+            "SELECT ready_for_present FROM cycles WHERE phase=? AND type=?",
+            (phase, cycle_type),
+        )
+        row = cur.fetchone()
+        ready_for_present = bool(row[0]) if row else True
+        if ready_for_present:
+            status["ready_for"] = cycle.get("ready_for")
+        # Baseline block — write only when populated.
+        baseline = cycle.get("baseline")
+        if baseline is not None:
+            status["baseline"] = baseline
+
+        status_path = handoffs / f"{phase}_{cycle_type}_status.json"
+        status_path.write_text(
+            json.dumps(status, indent=2) + "\n", encoding="utf-8"
+        )
+
+        rounds_path = handoffs / f"{phase}_{cycle_type}_rounds.jsonl"
+        with rounds_path.open("w", encoding="utf-8") as f:
+            for r in rounds:
+                # Match pre-Phase-28 minimal shape: include
+                # updated_by / summary only when present, so older
+                # consumers that don't know those fields don't see
+                # explicit nulls they have to ignore.
+                entry: dict = {
+                    "round": r["round"],
+                    "role": r["role"],
+                    "action": r["action"],
+                    "content": r.get("content") or "",
+                    "ts": r["ts"],
+                }
+                if r.get("updated_by") is not None:
+                    entry["updated_by"] = r["updated_by"]
+                if r.get("summary") is not None:
+                    entry["summary"] = r["summary"]
+                f.write(json.dumps(entry) + "\n")
+                rounds_written += 1
+        cycles_written += 1
+
+    # Top-level state file.
+    state_written = False
+    state = get_state(conn)
+    if state is not None:
+        history = get_history(conn)
+        # `get_state` already unpacks extra_json into the dict; we
+        # just need to drop the (now-meaningless) extra_json key
+        # itself if present, attach history, and write.
+        out = dict(state)
+        out.pop("extra_json", None)
+        out["history"] = [
+            {
+                "turn": h.get("turn"),
+                "status": h.get("status"),
+                "timestamp": h.get("ts"),
+                "phase": h.get("phase"),
+                "round": h.get("round"),
+                "updated_by": h.get("updated_by"),
+            }
+            for h in history
+        ]
+        state_path = project_dir / "handoff-state.json"
+        state_path.write_text(
+            json.dumps(out, indent=2) + "\n", encoding="utf-8"
+        )
+        state_written = True
+
+    return {
+        "cycles": cycles_written,
+        "rounds": rounds_written,
+        "state_written": state_written,
+    }
+
+
 # ---------- Renderer (matches tagteam.cycle.render_cycle byte-for-byte) ----------
 
 def render_cycle(
