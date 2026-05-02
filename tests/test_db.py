@@ -493,3 +493,242 @@ class TestStateExtra:
 
     def test_get_state_returns_none_when_empty(self, conn):
         assert db.get_state(conn) is None
+
+
+# ---------- Exporter (Phase 28 Step B) ----------
+
+class TestExportToFiles:
+    """`export_to_files` is the inverse of `import_from_files`.
+    Round-trip fidelity is the load-bearing contract: re-importing
+    the just-exported files must produce an equivalent DB."""
+
+    def test_writes_cycle_files(self, project_dir):
+        # Seed: import a clean fixture
+        (project_dir / "docs" / "handoffs" / "p_plan_status.json").write_text(json.dumps({
+            "state": "approved", "ready_for": None, "round": 1,
+            "phase": "p", "type": "plan",
+            "lead": "L", "reviewer": "R", "date": "2026-05-01",
+        }))
+        (project_dir / "docs" / "handoffs" / "p_plan_rounds.jsonl").write_text(json.dumps({
+            "round": 1, "role": "lead", "action": "SUBMIT_FOR_REVIEW",
+            "content": "v1", "ts": "2026-05-01T00:00:00+00:00",
+        }) + "\n")
+        c = db.connect(db_path=project_dir / "src.db")
+        db.import_from_files(project_dir, c)
+
+        # Export to a fresh dir
+        out_dir = project_dir / "out"
+        (out_dir / "docs" / "handoffs").mkdir(parents=True)
+        report = db.export_to_files(c, out_dir)
+        c.close()
+
+        assert report["cycles"] == 1
+        assert report["rounds"] == 1
+        assert (out_dir / "docs" / "handoffs" / "p_plan_status.json").exists()
+        assert (out_dir / "docs" / "handoffs" / "p_plan_rounds.jsonl").exists()
+
+    def test_round_trip_idempotent(self, project_dir):
+        """Import → export → import — the two DBs must be
+        equivalent (same cycles, rounds, state, history)."""
+        # Seed source
+        (project_dir / "docs" / "handoffs" / "p_plan_status.json").write_text(json.dumps({
+            "state": "approved", "ready_for": None, "round": 2,
+            "phase": "p", "type": "plan",
+            "lead": "L", "reviewer": "R", "date": "2026-05-01",
+        }))
+        (project_dir / "docs" / "handoffs" / "p_plan_rounds.jsonl").write_text(
+            json.dumps({"round": 1, "role": "lead",
+                        "action": "SUBMIT_FOR_REVIEW", "content": "v1",
+                        "ts": "2026-05-01T00:00:00+00:00"}) + "\n" +
+            json.dumps({"round": 1, "role": "reviewer",
+                        "action": "REQUEST_CHANGES", "content": "fix",
+                        "ts": "2026-05-01T00:01:00+00:00"}) + "\n" +
+            json.dumps({"round": 2, "role": "lead",
+                        "action": "SUBMIT_FOR_REVIEW", "content": "v2",
+                        "ts": "2026-05-01T00:02:00+00:00"}) + "\n" +
+            json.dumps({"round": 2, "role": "reviewer",
+                        "action": "APPROVE", "content": "ok",
+                        "ts": "2026-05-01T00:03:00+00:00"}) + "\n"
+        )
+        (project_dir / "handoff-state.json").write_text(json.dumps({
+            "phase": "p", "type": "plan", "round": 2, "status": "done",
+            "result": "approved", "updated_by": "R", "seq": 5,
+            "history": [
+                {"timestamp": "2026-05-01T00:00:00+00:00", "turn": "reviewer",
+                 "phase": "p", "round": 1, "updated_by": "L"},
+            ],
+        }))
+        c1 = db.connect(db_path=project_dir / "db1.db")
+        db.import_from_files(project_dir, c1)
+
+        # Export to a fresh dir.
+        out_dir = project_dir / "out"
+        (out_dir / "docs" / "handoffs").mkdir(parents=True)
+        db.export_to_files(c1, out_dir)
+        c1.close()
+
+        # Re-import the exported files into a different DB.
+        c2 = db.connect(db_path=project_dir / "db2.db")
+        db.import_from_files(out_dir, c2)
+
+        # Cycle equivalence
+        cyc1 = db.get_cycle(db.connect(db_path=project_dir / "db1.db"), "p", "plan")
+        cyc2 = db.get_cycle(c2, "p", "plan")
+        for k in ["state", "ready_for", "round", "lead", "reviewer", "date"]:
+            assert cyc1[k] == cyc2[k], f"cycle field {k} differs"
+
+        # Round equivalence
+        r1 = db.get_rounds(db.connect(db_path=project_dir / "db1.db"), "p", "plan")
+        r2 = db.get_rounds(c2, "p", "plan")
+        assert len(r1) == len(r2)
+        for a, b in zip(r1, r2):
+            assert a["round"] == b["round"]
+            assert a["role"] == b["role"]
+            assert a["action"] == b["action"]
+            assert a["content"] == b["content"]
+            assert a["ts"] == b["ts"]
+
+        # State equivalence
+        s2 = db.get_state(c2)
+        assert s2["phase"] == "p"
+        assert s2["seq"] == 5
+
+        # History equivalence
+        h2 = db.get_history(c2)
+        assert len(h2) == 1
+        assert h2[0]["phase"] == "p"
+        c2.close()
+
+    def test_preserves_ready_for_missing_vs_null(self, project_dir):
+        """The `ready_for_present` schema flag must round-trip
+        correctly: a cycle with NO ready_for key should export
+        without the key, while a cycle with explicit null should
+        export with `"ready_for": null`."""
+        c = db.connect(db_path=project_dir / "src.db")
+        # Cycle 1: ready_for missing
+        db.upsert_cycle(c, "missing", "plan",
+                        ready_for=None, ready_for_present=False,
+                        state="approved", round_=1, lead="L",
+                        reviewer="R", date="2026-05-01")
+        # Cycle 2: ready_for explicit null
+        db.upsert_cycle(c, "null", "plan",
+                        ready_for=None, ready_for_present=True,
+                        state="approved", round_=1, lead="L",
+                        reviewer="R", date="2026-05-01")
+
+        out_dir = project_dir / "out"
+        (out_dir / "docs" / "handoffs").mkdir(parents=True)
+        db.export_to_files(c, out_dir)
+        c.close()
+
+        missing_status = json.loads(
+            (out_dir / "docs" / "handoffs" / "missing_plan_status.json").read_text()
+        )
+        null_status = json.loads(
+            (out_dir / "docs" / "handoffs" / "null_plan_status.json").read_text()
+        )
+        assert "ready_for" not in missing_status, (
+            "ready_for_present=False must NOT include the key"
+        )
+        assert "ready_for" in null_status
+        assert null_status["ready_for"] is None
+
+    def test_omits_optional_round_fields_when_null(self, project_dir):
+        """`updated_by` and `summary` are optional. Old-format files
+        don't have them. Exported rounds must omit them when null,
+        not write `null` literals (which older code would have to
+        skip)."""
+        c = db.connect(db_path=project_dir / "src.db")
+        cid = db.upsert_cycle(c, "p", "plan", state="approved",
+                              round_=1, lead="L", reviewer="R",
+                              date="2026-05-01")
+        db.add_round(c, cid, 1, "lead", "SUBMIT_FOR_REVIEW", "x",
+                     "2026-05-01T00:00:00+00:00",
+                     updated_by=None, summary=None)
+        # And one round with both fields populated for contrast
+        db.add_round(c, cid, 1, "reviewer", "APPROVE", "ok",
+                     "2026-05-01T00:01:00+00:00",
+                     updated_by="R", summary="lgtm")
+
+        out_dir = project_dir / "out"
+        (out_dir / "docs" / "handoffs").mkdir(parents=True)
+        db.export_to_files(c, out_dir)
+        c.close()
+
+        lines = (out_dir / "docs" / "handoffs" / "p_plan_rounds.jsonl"
+                 ).read_text().strip().splitlines()
+        first = json.loads(lines[0])
+        second = json.loads(lines[1])
+        assert "updated_by" not in first
+        assert "summary" not in first
+        assert second["updated_by"] == "R"
+        assert second["summary"] == "lgtm"
+
+    def test_baseline_round_trips(self, project_dir):
+        c = db.connect(db_path=project_dir / "src.db")
+        db.upsert_cycle(
+            c, "p", "impl", state="approved", round_=1,
+            lead="L", reviewer="R", date="2026-05-01",
+            baseline={"sha": "abc123",
+                      "dirty_paths": [" M foo.py"],
+                      "captured_at": "2026-05-01T00:00:00+00:00",
+                      "source": "init"},
+        )
+        out_dir = project_dir / "out"
+        (out_dir / "docs" / "handoffs").mkdir(parents=True)
+        db.export_to_files(c, out_dir)
+        c.close()
+
+        status = json.loads(
+            (out_dir / "docs" / "handoffs" / "p_impl_status.json").read_text()
+        )
+        assert status["baseline"]["sha"] == "abc123"
+
+    def test_no_baseline_key_when_null(self, project_dir):
+        c = db.connect(db_path=project_dir / "src.db")
+        db.upsert_cycle(c, "p", "plan", state="approved", round_=1,
+                        lead="L", reviewer="R", date="2026-05-01")
+        out_dir = project_dir / "out"
+        (out_dir / "docs" / "handoffs").mkdir(parents=True)
+        db.export_to_files(c, out_dir)
+        c.close()
+
+        status = json.loads(
+            (out_dir / "docs" / "handoffs" / "p_plan_status.json").read_text()
+        )
+        assert "baseline" not in status
+
+    def test_state_with_extra_fields_round_trips(self, project_dir):
+        """State `extra_json` fields (e.g. roadmap_queue,
+        roadmap_index) must come out as top-level keys in the
+        handoff-state.json, matching what update_state writes."""
+        c = db.connect(db_path=project_dir / "src.db")
+        db.set_state(
+            c,
+            phase="p", type="plan", round=1, status="ready",
+            extra_json=json.dumps({"roadmap_queue": "a,b,c",
+                                   "roadmap_index": 1}),
+        )
+        out_dir = project_dir / "out"
+        (out_dir / "docs" / "handoffs").mkdir(parents=True)
+        db.export_to_files(c, out_dir)
+        c.close()
+
+        state = json.loads(
+            (out_dir / "handoff-state.json").read_text()
+        )
+        assert state["roadmap_queue"] == "a,b,c"
+        assert state["roadmap_index"] == 1
+        assert "extra_json" not in state  # cleaned up
+
+    def test_no_state_file_when_no_state_row(self, project_dir):
+        c = db.connect(db_path=project_dir / "src.db")
+        db.upsert_cycle(c, "p", "plan", state="approved", round_=1,
+                        lead="L", reviewer="R", date="2026-05-01")
+        out_dir = project_dir / "out"
+        (out_dir / "docs" / "handoffs").mkdir(parents=True)
+        report = db.export_to_files(c, out_dir)
+        c.close()
+
+        assert report["state_written"] is False
+        assert not (out_dir / "handoff-state.json").exists()
