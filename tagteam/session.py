@@ -9,6 +9,7 @@ Supports three backends:
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import sys
@@ -332,9 +333,11 @@ def _print_session_usage() -> None:
     print("Usage: python -m tagteam session <command> [options]")
     print()
     print("Commands:")
-    print("  start   Create or describe an orchestration session")
-    print("  kill    Kill the managed tmux/iTerm2 session")
-    print("  attach  Attach to an existing tmux session")
+    print("  start       Create or describe an orchestration session")
+    print("  kill        Kill the managed tmux/iTerm2 session")
+    print("  attach      Attach to an existing tmux session")
+    print("  adopt       Register manually-opened iTerm2 tabs (iterm2 only)")
+    print("  list-iterm  List currently-open iTerm2 sessions and their IDs")
     print()
     print("Options:")
     print(
@@ -343,6 +346,98 @@ def _print_session_usage() -> None:
     )
     print("  --dir PATH                    Project directory (default: .)")
     print("  --no-launch                   Skip auto-starting agents")
+
+
+def _adopt_command(args: list[str], backend: str) -> int:
+    """Register manually-opened iTerm2 tabs as the watcher's panes.
+
+    Writes ``.handoff-session.json`` in the same shape as
+    ``session start --launch`` (so all existing consumers — watcher
+    auto-detect, get_session_id, _any_session_alive, server log-tail —
+    work unchanged).
+    """
+    if backend != "iterm2":
+        print("'session adopt' is only supported for the iterm2 backend.")
+        return 1
+
+    lead_id = None
+    reviewer_id = None
+    watcher_id = None
+    project_dir = "."
+    force = False
+
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--lead" and i + 1 < len(args):
+            lead_id = args[i + 1]; i += 2
+        elif a == "--reviewer" and i + 1 < len(args):
+            reviewer_id = args[i + 1]; i += 2
+        elif a == "--watcher" and i + 1 < len(args):
+            watcher_id = args[i + 1]; i += 2
+        elif a == "--dir" and i + 1 < len(args):
+            project_dir = args[i + 1]; i += 2
+        elif a == "--force":
+            force = True; i += 1
+        elif a in ("-h", "--help"):
+            print("Usage: tagteam session adopt --lead <unique-id>"
+                  " [--reviewer <id>] [--watcher <id>] [--force]")
+            print()
+            print("Register iTerm2 tabs you opened manually so the watcher")
+            print("can send-keys to them. Use `tagteam session list-iterm`")
+            print("to discover the unique IDs of currently-open sessions.")
+            return 0
+        else:
+            print(f"Unknown arg: {a}")
+            return 1
+
+    if not lead_id:
+        print("--lead is required.")
+        return 1
+
+    from tagteam.iterm import session_id_is_valid
+
+    for role, sid in [("lead", lead_id), ("watcher", watcher_id),
+                      ("reviewer", reviewer_id)]:
+        if sid and not session_id_is_valid(sid):
+            print(f"ERROR: {role} session id {sid!r}"
+                  " is not a live iTerm2 session.")
+            return 1
+
+    path = Path(project_dir) / ".handoff-session.json"
+    if path.exists() and not force:
+        print(f"{path} already exists. Pass --force to overwrite.")
+        return 1
+
+    tabs = {"lead": {"session_id": lead_id}}
+    if watcher_id:
+        tabs["watcher"] = {"session_id": watcher_id}
+    if reviewer_id:
+        tabs["reviewer"] = {"session_id": reviewer_id}
+
+    payload = {"backend": "iterm2", "tabs": tabs}
+    path.write_text(json.dumps(payload, indent=2))
+    print(f"Adopted iTerm2 sessions into {path}")
+    for role, info in tabs.items():
+        print(f"  {role}: {info['session_id']}")
+    return 0
+
+
+def _list_iterm_command() -> int:
+    """List currently-open iTerm2 sessions and their unique IDs."""
+    from tagteam.iterm import list_iterm_sessions
+
+    sessions = list_iterm_sessions()
+    if not sessions:
+        print("No iTerm2 sessions found (is iTerm2 running?)")
+        return 1
+
+    print(f"{'unique-id':<40} {'tab-title':<30} window")
+    print("-" * 80)
+    for s in sessions:
+        print(f"{s['unique_id']:<40} {s['tab_title']:<30}"
+              f" {s['window_id']}")
+    return 0
 
 
 def session_command(args: list[str]) -> int:
@@ -407,6 +502,12 @@ def session_command(args: list[str]) -> int:
             return 1
         subprocess.run(["tmux", "attach", "-t", SESSION_NAME])
         return 0
+
+    if subcmd == "adopt":
+        return _adopt_command(remaining[1:], effective_backend)
+
+    if subcmd == "list-iterm":
+        return _list_iterm_command()
 
     if subcmd == "kill":
         if effective_backend == "iterm2":

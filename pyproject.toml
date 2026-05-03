@@ -25,6 +25,7 @@ classifiers = [
 
 [project.optional-dependencies]
 tui = ["textual>=1.0.0"]
+event = ["watchdog>=3.0"]
 
 [project.scripts]
 tagteam = "tagteam.cli:main"

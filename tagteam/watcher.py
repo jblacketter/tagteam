@@ -430,6 +430,327 @@ def _parse_timestamp(value: str | None) -> datetime | None:
     return parsed
 
 
+class _StateProcessor:
+    """Encapsulates per-tick processing logic for the watcher.
+
+    A single instance is reused across all loop iterations so it carries
+    the small bit of mutable state the loop needs (last seq, idle/send
+    timing). Both the polling loop and the future event-driven loop call
+    the same `tick()` method, ensuring identical behavior regardless of
+    what triggered the tick.
+    """
+
+    RESEND_TIMEOUT = 300  # seconds — re-send command if still 'ready'
+
+    def __init__(
+        self,
+        *,
+        mode: str,
+        lead_name: str,
+        reviewer_name: str,
+        lead_pane: str,
+        reviewer_pane: str,
+        lead_session_id: str | None,
+        reviewer_session_id: str | None,
+        confirm: bool,
+        timeout_minutes: int,
+        project_dir: str,
+        max_retries: int,
+        retry_delay: float,
+        pre_send_delay: float,
+    ):
+        self.mode = mode
+        self.lead_name = lead_name
+        self.reviewer_name = reviewer_name
+        self.lead_pane = lead_pane
+        self.reviewer_pane = reviewer_pane
+        self.lead_session_id = lead_session_id
+        self.reviewer_session_id = reviewer_session_id
+        self.confirm = confirm
+        self.timeout_minutes = timeout_minutes
+        self.project_dir = project_dir
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
+        self.pre_send_delay = pre_send_delay
+
+        self.last_processed_seq: int | None = None
+        self.last_processed_at: str | None = None
+        self.idle_since: float = time.time()
+        self.last_ready_send_time: float | None = None
+
+    def try_repair(self) -> None:
+        """Opportunistic shadow-DB repair, bounded by repair's own backoff."""
+        try:
+            from tagteam import repair as _repair
+            if _repair.should_attempt_repair(self.project_dir):
+                res = _repair.attempt_repair(self.project_dir)
+                if res["success"]:
+                    _log("[repair] db_invalid cleared after successful "
+                         "rebuild + parity check")
+                else:
+                    if _repair.needs_louder_signal(self.project_dir):
+                        _log(f"[repair] WARN: db_invalid set for >24h "
+                             f"without recovery (last reason: "
+                             f"{res.get('reason')})")
+        except Exception as e:
+            _log(f"[repair] error during opportunistic repair: {e}")
+
+    def tick(self, state: dict) -> None:
+        """Process one state observation. No-op if seq hasn't advanced
+        (unless the watchdog re-send window has elapsed)."""
+        current_seq = state.get("seq", 0)
+        updated_at = state.get("updated_at") or "__missing__"
+
+        # First-poll bootstrap: if the existing state isn't actionable,
+        # just record and wait. If it IS actionable (ready), pick it up.
+        if self.last_processed_seq is None:
+            if state.get("status") != "ready":
+                self.last_processed_seq = current_seq
+                self.last_processed_at = updated_at
+                self.idle_since = time.time()
+                _log(f"Current state: {state.get('status', '?')}"
+                     f" (turn: {state.get('turn', '?')},"
+                     f" phase: {state.get('phase', '?')})")
+                return
+            _log("Picking up active turn from existing state")
+
+        # Seq dedup with stuck-agent + watchdog re-send logic
+        if current_seq == self.last_processed_seq:
+            elapsed = time.time() - self.idle_since
+            if (elapsed > self.timeout_minutes * 60
+                    and state.get("status") == "working"):
+                _log(f"Warning: no state change for {self.timeout_minutes}m"
+                     " - agent may be stuck")
+                notify_macos("Tagteam",
+                             f"No activity for {self.timeout_minutes}m")
+                self.idle_since = time.time()
+
+            if (state.get("status") == "ready"
+                    and self.last_ready_send_time is not None
+                    and (time.time() - self.last_ready_send_time
+                         > self.RESEND_TIMEOUT)):
+                _log("Watchdog: state still 'ready' after 5m"
+                     " — re-sending command")
+                self.last_ready_send_time = None  # avoid rapid re-sends
+                # fall through to re-process
+            else:
+                return
+
+        # New state (or watchdog re-send) — record and dispatch
+        self.last_processed_seq = current_seq
+        self.last_processed_at = updated_at
+        self.idle_since = time.time()
+        self._dispatch(state)
+
+    def _dispatch(self, state: dict) -> None:
+        current_status = state.get("status")
+        current_turn = state.get("turn")
+        command = state.get("command", "")
+        phase = state.get("phase", "?")
+        round_num = state.get("round", "?")
+
+        agent_name = (self.lead_name if current_turn == "lead"
+                      else self.reviewer_name)
+        pane = self.lead_pane if current_turn == "lead" else self.reviewer_pane
+        session_id = (self.lead_session_id if current_turn == "lead"
+                      else self.reviewer_session_id)
+
+        if current_status == "ready" and command:
+            self._handle_ready(agent_name, pane, session_id,
+                               command, phase, round_num)
+        elif current_status == "working":
+            _log(f"   {agent_name} is working...")
+        elif current_status == "done":
+            self._handle_done(state)
+        elif current_status == "escalated":
+            self._handle_escalated(state)
+        elif current_status == "aborted":
+            reason = state.get("reason", "unknown")
+            _log(f"-- Cycle aborted: {reason}")
+            notify_macos("Tagteam", f"Cycle aborted: {reason}")
+
+    def _handle_ready(self, agent_name, pane, session_id,
+                      command, phase, round_num):
+        _log(f">> {agent_name}'s turn"
+             f" (phase: {phase}, round: {round_num})")
+        send_success = False
+
+        if self.mode == "iterm2":
+            if self.confirm:
+                try:
+                    input(f"[{_ts()}]    Press Enter to send"
+                          f" '{command}' to {agent_name}...")
+                except EOFError:
+                    return
+            send_success = send_iterm_command(
+                session_id, command,
+                max_retries=self.max_retries,
+                retry_delay=self.retry_delay,
+            )
+            if send_success:
+                _log(f"   Sent to {agent_name}: {command}")
+            else:
+                _log(f"   FAILED: Could not send to"
+                     f" {agent_name} after {self.max_retries} attempts")
+                notify_macos("Tagteam", f"Failed to send to {agent_name}")
+
+        elif self.mode == "tmux":
+            if self.confirm:
+                try:
+                    input(f"[{_ts()}]    Press Enter to send"
+                          f" '{command}' to {pane}...")
+                except EOFError:
+                    return
+            send_success = send_tmux_keys(
+                pane, command,
+                max_retries=self.max_retries,
+                retry_delay=self.retry_delay,
+                pre_send_delay=self.pre_send_delay,
+            )
+            if send_success:
+                _log(f"   Sent to {pane}: {command}")
+            else:
+                _log(f"   FAILED: Could not send to '{pane}'"
+                     f" after {self.max_retries} attempts")
+                notify_macos("Tagteam",
+                             f"Failed to send to {pane} after retries")
+
+        elif self.mode == "notify":
+            send_success = True
+            _log(f"   Command: {command}")
+            notify_macos("Tagteam", f"{agent_name}'s turn: {command}")
+
+        # Track send time for watchdog re-send (success OR failure;
+        # failure also gets a retry window via watchdog).
+        self.last_ready_send_time = time.time()
+
+    def _handle_done(self, state: dict) -> None:
+        result = state.get("result", "completed")
+
+        advanced = _try_roadmap_advance(state, self.project_dir)
+        if advanced:
+            self.last_processed_at = None
+            self.idle_since = time.time()
+            return
+
+        done_msg = "/handoff"
+        if result == "roadmap-complete":
+            _log("** Roadmap complete: all phases finished!")
+            notify_macos("Tagteam", "Roadmap complete!")
+        else:
+            _log(f"** Cycle complete: {result}")
+            notify_macos("Tagteam", f"Cycle complete: {result}")
+
+        _log(f"   Sending completion notice to {self.lead_name}...")
+        if self.mode == "iterm2":
+            send_iterm_command(
+                self.lead_session_id, done_msg,
+                max_retries=self.max_retries,
+                retry_delay=self.retry_delay,
+            )
+        elif self.mode == "tmux":
+            send_tmux_keys(
+                self.lead_pane, done_msg,
+                max_retries=self.max_retries,
+                retry_delay=self.retry_delay,
+                pre_send_delay=self.pre_send_delay,
+            )
+
+    def _handle_escalated(self, state: dict) -> None:
+        roadmap = state.get("roadmap") or {}
+        pause_reason = roadmap.get("pause_reason") or state.get("reason")
+        if pause_reason:
+            _log(f"!! Paused: {pause_reason}")
+            _log("   Resume with: python -m tagteam state set"
+                 " --status ready --turn <lead|reviewer>")
+            notify_macos("Tagteam", f"Paused: {pause_reason}")
+        else:
+            _log("!! Escalated to human arbiter")
+            notify_macos("Tagteam", "Escalated to human arbiter!")
+
+
+def _build_processor(
+    *,
+    mode: str,
+    lead_pane: str,
+    reviewer_pane: str,
+    confirm: bool,
+    timeout_minutes: int,
+    project_dir: str,
+    max_retries: int,
+    retry_delay: float,
+    pre_send_delay: float,
+) -> _StateProcessor | None:
+    """Resolve config + iTerm session IDs into a ready processor.
+
+    Returns None if iterm2 mode is requested but session IDs are missing
+    (caller should bail out — error already logged here).
+    """
+    config_path = Path(project_dir) / "tagteam.yaml"
+    config = read_config(config_path)
+    if config:
+        lead_name, reviewer_name = get_agent_names(config)
+        lead_name = lead_name or "lead"
+        reviewer_name = reviewer_name or "reviewer"
+    else:
+        lead_name = "lead"
+        reviewer_name = "reviewer"
+
+    lead_session_id = None
+    reviewer_session_id = None
+    if mode == "iterm2":
+        from tagteam.iterm import get_session_id
+        lead_session_id = get_session_id("lead", project_dir)
+        reviewer_session_id = get_session_id("reviewer", project_dir)
+        if not lead_session_id or not reviewer_session_id:
+            _log("ERROR: Could not find session IDs in .handoff-session.json")
+            _log("  Run 'python -m tagteam session start' first.")
+            return None
+
+    return _StateProcessor(
+        mode=mode,
+        lead_name=lead_name,
+        reviewer_name=reviewer_name,
+        lead_pane=lead_pane,
+        reviewer_pane=reviewer_pane,
+        lead_session_id=lead_session_id,
+        reviewer_session_id=reviewer_session_id,
+        confirm=confirm,
+        timeout_minutes=timeout_minutes,
+        project_dir=project_dir,
+        max_retries=max_retries,
+        retry_delay=retry_delay,
+        pre_send_delay=pre_send_delay,
+    )
+
+
+def _log_startup_banner(processor: _StateProcessor, interval: int) -> None:
+    _log(f"Watching handoff-state.json"
+         f" (interval: {interval}s, mode: {processor.mode})")
+    _log(f"Lead: {processor.lead_name} | Reviewer: {processor.reviewer_name}")
+    if processor.mode == "tmux":
+        _log(f"Panes: lead={processor.lead_pane},"
+             f" reviewer={processor.reviewer_pane}")
+        for name, pane in [("lead", processor.lead_pane),
+                           ("reviewer", processor.reviewer_pane)]:
+            if pane_exists(pane):
+                _log(f"  {name} pane OK: {pane}")
+            else:
+                _log(f"  WARNING: {name} pane '{pane}' not found")
+    elif processor.mode == "iterm2":
+        from tagteam.iterm import session_id_is_valid
+        for name, sid in [("lead", processor.lead_session_id),
+                          ("reviewer", processor.reviewer_session_id)]:
+            if session_id_is_valid(sid):
+                _log(f"  {name} session OK: {sid}")
+            else:
+                _log(f"  WARNING: {name} session '{sid}'"
+                     " not found in iTerm2")
+    if processor.confirm:
+        _log("Confirm mode: will pause before sending commands")
+    print(flush=True)
+
+
 def watch(
     interval: int = 10,
     mode: str = "notify",
@@ -441,273 +762,93 @@ def watch(
     max_retries: int = 3,
     retry_delay: float = 2.0,
     pre_send_delay: float = 1.0,
+    force_poll: bool = False,
 ) -> None:
-    """Main watch loop. Blocks until interrupted with Ctrl-C."""
+    """Main watch loop. Blocks until interrupted with Ctrl-C.
 
-    config_path = Path(project_dir) / "tagteam.yaml"
-    config = read_config(config_path)
-    if config:
-        lead_name, reviewer_name = get_agent_names(config)
-        lead_name = lead_name or "lead"
-        reviewer_name = reviewer_name or "reviewer"
+    Delegates per-tick work to _StateProcessor. Trigger source is either
+    polling (default fallback when ``watchdog`` isn't installed, or when
+    ``force_poll=True``) or watchdog filesystem events (when available).
+    """
+    processor = _build_processor(
+        mode=mode,
+        lead_pane=lead_pane,
+        reviewer_pane=reviewer_pane,
+        confirm=confirm,
+        timeout_minutes=timeout_minutes,
+        project_dir=project_dir,
+        max_retries=max_retries,
+        retry_delay=retry_delay,
+        pre_send_delay=pre_send_delay,
+    )
+    if processor is None:
+        return
+
+    _log_startup_banner(processor, interval)
+
+    if not force_poll:
+        from tagteam import watcher_events
+        if watcher_events.is_available():
+            _log("[trigger] event-driven (watchdog) with 30s heartbeat")
+            if _run_event_loop(processor, project_dir):
+                return
+            # Event loop failed at startup — fall through to poll mode.
+            _log(f"[trigger] falling back to poll mode"
+                 f" (interval={interval}s)")
+        else:
+            _log("[trigger] poll mode (install `tagteam[event]`"
+                 " to enable event-driven mode)")
     else:
-        lead_name = "lead"
-        reviewer_name = "reviewer"
+        _log(f"[trigger] poll mode (forced via --poll, interval={interval}s)")
 
-    # For iterm2 mode, discover session IDs from .handoff-session.json
-    lead_session_id = None
-    reviewer_session_id = None
-    if mode == "iterm2":
-        from tagteam.iterm import get_session_id, session_id_is_valid
-        lead_session_id = get_session_id("lead", project_dir)
-        reviewer_session_id = get_session_id("reviewer", project_dir)
-        if not lead_session_id or not reviewer_session_id:
-            _log("ERROR: Could not find session IDs in .handoff-session.json")
-            _log("  Run 'python -m tagteam session start' first.")
-            return
+    _run_poll_loop(processor, project_dir, interval)
 
-    _log(f"Watching handoff-state.json (interval: {interval}s, mode: {mode})")
-    _log(f"Lead: {lead_name} | Reviewer: {reviewer_name}")
-    if mode == "tmux":
-        _log(f"Panes: lead={lead_pane}, reviewer={reviewer_pane}")
-        # Verify panes exist at startup
-        for name, pane in [("lead", lead_pane), ("reviewer", reviewer_pane)]:
-            if pane_exists(pane):
-                _log(f"  {name} pane OK: {pane}")
-            else:
-                _log(f"  WARNING: {name} pane '{pane}' not found")
-    elif mode == "iterm2":
-        for name, sid in [("lead", lead_session_id), ("reviewer", reviewer_session_id)]:
-            if session_id_is_valid(sid):
-                _log(f"  {name} session OK: {sid}")
-            else:
-                _log(f"  WARNING: {name} session '{sid}' not found in iTerm2")
-    if confirm:
-        _log("Confirm mode: will pause before sending commands")
-    print(flush=True)
 
-    last_processed_seq = None
-    last_processed_at = None
-    idle_since = time.time()
-    last_ready_send_time = None  # tracks when we last sent a ready command
-    RESEND_TIMEOUT = 300  # re-send after 5 min if state still ready
-
+def _run_poll_loop(processor: "_StateProcessor",
+                   project_dir: str, interval: int) -> None:
     try:
         while True:
-            # Phase 28 Step A: opportunistic repair attempt. If the
-            # shadow DB is marked invalid and backoff allows, try to
-            # repair on this tick. Capped by repair's own bounded
-            # backoff schedule, so even with aggressive watcher
-            # intervals this won't retry-storm. The 24h louder-signal
-            # threshold escalates to a WARN log line.
-            try:
-                from tagteam import repair as _repair
-                if _repair.should_attempt_repair(project_dir):
-                    res = _repair.attempt_repair(project_dir)
-                    if res["success"]:
-                        _log("[repair] db_invalid cleared after successful "
-                             "rebuild + parity check")
-                    else:
-                        # Failure was already logged with a backoff
-                        # entry inside attempt_repair; don't double-log
-                        # at INFO. But surface louder if we're past
-                        # the 24h threshold.
-                        if _repair.needs_louder_signal(project_dir):
-                            _log(f"[repair] WARN: db_invalid set for >24h "
-                                 f"without recovery (last reason: "
-                                 f"{res.get('reason')})")
-            except Exception as e:
-                # Watcher must keep running even if repair plumbing
-                # itself glitches.
-                _log(f"[repair] error during opportunistic repair: {e}")
-
+            processor.try_repair()
             state = read_state(project_dir)
-
-            if state is None:
-                time.sleep(interval)
-                continue
-
-            current_seq = state.get("seq", 0)
-            updated_at_raw = state.get("updated_at")
-            updated_at = updated_at_raw or "__missing__"
-
-            # On first poll: process current state if it's actionable (ready).
-            # This ensures a watcher restart mid-cycle picks up the active turn.
-            if last_processed_seq is None:
-                if state.get("status") != "ready":
-                    # Not actionable — just record and wait for changes
-                    last_processed_seq = current_seq
-                    last_processed_at = updated_at
-                    idle_since = time.time()
-                    _log(f"Current state: {state.get('status', '?')}"
-                         f" (turn: {state.get('turn', '?')},"
-                         f" phase: {state.get('phase', '?')})")
-                    time.sleep(interval)
-                    continue
-                # State is ready — fall through to process it
-                _log("Picking up active turn from existing state")
-
-            # Use seq as primary change detector (monotonic, no timestamp collision)
-            if current_seq == last_processed_seq:
-                # Check for stuck agent (working too long)
-                elapsed = time.time() - idle_since
-                if (elapsed > timeout_minutes * 60
-                        and state.get("status") == "working"):
-                    _log(f"Warning: no state change for {timeout_minutes}m"
-                         " - agent may be stuck")
-                    notify_macos("Tagteam", f"No activity for {timeout_minutes}m")
-                    idle_since = time.time()  # avoid spamming
-
-                # Re-send watchdog: if state is still ready and we sent a
-                # command a while ago, the agent may not have received it
-                if (state.get("status") == "ready"
-                        and last_ready_send_time is not None
-                        and time.time() - last_ready_send_time > RESEND_TIMEOUT):
-                    _log("Watchdog: state still 'ready' after 5m — re-sending command")
-                    # Fall through to re-process this state
-                    last_ready_send_time = None  # reset to avoid rapid re-sends
-                else:
-                    time.sleep(interval)
-                    continue
-
-            # New state change detected (or watchdog re-send)
-            last_processed_seq = current_seq
-            last_processed_at = updated_at
-            idle_since = time.time()
-
-            current_status = state.get("status")
-            current_turn = state.get("turn")
-            command = state.get("command", "")
-            phase = state.get("phase", "?")
-            round_num = state.get("round", "?")
-
-            agent_name = lead_name if current_turn == "lead" else reviewer_name
-            pane = lead_pane if current_turn == "lead" else reviewer_pane
-            session_id = (lead_session_id if current_turn == "lead"
-                          else reviewer_session_id)
-
-            if current_status == "ready" and command:
-                _log(f">> {agent_name}'s turn"
-                     f" (phase: {phase}, round: {round_num})")
-
-                send_success = False
-
-                if mode == "iterm2":
-                    if confirm:
-                        try:
-                            input(f"[{_ts()}]    Press Enter to send"
-                                  f" '{command}' to {agent_name}...")
-                        except EOFError:
-                            break
-                    send_success = send_iterm_command(
-                        session_id, command,
-                        max_retries=max_retries,
-                        retry_delay=retry_delay,
-                    )
-                    if send_success:
-                        _log(f"   Sent to {agent_name}: {command}")
-                    else:
-                        _log(f"   FAILED: Could not send to"
-                             f" {agent_name} after {max_retries} attempts")
-                        notify_macos("Tagteam",
-                                     f"Failed to send to {agent_name}")
-
-                elif mode == "tmux":
-                    if confirm:
-                        try:
-                            input(f"[{_ts()}]    Press Enter to send"
-                                  f" '{command}' to {pane}...")
-                        except EOFError:
-                            break
-                    send_success = send_tmux_keys(
-                        pane, command,
-                        max_retries=max_retries,
-                        retry_delay=retry_delay,
-                        pre_send_delay=pre_send_delay,
-                    )
-                    if send_success:
-                        _log(f"   Sent to {pane}: {command}")
-                    else:
-                        _log(f"   FAILED: Could not send to"
-                             f" '{pane}' after {max_retries} attempts")
-                        notify_macos("Tagteam",
-                                     f"Failed to send to {pane} after retries")
-
-                elif mode == "notify":
-                    send_success = True
-                    _log(f"   Command: {command}")
-                    notify_macos("Tagteam",
-                                 f"{agent_name}'s turn: {command}")
-
-                # Track send time for watchdog re-send
-                if send_success:
-                    last_ready_send_time = time.time()
-                else:
-                    # Failed send — set time so watchdog will retry later
-                    last_ready_send_time = time.time()
-
-            elif current_status == "working":
-                _log(f"   {agent_name} is working...")
-
-            elif current_status == "done":
-                result = state.get("result", "completed")
-
-                # In full-roadmap mode, try to auto-advance
-                advanced = _try_roadmap_advance(state, project_dir)
-                if advanced:
-                    # State was updated — reset tracking so next poll
-                    # picks up the new "ready" state
-                    last_processed_at = None
-                    idle_since = time.time()
-                    continue
-
-                # Notify lead agent so it knows the cycle finished
-                done_msg = "/handoff"
-                if result == "roadmap-complete":
-                    _log("** Roadmap complete: all phases finished!")
-                    notify_macos("Tagteam", "Roadmap complete!")
-                else:
-                    _log(f"** Cycle complete: {result}")
-                    notify_macos("Tagteam", f"Cycle complete: {result}")
-
-                _log(f"   Sending completion notice to {lead_name}...")
-                if mode == "iterm2":
-                    send_iterm_command(
-                        lead_session_id, done_msg,
-                        max_retries=max_retries,
-                        retry_delay=retry_delay,
-                    )
-                elif mode == "tmux":
-                    send_tmux_keys(
-                        lead_pane, done_msg,
-                        max_retries=max_retries,
-                        retry_delay=retry_delay,
-                        pre_send_delay=pre_send_delay,
-                    )
-
-            elif current_status == "escalated":
-                # Show structured reason if available
-                roadmap = state.get("roadmap") or {}
-                pause_reason = roadmap.get("pause_reason") or state.get("reason")
-                if pause_reason:
-                    _log(f"!! Paused: {pause_reason}")
-                    _log("   Resume with: python -m tagteam state set"
-                         " --status ready --turn <lead|reviewer>")
-                    notify_macos("Tagteam",
-                                 f"Paused: {pause_reason}")
-                else:
-                    _log("!! Escalated to human arbiter")
-                    notify_macos("Tagteam", "Escalated to human arbiter!")
-
-            elif current_status == "aborted":
-                reason = state.get("reason", "unknown")
-                _log(f"-- Cycle aborted: {reason}")
-                notify_macos("Tagteam", f"Cycle aborted: {reason}")
-
+            if state is not None:
+                processor.tick(state)
             time.sleep(interval)
-
     except KeyboardInterrupt:
         _log("Watcher stopped.")
+
+
+def _run_event_loop(processor: "_StateProcessor", project_dir: str) -> bool:
+    """Run the event-driven loop. Returns True on clean exit (Ctrl-C),
+    False if the watchdog observer failed to start (caller should fall
+    back to poll mode).
+
+    Filesystem-event backends can fail at runtime even when watchdog
+    imports cleanly — for example macOS FSEvents can raise
+    ``SystemError: Cannot start fsevents stream`` on certain volumes,
+    and inotify can hit ``OSError(ENOSPC)`` when the user's
+    inotify-watch quota is exhausted. In those cases we log the reason
+    and let watch() drop back to polling so the watcher keeps running.
+    """
+    from tagteam import watcher_events
+
+    state_path = get_state_path(project_dir)
+
+    def on_change():
+        processor.try_repair()
+        state = read_state(project_dir)
+        if state is not None:
+            processor.tick(state)
+
+    try:
+        watcher_events.watch_with_events(state_path, on_change)
+    except KeyboardInterrupt:
+        _log("Watcher stopped.")
+        return True
+    except Exception as e:
+        _log(f"[trigger] event mode failed:"
+             f" {type(e).__name__}: {e}")
+        return False
+    return True
 
 
 # --- CLI entry point ---
@@ -762,6 +903,7 @@ def watch_command(args: list[str]) -> int:
     max_retries = 3
     retry_delay = 2.0
     pre_send_delay = 1.0
+    force_poll = False
 
     i = 0
     while i < len(args):
@@ -796,6 +938,9 @@ def watch_command(args: list[str]) -> int:
         elif arg == "--send-delay" and i + 1 < len(args):
             pre_send_delay = float(args[i + 1])
             i += 2
+        elif arg == "--poll":
+            force_poll = True
+            i += 1
         elif arg in ("-h", "--help"):
             print("Usage: python -m tagteam watch [options]")
             print()
@@ -810,6 +955,7 @@ def watch_command(args: list[str]) -> int:
             print("  --retries N        Max send retries on failure (default: 3)")
             print("  --retry-delay N    Seconds between retries (default: 2.0)")
             print("  --send-delay N     Seconds to wait before sending (default: 1.0)")
+            print("  --poll             Force polling mode (skip watchdog event detection)")
             return 0
         else:
             print(f"Unknown argument: {arg}")
@@ -829,5 +975,6 @@ def watch_command(args: list[str]) -> int:
         max_retries=max_retries,
         retry_delay=retry_delay,
         pre_send_delay=pre_send_delay,
+        force_poll=force_poll,
     )
     return 0

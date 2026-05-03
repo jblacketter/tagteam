@@ -228,14 +228,20 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 - **Source:** `docs/tagteam-2.0-proposal.md` §8 Phase C
 
 ### Phase 23: Per-round files (optional, defer if 20–22 suffice)
-- **Status:** Not started — defer pending experiment
-- **Description:** Split each round into its own file instead of an append-only JSONL. Only worth doing if 20–22 don't sufficiently shrink per-turn token cost. §9 of the proposal flags this as needing a small experiment first to verify the prompt-cache-not-shared assumption.
+- **Status:** Deferred (2026-05-03) — superseded by `--tail N` follow-up. See `docs/phases/per-round-files-experiment-findings.md` for the experiment writeup.
+- **Description:** Original scope was to split each round into its own file. Token experiment on the rankr corpus (cl100k_base) showed savings come entirely from query shape, not storage shape — Phase 28's SQLite store already covers the storage side. Recommended follow-up: a `tagteam cycle rounds --tail N` flag (small CLI change). Per-round file splitting itself is not worth the complexity.
 - **Source:** `docs/tagteam-2.0-proposal.md` §8 Phase D
 
 ### Phase 24: Event-driven watcher (optional polish)
-- **Status:** Not started
-- **Description:** Replace the polling loop in `watcher.py` with `watchdog`/`fswatch` filesystem events. Cuts idle CPU and tightens turn-flip latency. Inspired by ax-platform.com's `messages(wait=true, wait_mode=mentions)` blocking pattern.
-- **Source:** `docs/tagteam-2.0-proposal.md` §8 Phase E
+- **Status:** Complete (2026-05-03) — shipped via `polish-pack-watcher-tokens-adopt`.
+- **What shipped:**
+  - `_StateProcessor` extracted from `watch()` so polling and event triggers share one processing path.
+  - `tagteam/watcher_events.py` wrapping `watchdog.observers.Observer`, subscribed to `on_modified` + `on_created` + `on_moved` (atomic-rename of `.handoff-state.tmp` → `handoff-state.json` surfaces as a move on most backends).
+  - 30s heartbeat as safety net for missed events on broken filesystems / NFS.
+  - Runtime-failure fallback: if the observer raises (e.g. macOS FSEvents `SystemError: Cannot start fsevents stream`, or inotify `OSError(ENOSPC)`), the watcher logs the reason and drops back to poll mode instead of exiting.
+  - `--poll` flag forces legacy polling for debugging.
+  - `[event]` extras group in `pyproject.toml` (`pip install tagteam[event]` to enable; base install stays poll-only).
+- **Source:** `docs/tagteam-2.0-proposal.md` §8 Phase E; `docs/phases/polish-pack-watcher-tokens-adopt.md`
 
 ### Phase 25: Drift / out-of-sync audit — ABSORBED BY PHASE 28
 - **Status:** Absorbed — see Phase 28 / `docs/phases/sqlite-spike-findings.md`
@@ -285,7 +291,17 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
   - `tagteam watch` CLI: when `--mode` is not explicitly given, calls `_auto_detect_mode` and logs the picked mode + reason on startup.
   - 6 new tests in `tests/test_watcher_auto_detect.py` covering each mode-detection branch + graceful fallback when `session_exists()` raises.
 - **Final scope:** ~50 lines + tests, one session. Smaller than the original 50–80 estimate because the underlying send-keys plumbing was already done.
-- **Followup discovered, not done:** if you manually open iTerm tabs (instead of letting `session start --launch` create them), there's no way to register them as the watcher's lead/reviewer panes after-the-fact. Would need a `tagteam session adopt --lead <session-id> --reviewer <session-id>` command, or auto-detection by working directory + agent process. Backlog candidate.
+- **Followup discovered, not done:** if you manually open iTerm tabs (instead of letting `session start --launch` create them), there's no way to register them as the watcher's lead/reviewer panes after-the-fact. → Shipped as Phase 30 below.
+
+### Phase 30: Session adopt for manually-opened iTerm tabs
+- **Status:** Complete (2026-05-03) — shipped via `polish-pack-watcher-tokens-adopt`.
+- **What shipped:**
+  - `tagteam session adopt --lead <unique-id> [--reviewer <id>] [--watcher <id>] [--force]` writes `.handoff-session.json` in the same `{"backend": "iterm2", "tabs": {role: {"session_id": id}}}` schema that `session start --launch` produces, so all existing consumers (`get_session_id`, `_any_session_alive`, watcher auto-detect, `state diagnose`, server log-tail) work unchanged.
+  - `tagteam session list-iterm` lists currently-open iTerm2 sessions so users can discover the unique IDs to pass to `adopt`.
+  - Reuses the existing `iterm.session_id_is_valid()` helper for liveness checking — no parallel validator.
+  - 11 new tests including a `test_watcher_auto_detect_picks_iterm2_after_adopt` regression guard that closes the Phase 29 → adopt loop.
+- **Origin:** Phase 29 followup discovered while wiring up the live two-agent loop on this repo.
+- **Phase Plan:** `docs/phases/polish-pack-watcher-tokens-adopt.md` (Sub-phase C)
 
 ## Backlog
 

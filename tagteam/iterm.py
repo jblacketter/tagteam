@@ -368,6 +368,47 @@ def session_id_is_valid(session_id: str) -> bool:
         return False
 
 
+def list_iterm_sessions() -> list[dict]:
+    """Return a list of currently-open iTerm2 sessions.
+
+    Each entry: ``{"unique_id": ..., "tab_title": ..., "window_id": ...}``.
+    The ``unique_id`` values are exactly what ``session_id_is_valid`` and
+    ``session adopt`` accept — the same scripting term ``unique ID``.
+    """
+    script = '''
+    tell application "iTerm2"
+      set out to ""
+      repeat with w in windows
+        repeat with t in tabs of w
+          repeat with s in sessions of t
+            set out to out & (unique ID of s) & "|" & (name of t) & "|" & (id of w) & linefeed
+          end repeat
+        end repeat
+      end repeat
+      return out
+    end tell
+    '''
+    try:
+        raw = _osascript(script)
+    except Exception:
+        return []
+
+    out = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split("|", 2)
+        if len(parts) != 3:
+            continue
+        out.append({
+            "unique_id": parts[0],
+            "tab_title": parts[1],
+            "window_id": parts[2],
+        })
+    return out
+
+
 def get_session_id(role: str, project_dir: str) -> str | None:
     """Read a session ID for a role from .handoff-session.json."""
     data = _read_session_file(project_dir)
