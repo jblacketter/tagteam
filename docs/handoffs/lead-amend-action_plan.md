@@ -1,0 +1,76 @@
+# Plan Review Cycle: lead-amend-action
+
+- **Phase:** lead-amend-action
+- **Type:** plan
+- **Date:** 2026-04-30
+- **Lead:** Claude
+- **Reviewer:** Codex
+
+## Round 1
+
+### Lead
+
+**Action:** SUBMIT_FOR_REVIEW
+
+Initial plan submitted. Fixes Issue #5 from docs/handoff-cycle-issues-2026-04-24.md (no lead-side mid-review amendment path). Adds an AMEND action: lead-only, mid-review-only (state=in-progress + ready_for=reviewer), no round bump, no state transition, excluded from stale-round detection, no top-level state write (so the watcher stays silent — reviewer sees the amendment on their next /handoff). parser.parse_jsonl_rounds() gains a lead_amendments field per round; SKILL.md gets a short mid-review-amendment paragraph in the lead-turn block. Seven new tests covering happy path, three precondition errors (wrong role, wrong cycle state, fall-through edge), no-auto-escalation under repeated AMENDs, parser shape, and CLI rounds output. Plan: docs/phases/lead-amend-action.md.
+
+### Reviewer
+
+**Action:** REQUEST_CHANGES
+
+Requested changes on two blocking issues:
+
+1. The plan says an `AMEND` entry must stay on the same round as the current submission, but the technical approach never enforces that. In the proposed branch, `add_round()` trusts the caller's `--round N`, so `tagteam cycle add --action AMEND --round 999 ...` would be accepted mid-review and create an orphan amendment on a fake future round while status stays at round 1. Please either validate `round_num == status["round"]` / latest `SUBMIT_FOR_REVIEW` round, or explicitly ignore the supplied round and pin the entry to the active round.
+
+2. The plan promises schema-stable `tagteam cycle rounds` output with `lead_amendments` present even when empty, but it only updates `parse_jsonl_rounds()`. `cycle rounds` still goes through `read_cycle_rounds()`, which can return legacy markdown data via `extract_all_rounds()`, and that path would continue omitting the field. Please cover the legacy parser path too (emit `lead_amendments: []` there as well), or narrow the contract if you intentionally want this to be JSONL-only.
+
+## Round 2
+
+### Lead
+
+**Action:** SUBMIT_FOR_REVIEW
+
+Round 2 — addressed both blocking concerns.
+
+Issue #1 (round-pinning gap). add_round()'s AMEND branch now validates that the caller's --round matches status['round']; mismatches raise ValueError with the active round in the message. Doesn't silently rewrite the round — surfaces caller bugs and keeps the JSONL audit trail truthful. New test #8 exercises a deliberate --round 999 mismatch against an active round 1 and asserts ValueError plus unchanged JSONL.
+
+Issue #2 (legacy parser path). read_cycle_rounds() now normalizes the schema before returning so consumers can rely on lead_amendments being present regardless of underlying format. extract_all_rounds() (legacy markdown) gets backfilled with empty lists; defensive setdefault on the JSONL path covers JSONL written before this phase. New test #9 seeds a legacy *_cycle.md, calls read_cycle_rounds, and asserts every round dict has lead_amendments == [].
+
+Tests grew from 7 to 9. Success criteria gained two bullets covering both fixes.
+
+Plan: docs/phases/lead-amend-action.md.
+
+### Reviewer
+
+**Action:** REQUEST_CHANGES
+
+Requested changes for one blocking issue:
+
+1. The `_cli_add()` section assumes invalid `AMEND` uses will already surface as a clean CLI exit-1 with just the error message, but the current implementation in `tagteam/cycle.py` does not catch `ValueError` around `add_round()`. As written, the new AMEND precondition / round-mismatch failures would raise out of the CLI and produce a traceback instead of the manual-verification behavior the plan promises ("exit 1 with the precondition message"). Please update the plan so `_cli_add()` explicitly handles `ValueError` for this action path, or narrow the acceptance criteria and manual expectations if you intentionally want raw tracebacks.
+
+## Round 3
+
+### Lead
+
+**Action:** SUBMIT_FOR_REVIEW
+
+Round 3 — addressed the blocking concern.
+
+CLI clean-error contract. The plan's _cli_add() section now explicitly states that the current implementation does NOT catch ValueError around add_round() (verified by inspection), so without a fix the new AMEND precondition and round-mismatch errors would surface as Python tracebacks. Added the technical approach: wrap add_round() inside _cli_add() with try/except ValueError that prints 'Error: <msg>' to stderr and returns 1. This also hardens against future drift on the existing ValueErrors raised inside add_round() (Invalid action / Invalid role) that today are only pre-empted by _cli_add()'s own pre-check.
+
+Added test #10 covering the contract: invokes cycle_command(['add', ..., '--role', 'reviewer', '--action', 'AMEND', ...]); asserts rc==1, stderr contains 'AMEND requires role=lead', stderr has no 'Traceback' string, and the JSONL is unchanged. Test count grew from 9 to 10. Success criteria gained a bullet for the CLI clean-error contract.
+
+Plan: docs/phases/lead-amend-action.md.
+
+### Reviewer
+
+**Action:** APPROVE
+
+Approved.
+
+---
+
+<!-- CYCLE_STATUS -->
+READY_FOR: None
+ROUND: 3
+STATE: approved

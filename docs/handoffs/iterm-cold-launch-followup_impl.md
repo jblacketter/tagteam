@@ -1,0 +1,47 @@
+# Implementation Review Cycle: iterm-cold-launch-followup
+
+- **Phase:** iterm-cold-launch-followup
+- **Type:** impl
+- **Date:** 2026-04-18
+- **Lead:** Claude
+- **Reviewer:** Codex
+
+## Round 1
+
+### Lead
+
+**Action:** SUBMIT_FOR_REVIEW
+
+Implemented per approved plan. Summary of changes:
+
+ai_handoff/iterm.py:
+- _ITERM_LAUNCH_TIMEOUT_S bumped 5.0 -> 10.0
+- New constant _ITERM_READY_PROBE = 'tell application "iTerm2" to count windows'
+- Renamed _ensure_iterm_running -> _ensure_iterm_ready. New body skips the process-existence poll; if iterm_is_running() is False, try to fire `launch` (RuntimeError swallowed intentionally — LaunchServices can still bring iTerm2 up via Dock/Spotlight/prior state, so we rely on the probe as the authoritative readiness signal). Then loop until monotonic deadline calling _osascript(_ITERM_READY_PROBE); any RuntimeError is stored and we sleep _ITERM_POLL_INTERVAL_S. On timeout, raise RuntimeError whose message embeds the last probe error.
+- create_session() updated to call _ensure_iterm_ready() at the one existing call site; its try/except RuntimeError catch and tmux/manual fallback messaging is unchanged.
+
+tests/test_iterm.py:
+- Updated import: _ensure_iterm_running -> _ensure_iterm_ready.
+- TestCreateSessionLaunch: three @patch decorators retargeted to _ensure_iterm_ready.
+- TestEnsureItermRunning renamed to TestEnsureItermReady. Old three tests (noop_when_already_running, launches_when_not_running, times_out) replaced with new probe-semantics tests: test_ensure_iterm_ready_returns_after_probe_succeeds (warm path, 1 probe call, asserts no launch), test_ensure_iterm_ready_launches_then_polls (cold path, 1 launch + 2 fail + 1 success = 4 calls, script-content checks), test_ensure_iterm_ready_times_out_on_probe_failure (monotonic mocked to short-circuit the loop, asserts match 'did not become ready' AND 'bad-probe' appears in the error message).
+- Three new tests added: test_ensure_iterm_ready_cold_path_retries_until_probe_compiles (exact 7-call sequence), test_ensure_iterm_ready_warm_path_retries_until_probe_compiles (exact 6-call sequence, no launch), test_ensure_iterm_ready_continues_when_launch_raises (launch raises, probe succeeds next call, helper returns without propagating the launch error).
+- test_create_session_catches_launch_failure kept (patch target updated to _ensure_iterm_ready).
+
+Test results: tests/test_iterm.py 33/33 pass. Full suite 266 passed, 3 skipped, 1 failure (test_stale_rounds_auto_escalate — documented pre-existing failure in cycle.py scope, not related to this phase).
+
+Manual verification is a human arbiter step: running `ai-handoff quickstart` from Terminal.app with iTerm2 fully quit is not runnable from inside this Claude session (it's hosted in iTerm2). User will run it after approval.
+
+No files outside iterm.py and test_iterm.py were touched.
+
+### Reviewer
+
+**Action:** APPROVE
+
+Approved.
+
+---
+
+<!-- CYCLE_STATUS -->
+READY_FOR: None
+ROUND: 1
+STATE: approved
