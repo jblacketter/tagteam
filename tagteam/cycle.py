@@ -91,6 +91,48 @@ def _rounds_path(phase: str, cycle_type: str, project_dir: str) -> Path:
     return _handoffs_dir(project_dir) / f"{phase}_{cycle_type}_rounds.jsonl"
 
 
+def _legacy_status_path(phase: str, cycle_type: str,
+                        project_dir: str) -> Path | None:
+    """Find a status JSON file: docs/handoffs/ first, then .tagteam/legacy/.
+
+    Returns None if neither location has the file. Used by readers and
+    parity checks that must keep working after `migrate --to-step-b`
+    moves files out of docs/handoffs/.
+    """
+    primary = _status_path(phase, cycle_type, project_dir)
+    if primary.exists():
+        return primary
+    legacy = (Path(_resolve(project_dir)) / ".tagteam" / "legacy"
+              / f"{phase}_{cycle_type}_status.json")
+    if legacy.exists():
+        return legacy
+    return None
+
+
+def _legacy_rounds_path(phase: str, cycle_type: str,
+                        project_dir: str) -> Path | None:
+    """Find a rounds JSONL file: docs/handoffs/ first, then .tagteam/legacy/.
+    Returns None if neither location has the file."""
+    primary = _rounds_path(phase, cycle_type, project_dir)
+    if primary.exists():
+        return primary
+    legacy = (Path(_resolve(project_dir)) / ".tagteam" / "legacy"
+              / f"{phase}_{cycle_type}_rounds.jsonl")
+    if legacy.exists():
+        return legacy
+    return None
+
+
+class CycleReadError(Exception):
+    """Raised when a runtime cycle read cannot be satisfied.
+
+    Currently raised when `dualwrite.is_db_invalid()` is set AND the
+    legacy file source is unavailable (e.g. operator ran
+    `migrate --to-step-b` before the DB recovered). The exception
+    message contains an operator recovery hint.
+    """
+
+
 def _git(project_dir: str, *args: str) -> tuple[int, str]:
     """Run a git command and return (returncode, stdout). Never raises."""
     try:
@@ -155,7 +197,12 @@ def _count_stale_rounds(phase: str, cycle_type: str, project_dir: str) -> int:
 
     Returns the number of consecutive stale rounds (from most recent backward).
     """
-    rounds = read_rounds(phase, cycle_type, project_dir)
+    # Called inside add_round AFTER the new round was appended to the
+    # file but BEFORE the shadow DB sync, so the DB is stale here.
+    # Read directly from the file source.
+    rounds = _read_rounds_from_file(
+        _rounds_path(phase, cycle_type, project_dir)
+    )
 
     # Extract lead submissions in order
     submissions = [
@@ -191,12 +238,13 @@ def _resolve_baseline_for_cycle(phase: str, cycle_type: str,
     if cycle_type == "plan":
         return _capture_baseline(project_dir, source="plan-init")
 
-    plan_status_path = _status_path(phase, "plan", project_dir)
-    if plan_status_path.exists():
-        try:
-            plan_status = json.loads(plan_status_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            plan_status = {}
+    # Use the Stage 2 read_status helper so plan-baseline propagation
+    # works whether the plan status is in the DB, docs/handoffs/, or
+    # .tagteam/legacy/ (post Step B activation). The CycleReadError
+    # case is fine to let propagate — if the operator must repair, they
+    # need to know.
+    plan_status = read_status(phase, "plan", project_dir)
+    if plan_status:
         plan_baseline = plan_status.get("baseline")
         if isinstance(plan_baseline, dict):
             propagated = copy.deepcopy(plan_baseline)
@@ -345,8 +393,12 @@ def add_round(phase: str, cycle_type: str, role: str, action: str,
         with open(rp, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
 
-        # Update status
-        status = read_status(phase, cycle_type, project_dir) or {}
+        # Update status — read from file directly (DB returns a
+        # different field order, which would shift fields when we
+        # write back to disk and break parity-corpus golden files).
+        status = _read_status_from_file(
+            _status_path(phase, cycle_type, project_dir)
+        ) or {}
         transition = _TRANSITIONS[action]
         status["state"] = transition["state"]
         status["ready_for"] = transition["ready_for"]
@@ -419,7 +471,12 @@ def _derive_top_level_state(phase: str, cycle_type: str,
     )
 
     project_dir = _resolve(project_dir)
-    cycle_status = read_status(phase, cycle_type, project_dir)
+    # Runs inside add_round/init_cycle's writer lock, BEFORE the shadow
+    # DB write. The DB is stale by definition at this point — read the
+    # canonical file directly.
+    cycle_status = _read_status_from_file(
+        _status_path(phase, cycle_type, project_dir)
+    )
     if cycle_status is None:
         return None
 
@@ -477,26 +534,22 @@ def _update_handoff_state(phase: str, cycle_type: str, action: str,
     _derive_top_level_state(phase, cycle_type, project_dir, updated_by)
 
 
-def read_status(phase: str, cycle_type: str, project_dir: str = ".") -> dict | None:
-    """Read status JSON for a cycle. Returns None if not found."""
-    project_dir = _resolve(project_dir)
-    sp = _status_path(phase, cycle_type, project_dir)
-    if not sp.exists():
+def _read_status_from_file(path: Path) -> dict | None:
+    """File-side status reader. Returns None on parse error or missing."""
+    if not path.exists():
         return None
     try:
-        return json.loads(sp.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
 
 
-def read_rounds(phase: str, cycle_type: str, project_dir: str = ".") -> list[dict]:
-    """Read all round entries from JSONL. Returns empty list if not found."""
-    project_dir = _resolve(project_dir)
-    rp = _rounds_path(phase, cycle_type, project_dir)
-    if not rp.exists():
+def _read_rounds_from_file(path: Path) -> list[dict]:
+    """File-side rounds reader. Returns [] on missing or parse error."""
+    if not path.exists():
         return []
     entries = []
-    for line in rp.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if line:
             try:
@@ -506,16 +559,215 @@ def read_rounds(phase: str, cycle_type: str, project_dir: str = ".") -> list[dic
     return entries
 
 
-def render_cycle(phase: str, cycle_type: str, project_dir: str = ".") -> str | None:
-    """Synthesize human-readable markdown from JSONL + status.
+def _read_status_from_db(phase: str, cycle_type: str,
+                        project_dir: str) -> dict | None:
+    """DB-side status reader. Returns the file-shape dict or None.
 
-    Returns None if the cycle doesn't exist.
+    Converts `db.get_cycle`'s schema to the historical file shape
+    expected by callers. The conversion mirrors `db.export_to_files`
+    so a status produced here matches what export would have written.
     """
-    status = read_status(phase, cycle_type, project_dir)
+    from tagteam import db, dualwrite
+    conn = None
+    try:
+        conn = db.connect(project_dir=project_dir)
+        cycle = db.get_cycle(conn, phase, cycle_type)
+        if cycle is None:
+            return None
+        status: dict = {
+            "state": cycle["state"],
+            "round": cycle.get("round") or 0,
+            "phase": phase,
+            "type": cycle_type,
+            "lead": cycle.get("lead"),
+            "reviewer": cycle.get("reviewer"),
+            "date": cycle.get("date"),
+        }
+        if cycle.get("ready_for_present"):
+            status["ready_for"] = cycle.get("ready_for")
+        baseline = cycle.get("baseline")
+        if baseline is not None:
+            status["baseline"] = baseline
+        return status
+    except Exception:
+        return None
+    finally:
+        if conn is not None:
+            try: conn.close()
+            except Exception: pass
+
+
+def _read_rounds_from_db(phase: str, cycle_type: str,
+                        project_dir: str) -> list[dict]:
+    """DB-side rounds reader. Returns the file-shape entries."""
+    from tagteam import db
+    conn = None
+    try:
+        conn = db.connect(project_dir=project_dir)
+        rounds = db.get_rounds(conn, phase, cycle_type)
+        out: list[dict] = []
+        for r in rounds:
+            entry = {
+                "round": r["round"],
+                "role": r["role"],
+                "action": r["action"],
+                "content": r.get("content") or "",
+                "ts": r["ts"],
+            }
+            if r.get("updated_by") is not None:
+                entry["updated_by"] = r["updated_by"]
+            if r.get("summary") is not None:
+                entry["summary"] = r["summary"]
+            out.append(entry)
+        return out
+    except Exception:
+        return []
+    finally:
+        if conn is not None:
+            try: conn.close()
+            except Exception: pass
+
+
+def read_status(phase: str, cycle_type: str, project_dir: str = ".") -> dict | None:
+    """Read status for a cycle. Returns None if not found.
+
+    Phase 28 Stage 2 contract: DB-first when the DB is valid; falls
+    back to legacy file source (docs/handoffs/ or .tagteam/legacy/)
+    when the DB doesn't have the cycle. When `dualwrite.is_db_invalid`
+    is set, file source is canonical — if no legacy file exists,
+    raises `CycleReadError` with an operator recovery hint rather than
+    silently returning DB content that may be stale.
+    """
+    from tagteam import dualwrite
+    project_dir = _resolve(project_dir)
+
+    if dualwrite.is_db_invalid(project_dir):
+        legacy = _legacy_status_path(phase, cycle_type, project_dir)
+        if legacy is not None:
+            return _read_status_from_file(legacy)
+        # Sentinel set + no file source → operator must repair.
+        # For not-found cases (cycle never existed), prefer None so
+        # callers like `cycle status` can print "no cycle found" rather
+        # than crash. Only raise if other cycles exist on disk; that
+        # signals "this project has data, just not for this cycle name."
+        if _any_legacy_cycle_files(project_dir):
+            return None
+        raise CycleReadError(
+            "DB_INVALID and no legacy cycle files found. "
+            "Run `tagteam state repair-db` to recover."
+        )
+
+    db_status = _read_status_from_db(phase, cycle_type, project_dir)
+    if db_status is not None:
+        return db_status
+    legacy = _legacy_status_path(phase, cycle_type, project_dir)
+    if legacy is not None:
+        return _read_status_from_file(legacy)
+    return None
+
+
+def read_rounds(phase: str, cycle_type: str, project_dir: str = ".") -> list[dict]:
+    """Read all round entries for a cycle. Returns [] if not found.
+
+    Same DB-first / file-fallback / db_invalid contract as `read_status`.
+    """
+    from tagteam import dualwrite
+    project_dir = _resolve(project_dir)
+
+    if dualwrite.is_db_invalid(project_dir):
+        legacy = _legacy_rounds_path(phase, cycle_type, project_dir)
+        if legacy is not None:
+            return _read_rounds_from_file(legacy)
+        if _any_legacy_cycle_files(project_dir):
+            return []
+        raise CycleReadError(
+            "DB_INVALID and no legacy cycle files found. "
+            "Run `tagteam state repair-db` to recover."
+        )
+
+    db_rounds = _read_rounds_from_db(phase, cycle_type, project_dir)
+    if db_rounds:
+        return db_rounds
+    # DB returned empty — could be no cycle, or a cycle with no rounds.
+    # Disambiguate by checking if status exists (in DB or legacy).
+    if _read_status_from_db(phase, cycle_type, project_dir) is not None:
+        return []  # cycle exists in DB but has no rounds
+    legacy = _legacy_rounds_path(phase, cycle_type, project_dir)
+    if legacy is not None:
+        return _read_rounds_from_file(legacy)
+    return []
+
+
+def _any_legacy_cycle_files(project_dir: str) -> bool:
+    """True if any cycle file exists in docs/handoffs/ or .tagteam/legacy/."""
+    pdir = Path(_resolve(project_dir))
+    for d in (pdir / "docs" / "handoffs", pdir / ".tagteam" / "legacy"):
+        if d.is_dir():
+            for p in d.iterdir():
+                name = p.name
+                if name.endswith("_rounds.jsonl") or name.endswith("_status.json"):
+                    return True
+    return False
+
+
+def render_cycle_from_files(phase: str, cycle_type: str,
+                           project_dir: str = ".") -> str | None:
+    """File-side renderer. Reads ONLY from legacy JSONL/JSON files
+    (docs/handoffs/ or .tagteam/legacy/), never from the DB.
+
+    Used by divergence and repair parity checks that compare file-side
+    output to DB-side output. Keeping these comparisons file-vs-DB is
+    the load-bearing parity contract from Phase 28 Step A.
+    """
+    project_dir = _resolve(project_dir)
+    status_path = _legacy_status_path(phase, cycle_type, project_dir)
+    if status_path is None:
+        return None
+    status = _read_status_from_file(status_path)
     if status is None:
         return None
+    rounds_path = _legacy_rounds_path(phase, cycle_type, project_dir)
+    entries = _read_rounds_from_file(rounds_path) if rounds_path else []
+    return _format_cycle_md(phase, cycle_type, status, entries)
 
-    entries = read_rounds(phase, cycle_type, project_dir)
+
+def render_cycle(phase: str, cycle_type: str, project_dir: str = ".") -> str | None:
+    """Synthesize human-readable markdown for a cycle.
+
+    DB-backed when the DB is valid (delegates to `db.render_cycle`,
+    which produces byte-identical output to the file-side renderer per
+    the Phase 28 parity contract). Falls back to `render_cycle_from_files`
+    when DB_INVALID is set.
+
+    Returns None if the cycle doesn't exist on either side.
+    """
+    from tagteam import db, dualwrite
+    project_dir = _resolve(project_dir)
+
+    if dualwrite.is_db_invalid(project_dir):
+        return render_cycle_from_files(phase, cycle_type, project_dir)
+
+    conn = None
+    try:
+        conn = db.connect(project_dir=project_dir)
+        md = db.render_cycle(conn, phase, cycle_type)
+        if md is not None:
+            return md
+    except Exception:
+        pass
+    finally:
+        if conn is not None:
+            try: conn.close()
+            except Exception: pass
+
+    return render_cycle_from_files(phase, cycle_type, project_dir)
+
+
+def _format_cycle_md(phase: str, cycle_type: str, status: dict,
+                     entries: list[dict]) -> str:
+    """Format the cycle markdown from a status dict + round entries.
+    Used by `render_cycle_from_files`. Same shape as the historical
+    pre-Stage-2 `render_cycle` output."""
 
     step_label = "Plan" if cycle_type == "plan" else "Implementation"
     lines = [
@@ -1060,7 +1312,13 @@ def _shadow_db_after_cycle_write(project_dir: str, phase: str,
     db_failed = False
     try:
         conn = db.connect(project_dir=project_dir)
-        status = read_status(phase, cycle_type, project_dir) or {}
+        # Shadow write must read the FRESHLY-WRITTEN files, not the
+        # stale DB state. The new Stage 2 read_status/read_rounds are
+        # DB-first, so they'd return pre-write content here. Use the
+        # file-side helpers directly.
+        status = _read_status_from_file(
+            _status_path(phase, cycle_type, project_dir)
+        ) or {}
         cycle_id = db.upsert_cycle(
             conn, phase, cycle_type,
             lead=status.get("lead"),
@@ -1082,7 +1340,9 @@ def _shadow_db_after_cycle_write(project_dir: str, phase: str,
                 (cycle_id,),
             ).fetchall()
         )
-        for r in read_rounds(phase, cycle_type, project_dir):
+        for r in _read_rounds_from_file(
+            _rounds_path(phase, cycle_type, project_dir)
+        ):
             key = (r["round"], r["role"], r["action"], r["ts"])
             if key in existing_keys:
                 continue
@@ -1156,8 +1416,11 @@ def _shadow_db_after_amend(project_dir: str, phase: str, cycle_type: str,
         if row is None:
             # Cycle missing from DB — shouldn't happen if previous
             # dual-writes succeeded. Fall back to a status-driven
-            # upsert so the AMEND has somewhere to attach.
-            status = read_status(phase, cycle_type, project_dir) or {}
+            # upsert so the AMEND has somewhere to attach. Read from
+            # file directly (DB is stale by definition here).
+            status = _read_status_from_file(
+                _status_path(phase, cycle_type, project_dir)
+            ) or {}
             cycle_id = db.upsert_cycle(
                 conn, phase, cycle_type,
                 lead=status.get("lead"),

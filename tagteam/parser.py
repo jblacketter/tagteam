@@ -245,16 +245,21 @@ def read_cycle_rounds(phase: str, cycle_type: str,
     if project_dir == ".":
         from tagteam.state import _resolve_project_root
         project_dir = _resolve_project_root()
-    handoffs = Path(project_dir) / "docs" / "handoffs"
+    project_path = Path(project_dir)
+    handoffs = project_path / "docs" / "handoffs"
+    legacy = project_path / ".tagteam" / "legacy"
 
-    # Check JSONL first
-    jsonl_path = handoffs / f"{phase}_{cycle_type}_rounds.jsonl"
-    if jsonl_path.exists():
-        rounds = parse_jsonl_rounds(jsonl_path)
-        if rounds:
-            for r in rounds:
-                r.setdefault("lead_amendments", [])
-        return rounds
+    # Check JSONL first — look in docs/handoffs/, then .tagteam/legacy/
+    # (post-Step-B-activation location). Preserves AMEND grouping which
+    # the DB-flat read in cycle.read_rounds doesn't reconstruct.
+    for d in (handoffs, legacy):
+        jsonl_path = d / f"{phase}_{cycle_type}_rounds.jsonl"
+        if jsonl_path.exists():
+            rounds = parse_jsonl_rounds(jsonl_path)
+            if rounds:
+                for r in rounds:
+                    r.setdefault("lead_amendments", [])
+            return rounds
 
     # Fall back to legacy markdown. Markdown predates the AMEND action
     # and cannot represent amendments — backfill an empty list per round

@@ -401,8 +401,16 @@ class TestMigrateToStepB:
 
 
 def test_step_b_migration_refuses_until_readers_are_db_backed(
-    populated_project, capsys
+    populated_project, capsys, monkeypatch
 ):
+    """Regression guard for the Stage 2 readers-ready flag.
+
+    Stage 2 flipped STEP_B_READERS_READY = True, but the guard logic
+    must still work when the flag is False — this test proves the
+    refusal path is intact in case someone accidentally reverts it.
+    """
+    monkeypatch.setattr("tagteam.migrate._step_b_readers_ready", lambda: False)
+
     rc = migrate_to_step_b_command(
         ["--to-step-b", "--dir", str(populated_project)]
     )
@@ -414,3 +422,11 @@ def test_step_b_migration_refuses_until_readers_are_db_backed(
     assert rounds.exists()
     assert status.exists()
     assert not md.exists()
+
+
+def test_step_b_readers_ready_is_flipped_true():
+    """Sanity check: Stage 2 flipped this to True. If it gets reverted
+    accidentally, this test fails loudly."""
+    from tagteam.migrate import STEP_B_READERS_READY, _step_b_readers_ready
+    assert STEP_B_READERS_READY is True
+    assert _step_b_readers_ready() is True

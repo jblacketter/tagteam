@@ -402,7 +402,9 @@ def _run_parity_unchecked(conn, project_dir: Path) -> dict | None:
                 **sanity,
             }
         from tagteam import cycle as cycle_mod
-        file_md = cycle_mod.render_cycle(
+        # Stage 2: cycle.render_cycle is DB-backed; use the dedicated
+        # file-side renderer so parity check stays file-vs-DB.
+        file_md = cycle_mod.render_cycle_from_files(
             c["phase"], c["type"], str(project_dir)
         )
         db_md = db_mod.render_cycle(conn, c["phase"], c["type"])
