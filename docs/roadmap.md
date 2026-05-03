@@ -251,7 +251,7 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 - **Description:** The user-facing health surface (`tagteam state health [--stale-days N]`) reduces to a few SELECT queries over the Phase 28 schema. Should ship as part of the production port, not as a separate phase — the queries are trivial once the DB exists.
 
 ### Phase 28: SQLite as canonical runtime store
-- **Status:** Spike complete (2026-05-01) — production port pending. See `docs/phases/sqlite-spike-findings.md` for go/no-go writeup. Verdict: **go**, with 24/24 byte-identical round-trip on rankr corpus.
+- **Status:** Complete (2026-05-03) — shipped in 0.6.0. Step A (dual-write), Step B (auto-export + `migrate --to-step-b`), and Stage 2 (DB-backed runtime readers) all merged; Step B activated on this repo post-Stage-2. See `docs/phases/sqlite-spike-findings.md` for the original go/no-go writeup.
 - **Description:** Move runtime state (handoff state, cycle status, rounds, diagnostics) from a constellation of JSON/JSONL files to a single SQLite database at `.tagteam/tagteam.db`. Auto-render a synthesized markdown view to `docs/handoffs/<phase>_<type>.md` on every write so PR-reviewable conversation history is preserved. Eliminates by construction the multi-file drift class of bugs that motivated Phases 25 and 27, absorbs Phases 20/21/22/26 as well.
 - **Why this is its own phase, not just an implementation detail of 26:** It changes the *canonical* data store, not just its location. The 2.0 proposal stayed file-based by default; this phase is the explicit revisit, scoped to runtime state only (not the round log's role as audit artifact — the markdown render covers that).
 - **Schema sketch:**
