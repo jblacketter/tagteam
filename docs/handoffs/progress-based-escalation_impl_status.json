@@ -1,0 +1,10 @@
+{
+  "state": "approved",
+  "ready_for": null,
+  "round": 1,
+  "phase": "progress-based-escalation",
+  "type": "impl",
+  "lead": "Claude",
+  "reviewer": "Codex",
+  "date": "2026-04-02"
+}
