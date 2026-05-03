@@ -214,6 +214,17 @@ def migrate_to_sqlite_command(args: list[str]) -> int:
 _STEP_B_CYCLE_FILE_RE = re.compile(
     r"^(.+)_(plan|impl)_(status\.json|rounds\.jsonl)$"
 )
+STEP_B_READERS_READY = False
+
+
+def _step_b_readers_ready() -> bool:
+    """True only after Stage 2 DB-backed cycle readers have landed.
+
+    Moving legacy cycle files before readers switch away from
+    `_rounds.jsonl` / `_status.json` breaks historical CLI/TUI/web
+    reads. Keep this guard closed until the read-path migration ships.
+    """
+    return STEP_B_READERS_READY
 
 
 def migrate_to_step_b_command(args: list[str]) -> int:
@@ -229,6 +240,14 @@ def migrate_to_step_b_command(args: list[str]) -> int:
     project_path = Path(project_dir).resolve()
     handoffs = project_path / "docs" / "handoffs"
     legacy_dir = project_path / ".tagteam" / "legacy"
+
+    if not _step_b_readers_ready():
+        print(
+            "Error: migrate --to-step-b requires Stage 2 DB-backed cycle "
+            "readers. Refusing to move _rounds.jsonl/_status.json files "
+            "while runtime reads still depend on them."
+        )
+        return 1
 
     if not handoffs.is_dir() and not legacy_dir.is_dir():
         print(f"Error: no docs/handoffs or .tagteam/legacy in {project_path}.")

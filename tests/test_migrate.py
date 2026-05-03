@@ -233,6 +233,10 @@ def _cycle_file_paths(project, phase, cycle_type):
 
 
 class TestMigrateToStepB:
+    @pytest.fixture(autouse=True)
+    def _enable_step_b_migration_for_tests(self, monkeypatch):
+        monkeypatch.setattr("tagteam.migrate._step_b_readers_ready", lambda: True)
+
     def test_happy_path_renders_and_moves_legacy_files(
         self, populated_project, capsys
     ):
@@ -394,3 +398,19 @@ class TestMigrateToStepB:
         assert "file_inconsistent" in out
         assert "alpha_plan" in out
         assert "object_shape" in out
+
+
+def test_step_b_migration_refuses_until_readers_are_db_backed(
+    populated_project, capsys
+):
+    rc = migrate_to_step_b_command(
+        ["--to-step-b", "--dir", str(populated_project)]
+    )
+
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "requires Stage 2 DB-backed cycle readers" in out
+    rounds, status, md = _cycle_file_paths(populated_project, "alpha", "plan")
+    assert rounds.exists()
+    assert status.exists()
+    assert not md.exists()
