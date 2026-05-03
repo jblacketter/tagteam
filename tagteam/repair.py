@@ -108,8 +108,7 @@ def attempt_repair(
          Otherwise, record the failure with bounded exponential
          backoff and leave the sentinel set.
     """
-    from tagteam import db, divergence, dualwrite
-    from tagteam.migrate import _remove_sqlite_db_files
+    from tagteam import auto_export, dualwrite
 
     if now is None:
         now = datetime.now(timezone.utc)
@@ -126,57 +125,42 @@ def attempt_repair(
                 "next_attempt_at": None,
             }
 
-        # Pre-check: file side must be internally consistent before
-        # we try to rebuild the DB from it. A malformed rounds.jsonl
-        # or torn status.json would crash the importer or produce a
-        # stale DB; either way the operator needs to fix the files,
-        # not bang on the DB harder.
-        bad_file = _check_all_files(project_path)
-        if bad_file is not None:
+        result = rebuild_db_from_files_and_verify(project_path)
+        if not result["success"]:
             return _record_failure_and_return(
-                project_path,
-                reason=(
-                    f"file_inconsistent: {bad_file['kind']} on "
-                    f"{bad_file.get('phase','?')}_{bad_file.get('type','?')}: "
-                    f"{bad_file.get('check') or bad_file.get('detail','')}"
-                ),
-                now=now,
+                project_path, reason=result["reason"], now=now
             )
 
-        # Files look clean — rebuild from scratch.
+        conn = result["conn"]
         try:
-            db_path = project_path / db.DEFAULT_DB_RELPATH
-            _remove_sqlite_db_files(db_path)
-            conn = db.connect(db_path=db_path)
-            try:
-                db.import_from_files(project_path, conn)
-
-                # Post-rebuild parity check. divergence.check_cycle_divergence
-                # would short-circuit on the still-set sentinel, so use the
-                # unchecked variant here.
-                bad = _run_parity_unchecked(conn, project_path)
-                if bad is not None:
+            if dualwrite.step_b_active():
+                export_results = auto_export.render_all_cycles_to_files(
+                    conn, project_path
+                )
+                failed = [
+                    f"{phase}_{cycle_type}"
+                    for (phase, cycle_type), ok in export_results.items()
+                    if not ok
+                ]
+                if failed:
                     return _record_failure_and_return(
                         project_path,
                         reason=(
-                            f"parity check failed after rebuild: "
-                            f"{bad['kind']} on "
-                            f"{bad['phase']}_{bad['type']}"
+                            "auto_export_failed after repair: "
+                            + ", ".join(failed)
                         ),
                         now=now,
                     )
-            finally:
-                conn.close()
-        except Exception as e:
-            return _record_failure_and_return(
-                project_path,
-                reason=f"repair raised: {type(e).__name__}: {e}",
-                now=now,
-            )
 
-        # Step 4: success — clear sentinel.
-        dualwrite.clear_db_invalid(project_path)
-        return {"success": True, "reason": None, "next_attempt_at": None}
+            # Step 4: success — clear sentinel.
+            dualwrite.clear_db_invalid(project_path)
+            return {"success": True, "reason": None, "next_attempt_at": None}
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
 
 def needs_louder_signal(
@@ -205,6 +189,64 @@ def needs_louder_signal(
         return False
 
     return (now - since_dt).total_seconds() >= LOUDER_SIGNAL_AFTER_SECONDS
+
+
+def rebuild_db_from_files_and_verify(project_dir: str | Path) -> dict[str, Any]:
+    """Unconditionally rebuild the DB from canonical files and verify parity.
+
+    Caller owns locking and sentinel management. On success, returns an
+    open SQLite connection so callers can continue using the freshly
+    verified DB. On failure, closes any opened connection and returns a
+    reason suitable for operator-facing output or repair backoff state.
+    """
+    from tagteam import db
+    from tagteam.migrate import _remove_sqlite_db_files
+
+    project_path = Path(project_dir)
+
+    bad_file = _check_all_files(project_path)
+    if bad_file is not None:
+        return {
+            "success": False,
+            "reason": (
+                f"file_inconsistent: {bad_file['kind']} on "
+                f"{bad_file.get('phase','?')}_{bad_file.get('type','?')}: "
+                f"{bad_file.get('check') or bad_file.get('detail','')}"
+            ),
+            "conn": None,
+        }
+
+    conn = None
+    try:
+        db_path = project_path / db.DEFAULT_DB_RELPATH
+        _remove_sqlite_db_files(db_path)
+        conn = db.connect(db_path=db_path)
+        db.import_from_files(project_path, conn)
+
+        bad = _run_parity_unchecked(conn, project_path)
+        if bad is not None:
+            reason = (
+                f"parity check failed after rebuild: {bad['kind']} "
+                f"on {bad['phase']}_{bad['type']}"
+            )
+            try:
+                conn.close()
+            except Exception:
+                pass
+            return {"success": False, "reason": reason, "conn": None}
+
+        return {"success": True, "reason": None, "conn": conn}
+    except Exception as e:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        return {
+            "success": False,
+            "reason": f"repair raised: {type(e).__name__}: {e}",
+            "conn": None,
+        }
 
 
 # ---------- Internal helpers ----------

@@ -45,23 +45,40 @@ def render_cycle_to_file(
     """
     from tagteam import db as db_mod
 
-    project_dir = Path(project_dir)
-    md = db_mod.render_cycle(conn, phase, cycle_type)
-    if md is None:
-        return False
-
-    handoffs = project_dir / "docs" / "handoffs"
     try:
+        project_dir = Path(project_dir)
+        md = db_mod.render_cycle(conn, phase, cycle_type)
+        if md is None:
+            return False
+
+        handoffs = project_dir / "docs" / "handoffs"
         handoffs.mkdir(parents=True, exist_ok=True)
         out_path = handoffs / f"{phase}_{cycle_type}.md"
         tmp_path = handoffs / f".{phase}_{cycle_type}.md.tmp"
-        # `cycle.render_cycle` produces output without a trailing
-        # newline; normalize to a single trailing newline so the
-        # committed .md follows the usual POSIX text-file shape.
-        if not md.endswith("\n"):
-            md = md + "\n"
         tmp_path.write_text(md, encoding="utf-8")
         tmp_path.replace(out_path)
         return True
-    except OSError:
+    except Exception:
         return False
+
+
+def render_all_cycles_to_files(
+    conn: sqlite3.Connection,
+    project_dir: str | Path,
+) -> dict[tuple[str, str], bool]:
+    """Render every cycle in `conn` to its markdown export.
+
+    This lower-level bulk helper intentionally does not consult the
+    db-invalid sentinel. Callers such as repair or migration are
+    responsible for proving the DB is valid before invoking it.
+    """
+    from tagteam import db as db_mod
+
+    results: dict[tuple[str, str], bool] = {}
+    for cycle in db_mod.list_cycles(conn):
+        phase = cycle["phase"]
+        cycle_type = cycle["type"]
+        results[(phase, cycle_type)] = render_cycle_to_file(
+            conn, project_dir, phase, cycle_type
+        )
+    return results

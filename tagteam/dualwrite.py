@@ -300,3 +300,14 @@ def should_skip_inner_dualwrite() -> bool:
     """True if the current thread is inside a `skip_inner_dualwrite`
     block. Called by `write_state`'s dual-write wrapper."""
     return getattr(_state_thread_local, "skip_depth", 0) > 0
+
+
+# ---------- Step B activation ----------
+
+def step_b_active() -> bool:
+    """True when Phase 28 Step B behavior is explicitly enabled.
+
+    Read per-call so long-running watcher/server processes can pick up
+    soak toggles without a restart. Only the exact value "1" enables it.
+    """
+    return os.environ.get("TAGTEAM_STEP_B") == "1"

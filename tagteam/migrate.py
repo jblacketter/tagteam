@@ -7,6 +7,7 @@ to use the new configuration-based workflow.
 
 import re
 import shutil
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -61,6 +62,8 @@ def migrate_command(args: list[str]) -> int:
     Returns:
         Exit code (0 for success, 1 for error)
     """
+    if "--to-step-b" in args:
+        return migrate_to_step_b_command(args)
     if "--to-sqlite" in args:
         return migrate_to_sqlite_command(args)
 
@@ -206,6 +209,199 @@ def migrate_to_sqlite_command(args: list[str]) -> int:
     print("Source files unchanged. The DB is not yet canonical — runtime")
     print("still reads from JSON/JSONL files until the dual-write phase lands.")
     return 0
+
+
+_STEP_B_CYCLE_FILE_RE = re.compile(
+    r"^(.+)_(plan|impl)_(status\.json|rounds\.jsonl)$"
+)
+
+
+def migrate_to_step_b_command(args: list[str]) -> int:
+    """Activate Phase 28 Step B cycle markdown auto-export.
+
+    Rebuilds the DB from legacy cycle JSON/JSONL files, renders
+    `<phase>_<type>.md` for every cycle, then moves legacy cycle files
+    to `.tagteam/legacy/`. The file move is resumable: reruns rebuild
+    from both active `docs/handoffs/` files and already-moved legacy
+    files.
+    """
+    project_dir = _arg_value(args, "--dir") or "."
+    project_path = Path(project_dir).resolve()
+    handoffs = project_path / "docs" / "handoffs"
+    legacy_dir = project_path / ".tagteam" / "legacy"
+
+    if not handoffs.is_dir() and not legacy_dir.is_dir():
+        print(f"Error: no docs/handoffs or .tagteam/legacy in {project_path}.")
+        return 1
+
+    from tagteam import auto_export, db, dualwrite
+
+    with dualwrite.writer_lock(project_path):
+        rebuild = _rebuild_step_b_db_from_sources(project_path)
+        if not rebuild["success"]:
+            print(f"Error: {rebuild['reason']}")
+            return 1
+
+        conn = rebuild["conn"]
+        failures: list[tuple[str, str, str]] = []
+        rendered = 0
+        moved = 0
+        try:
+            handoffs.mkdir(parents=True, exist_ok=True)
+            legacy_dir.mkdir(parents=True, exist_ok=True)
+
+            for cycle in db.list_cycles(conn):
+                phase = cycle["phase"]
+                cycle_type = cycle["type"]
+                expected = db.render_cycle(conn, phase, cycle_type)
+                md_path = handoffs / f"{phase}_{cycle_type}.md"
+                needs_render = True
+                if expected is not None and md_path.exists():
+                    try:
+                        needs_render = md_path.read_text(
+                            encoding="utf-8"
+                        ) != expected
+                    except OSError:
+                        needs_render = True
+
+                if needs_render:
+                    ok = auto_export.render_cycle_to_file(
+                        conn, project_path, phase, cycle_type
+                    )
+                    if not ok:
+                        failures.append((phase, cycle_type, "render_failed"))
+                        continue
+                    rendered += 1
+                    try:
+                        if md_path.read_text(encoding="utf-8") != expected:
+                            failures.append(
+                                (phase, cycle_type, "render_mismatch")
+                            )
+                            continue
+                    except OSError as e:
+                        failures.append(
+                            (phase, cycle_type, f"render_read_failed: {e}")
+                        )
+                        continue
+
+                for suffix in ("rounds.jsonl", "status.json"):
+                    src = handoffs / f"{phase}_{cycle_type}_{suffix}"
+                    if not src.exists():
+                        continue
+                    dst = legacy_dir / src.name
+                    try:
+                        if dst.exists():
+                            dst.unlink()
+                        shutil.move(str(src), str(dst))
+                        moved += 1
+                    except OSError as e:
+                        failures.append(
+                            (phase, cycle_type, f"move_failed: {e}")
+                        )
+
+            if failures:
+                print(f"migrate --to-step-b completed with "
+                      f"{len(failures)} failure(s):")
+                for phase, cycle_type, reason in failures:
+                    print(f"  {phase}_{cycle_type}: {reason}")
+                return 1
+
+            print(
+                "Step B migration complete: "
+                f"{len(db.list_cycles(conn))} cycles, "
+                f"{rendered} markdown render(s), {moved} legacy file move(s)."
+            )
+            return 0
+        finally:
+            if conn is not None:
+                conn.close()
+
+
+def _step_b_source_files(project_path: Path) -> dict[str, Path]:
+    """Return legacy cycle source files for Step B rebuild.
+
+    `.tagteam/legacy` is read first and active `docs/handoffs` files
+    override it. That makes a rerun after operator edits prefer the
+    still-active pre-activation source.
+    """
+    out: dict[str, Path] = {}
+    for directory in (
+        project_path / ".tagteam" / "legacy",
+        project_path / "docs" / "handoffs",
+    ):
+        if not directory.is_dir():
+            continue
+        for path in sorted(directory.iterdir()):
+            if path.is_file() and _STEP_B_CYCLE_FILE_RE.match(path.name):
+                out[path.name] = path
+    return out
+
+
+def _rebuild_step_b_db_from_sources(project_path: Path) -> dict:
+    """Rebuild DB from active + already-moved Step B legacy files."""
+    from tagteam import db
+    from tagteam import repair
+
+    source_files = _step_b_source_files(project_path)
+    if not source_files:
+        return {
+            "success": False,
+            "reason": "no legacy cycle files found",
+            "conn": None,
+        }
+
+    conn = None
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_project = Path(tmp)
+            tmp_handoffs = tmp_project / "docs" / "handoffs"
+            tmp_handoffs.mkdir(parents=True)
+            for name, src in source_files.items():
+                shutil.copy2(src, tmp_handoffs / name)
+
+            state_path = project_path / "handoff-state.json"
+            if state_path.exists():
+                shutil.copy2(state_path, tmp_project / "handoff-state.json")
+
+            bad_file = repair._check_all_files(tmp_project)
+            if bad_file is not None:
+                return {
+                    "success": False,
+                    "reason": (
+                        f"file_inconsistent: {bad_file['kind']} on "
+                        f"{bad_file.get('phase','?')}_"
+                        f"{bad_file.get('type','?')}: "
+                        f"{bad_file.get('check') or bad_file.get('detail','')}"
+                    ),
+                    "conn": None,
+                }
+
+            db_path = project_path / db.DEFAULT_DB_RELPATH
+            _remove_sqlite_db_files(db_path)
+            conn = db.connect(db_path=db_path)
+            db.import_from_files(tmp_project, conn)
+
+            bad = repair._run_parity_unchecked(conn, tmp_project)
+            if bad is not None:
+                reason = (
+                    f"parity check failed after rebuild: {bad['kind']} "
+                    f"on {bad['phase']}_{bad['type']}"
+                )
+                conn.close()
+                return {"success": False, "reason": reason, "conn": None}
+
+            return {"success": True, "reason": None, "conn": conn}
+    except Exception as e:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        return {
+            "success": False,
+            "reason": f"step-b rebuild raised: {type(e).__name__}: {e}",
+            "conn": None,
+        }
 
 
 def _arg_value(args: list[str], flag: str) -> str | None:
