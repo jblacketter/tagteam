@@ -277,6 +277,17 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
   - How are schema migrations versioned and rolled forward? (Probably: `PRAGMA user_version` + migration scripts in `tagteam/migrations/`.)
   - Concurrent access between watcher daemon and CLI commands — WAL mode should handle it, but worth load-testing.
 
+### Phase 29: iTerm2 send-keys for watcher
+- **Status:** Not started
+- **Motivation:** Today the watcher daemon has two modes: macOS notify (just a system notification — operator must manually trigger the next agent) and `tmux send-keys` (actually types the prompt into the next agent's pane). iTerm2 has no equivalent — `iterm.py` only handles session creation, not runtime nudging. This means the iTerm2 backend can never run the loop end-to-end without a human in the middle, defeating the point of the watcher. Surfaced 2026-05-03 during the first live two-agent loop on this repo: cycle init → watcher detected the turn flip → posted a notification → Codex's tab sat idle until the operator hand-relayed.
+- **Sketch:**
+  - Add `iterm.send_text_to_session(session_id, text)` using AppleScript (`tell session id "..." to write text "..."`)
+  - Wire `watcher.py`'s "send to agent" branch to dispatch on backend: tmux → existing `tmux send-keys`, iterm2 → new `iterm.send_text_to_session`, notify → existing notification path
+  - Pane discovery: reuse the iTerm session-ID model already in `session.py` (the same one used to create panes during `session start --launch`)
+  - Mirror tmux-mode's busy-detection: capture the pane's recent output and skip send if the agent appears mid-response
+- **Estimated scope:** ~50–80 lines + tests; one cycle.
+- **Why it's now its own phase:** would have been a Phase 8 sub-item but wasn't scoped at the time; current Phase 28 work makes the missing capability painful enough to justify a dedicated phase.
+
 ## Backlog
 
 ### Terminal.app backend (macOS, optional)
