@@ -1,0 +1,10 @@
+{
+  "state": "approved",
+  "ready_for": null,
+  "round": 2,
+  "phase": "unified-state-command",
+  "type": "impl",
+  "lead": "Claude",
+  "reviewer": "Codex",
+  "date": "2026-03-22"
+}

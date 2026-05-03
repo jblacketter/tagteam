@@ -1,0 +1,10 @@
+{
+  "state": "approved",
+  "ready_for": null,
+  "round": 3,
+  "phase": "stale-state-overlay-fix",
+  "type": "plan",
+  "lead": "Claude",
+  "reviewer": "Codex",
+  "date": "2026-03-22"
+}

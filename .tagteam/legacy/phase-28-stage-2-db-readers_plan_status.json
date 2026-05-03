@@ -1,0 +1,23 @@
+{
+  "state": "approved",
+  "ready_for": null,
+  "round": 2,
+  "phase": "phase-28-stage-2-db-readers",
+  "type": "plan",
+  "lead": "Claude",
+  "reviewer": "Codex",
+  "date": "2026-05-03",
+  "baseline": {
+    "sha": "b57f26a6cd4371dd91e8c9e387a42da9d16a6472",
+    "dirty_paths": [
+      " D .idea/ai-handoff.iml",
+      " M .idea/modules.xml",
+      " M tagteam/migrate.py",
+      " M tests/test_migrate.py",
+      "?? docs/handoff-cycle-issues-2026-04-24.md",
+      "?? scratch.md"
+    ],
+    "captured_at": "2026-05-03T06:07:58.038789+00:00",
+    "source": "plan-init"
+  }
+}
