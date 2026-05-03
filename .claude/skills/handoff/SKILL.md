@@ -65,6 +65,8 @@ If there is no state file, show: `Phase: — | Type: — | Round: — | Turn: �
 2. Address the feedback: update the plan or implementation files
 3. Add your round and update state in one command: `tagteam cycle add --phase [phase] --type [plan|impl] --role lead --action SUBMIT_FOR_REVIEW --round [N+1] --updated-by [your-agent-name] --content "summary of changes"`
 
+When `TAGTEAM_STEP_B=1`, `docs/handoffs/<phase>_<type>.md` is auto-rendered on every cycle write. Do not hand-edit that file; update the cycle with `tagteam cycle add` instead. If a write produces no markdown update, check `handoff-diagnostics.jsonl` for an auto-export diagnostic.
+
 **Mid-review amendment.** If new info arrives (e.g., the human arbiter answers an open question) while the reviewer is still on your submission and you haven't been handed back the turn, run:
 
 ```

@@ -117,6 +117,34 @@ class TestSeqMismatchSideChannel:
         assert "expected=3" in report
         assert "actual=5" in report
 
+    def test_diagnose_reads_auto_export_diagnostics(self, tmp_path):
+        write_state({"turn": "lead", "status": "ready", "seq": 5}, str(tmp_path))
+        log_path = tmp_path / DIAGNOSTICS_LOG
+        log_path.write_text(
+            json.dumps({
+                "kind": "auto_export_failed",
+                "phase": "p",
+                "type": "plan",
+                "timestamp": "2026-05-03T00:00:00+00:00",
+                "reason": "render_returned_false",
+            }) + "\n"
+        )
+
+        report = diagnose_state(str(tmp_path))
+        assert "auto-export failed for p_plan" in report
+        assert "render_returned_false" in report
+
+    def test_diagnose_unknown_diagnostic_kind(self, tmp_path):
+        write_state({"turn": "lead", "status": "ready", "seq": 5}, str(tmp_path))
+        log_path = tmp_path / DIAGNOSTICS_LOG
+        log_path.write_text(
+            json.dumps({"kind": "future_kind", "value": 1}) + "\n"
+        )
+
+        report = diagnose_state(str(tmp_path))
+        assert "future_kind" in report
+        assert '"value": 1' in report
+
     def test_diagnose_clean_truncates_log(self, tmp_path):
         _log_seq_mismatch(1, 2, "test", str(tmp_path))
         assert len(_read_diagnostics_log(str(tmp_path))) == 1

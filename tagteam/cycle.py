@@ -270,6 +270,7 @@ def init_cycle(phase: str, cycle_type: str, lead: str, reviewer: str,
 
         # Shadow DB write + divergence check.
         _shadow_db_after_cycle_write(project_dir, phase, cycle_type)
+        _auto_export_cycle_md(project_dir, phase, cycle_type)
 
     return status
 
@@ -325,6 +326,7 @@ def add_round(phase: str, cycle_type: str, role: str, action: str,
             # AMEND is rounds-only on the DB side too — no status
             # mutation, no state derive.
             _shadow_db_after_amend(project_dir, phase, cycle_type, entry)
+            _auto_export_cycle_md(project_dir, phase, cycle_type)
 
         return status
 
@@ -383,6 +385,7 @@ def add_round(phase: str, cycle_type: str, role: str, action: str,
 
         # Shadow DB write + divergence check.
         _shadow_db_after_cycle_write(project_dir, phase, cycle_type)
+        _auto_export_cycle_md(project_dir, phase, cycle_type)
 
     return status
 
@@ -938,6 +941,88 @@ def _cli_scope_diff(args: list[str]) -> int:
 
 
 # ----------------------------------------------------------------------
+
+# --- Phase 28 Step B: auto-export hooks ---
+
+def _emit_auto_export_diagnostic(
+    project_dir: str,
+    kind: str,
+    phase: str,
+    cycle_type: str,
+    *,
+    reason: str | None = None,
+) -> None:
+    """Append a best-effort auto-export diagnostic.
+
+    This side-channel must never break cycle writes.
+    """
+    try:
+        from tagteam.state import DIAGNOSTICS_LOG
+
+        entry = {
+            "kind": kind,
+            "phase": phase,
+            "type": cycle_type,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        if reason:
+            entry["reason"] = reason
+        log_path = Path(project_dir) / DIAGNOSTICS_LOG
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception:
+        pass
+
+
+def _auto_export_cycle_md(project_dir: str, phase: str,
+                          cycle_type: str) -> None:
+    """Render the DB-backed markdown artifact for a cycle when Step B
+    auto-export is active.
+
+    Called inside the writer lock after the shadow DB helper returns.
+    If the DB-invalid sentinel is set, skip rather than rendering stale
+    content over the last-good markdown.
+    """
+    from tagteam import auto_export, db, dualwrite
+
+    if not dualwrite.step_b_active():
+        return
+
+    if dualwrite.is_db_invalid(project_dir):
+        _emit_auto_export_diagnostic(
+            project_dir, "auto_export_skipped_db_invalid", phase, cycle_type
+        )
+        return
+
+    conn = None
+    try:
+        conn = db.connect(project_dir=project_dir)
+        ok = auto_export.render_cycle_to_file(
+            conn, project_dir, phase, cycle_type
+        )
+        if not ok:
+            _emit_auto_export_diagnostic(
+                project_dir,
+                "auto_export_failed",
+                phase,
+                cycle_type,
+                reason="render_returned_false",
+            )
+    except Exception as e:
+        _emit_auto_export_diagnostic(
+            project_dir,
+            "auto_export_failed",
+            phase,
+            cycle_type,
+            reason=f"{type(e).__name__}: {e}",
+        )
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
 
 # --- Phase 28 Step A: shadow DB write helpers ---
 

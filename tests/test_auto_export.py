@@ -44,16 +44,14 @@ class TestRenderCycleToFile:
 
     def test_byte_identical_to_db_render(self, conn_with_cycle):
         """The auto-export's content must equal db.render_cycle's
-        output (modulo trailing newline). This is the parity contract
+        output exactly. This is the parity contract
         that makes auto-export non-regressive vs the existing file
         renderer."""
         c, project = conn_with_cycle
         auto_export.render_cycle_to_file(c, project, "p", "plan")
         from_disk = (project / "docs" / "handoffs" / "p_plan.md").read_text()
         from_db = db.render_cycle(c, "p", "plan")
-        # Auto-export normalizes to a single trailing newline; strip
-        # for comparison.
-        assert from_disk.rstrip("\n") == from_db.rstrip("\n")
+        assert from_disk == from_db
 
     def test_atomic_write_no_tmp_left_behind(self, conn_with_cycle):
         c, project = conn_with_cycle

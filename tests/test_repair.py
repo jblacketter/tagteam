@@ -114,6 +114,40 @@ class TestAttemptRepairHappyPath:
         assert result["success"] is True
         assert "sentinel not set" in result.get("reason", "")
 
+    def test_rebuild_helper_runs_when_sentinel_clear(self, project):
+        _seed_clean_cycle(project)
+        conn = db.connect(project_dir=str(project))
+        try:
+            conn.execute("UPDATE rounds SET content='tampered' WHERE 1=1")
+            conn.commit()
+        finally:
+            conn.close()
+
+        result = repair.rebuild_db_from_files_and_verify(project)
+        assert result["success"] is True
+        conn = result["conn"]
+        try:
+            rows = conn.execute("SELECT content FROM rounds").fetchall()
+        finally:
+            conn.close()
+        assert all("tampered" not in r[0] for r in rows)
+
+    def test_repair_exports_markdown_when_step_b_active(self, project, monkeypatch):
+        monkeypatch.setenv("TAGTEAM_STEP_B", "1")
+        _seed_clean_cycle(project)
+        (project / "docs" / "handoffs" / "p_plan.md").unlink()
+        dualwrite.mark_db_invalid(project, reason="simulated")
+
+        result = repair.attempt_repair(project)
+        assert result["success"] is True
+        md = project / "docs" / "handoffs" / "p_plan.md"
+        assert md.exists()
+        conn = db.connect(project_dir=str(project))
+        try:
+            assert md.read_text() == db.render_cycle(conn, "p", "plan")
+        finally:
+            conn.close()
+
 
 # ---------- attempt_repair: failure path ----------
 

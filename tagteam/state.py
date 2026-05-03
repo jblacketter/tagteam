@@ -366,6 +366,37 @@ def _read_diagnostics_log(project_dir: str | None = None) -> list[dict]:
     return entries
 
 
+def _diagnostic_kind(entry: dict) -> str:
+    return entry.get("kind") or entry.get("event") or "seq_mismatch"
+
+
+def _format_diagnostic_entry(entry: dict) -> str:
+    kind = _diagnostic_kind(entry)
+    if kind == "seq_mismatch":
+        return (
+            f"       seq mismatch expected={entry.get('expected')}"
+            f" actual={entry.get('actual')}"
+            f" caller={entry.get('caller')}"
+            f" @ {entry.get('timestamp', '?')}"
+        )
+    if kind == "auto_export_failed":
+        phase = entry.get("phase", "?")
+        cycle_type = entry.get("type") or entry.get("cycle_type", "?")
+        return (
+            f"       auto-export failed for {phase}_{cycle_type}"
+            f" @ {entry.get('timestamp', entry.get('ts', '?'))}"
+            f" reason={entry.get('reason', '?')}"
+        )
+    if kind == "auto_export_skipped_db_invalid":
+        phase = entry.get("phase", "?")
+        cycle_type = entry.get("type") or entry.get("cycle_type", "?")
+        return (
+            f"       auto-export skipped (DB invalid) for {phase}_{cycle_type}"
+            f" @ {entry.get('timestamp', entry.get('ts', '?'))}"
+        )
+    return f"       {kind}: {json.dumps(entry, sort_keys=True)}"
+
+
 def clear_diagnostics_log(project_dir: str | None = None) -> None:
     """Truncate the diagnostics side-channel log.
 
@@ -571,20 +602,16 @@ def diagnose_state(project_dir: str | None = None,
     else:
         lines.append("[OK]  No history entries")
 
-    # Check 6: Seq mismatch log
-    mismatch_entries = _read_diagnostics_log(project_dir)
-    if mismatch_entries:
-        recent = mismatch_entries[-5:]  # last 5
-        lines.append(f"[WARN] {len(mismatch_entries)} seq mismatch(es)"
+    # Check 6: Diagnostics log
+    diagnostic_entries = _read_diagnostics_log(project_dir)
+    if diagnostic_entries:
+        recent = diagnostic_entries[-5:]  # last 5
+        lines.append(f"[WARN] {len(diagnostic_entries)} diagnostic event(s)"
                      " in diagnostics log:")
         for entry in recent:
-            lines.append(
-                f"       expected={entry.get('expected')}"
-                f" actual={entry.get('actual')}"
-                f" caller={entry.get('caller')}"
-                f" @ {entry.get('timestamp', '?')}")
+            lines.append(_format_diagnostic_entry(entry))
     else:
-        lines.append("[OK]  No seq mismatches in diagnostics log")
+        lines.append("[OK]  No diagnostics in diagnostics log")
 
     # Check 7: Agent health (optional)
     if check_agents:

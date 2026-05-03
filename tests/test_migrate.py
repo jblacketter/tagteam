@@ -4,7 +4,9 @@ import json
 import pytest
 from pathlib import Path
 
-from tagteam.migrate import detect_agent_names, migrate_to_sqlite_command
+from tagteam.migrate import (
+    detect_agent_names, migrate_to_sqlite_command, migrate_to_step_b_command,
+)
 from tagteam import db
 
 
@@ -217,3 +219,178 @@ class TestMigrateToSqlite:
         rc = migrate_command(["--to-sqlite", "--dir", str(populated_project)])
         assert rc == 0
         assert (populated_project / ".tagteam" / "tagteam.db").exists()
+
+
+# ---------- migrate --to-step-b ----------
+
+def _cycle_file_paths(project, phase, cycle_type):
+    handoffs = project / "docs" / "handoffs"
+    return (
+        handoffs / f"{phase}_{cycle_type}_rounds.jsonl",
+        handoffs / f"{phase}_{cycle_type}_status.json",
+        handoffs / f"{phase}_{cycle_type}.md",
+    )
+
+
+class TestMigrateToStepB:
+    def test_happy_path_renders_and_moves_legacy_files(
+        self, populated_project, capsys
+    ):
+        rc = migrate_to_step_b_command(
+            ["--to-step-b", "--dir", str(populated_project)]
+        )
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "Step B migration complete" in out
+
+        legacy = populated_project / ".tagteam" / "legacy"
+        for phase, cycle_type in (("alpha", "plan"), ("alpha", "impl")):
+            rounds, status, md = _cycle_file_paths(
+                populated_project, phase, cycle_type
+            )
+            assert md.exists()
+            assert not rounds.exists()
+            assert not status.exists()
+            assert (legacy / rounds.name).exists()
+            assert (legacy / status.name).exists()
+
+        conn = db.connect(project_dir=str(populated_project))
+        try:
+            assert len(db.list_cycles(conn)) == 2
+            assert (
+                populated_project / "docs" / "handoffs" / "alpha_plan.md"
+            ).read_text() == db.render_cycle(conn, "alpha", "plan")
+        finally:
+            conn.close()
+
+    def test_second_run_is_idempotent(self, populated_project, capsys):
+        assert migrate_to_step_b_command(
+            ["--to-step-b", "--dir", str(populated_project)]
+        ) == 0
+        capsys.readouterr()
+        assert migrate_to_step_b_command(
+            ["--to-step-b", "--dir", str(populated_project)]
+        ) == 0
+        out = capsys.readouterr().out
+        assert "Step B migration complete" in out
+        conn = db.connect(project_dir=str(populated_project))
+        try:
+            assert len(db.list_cycles(conn)) == 2
+        finally:
+            conn.close()
+
+    def test_rerun_rewrites_drifted_markdown(self, populated_project, capsys):
+        assert migrate_to_step_b_command(
+            ["--to-step-b", "--dir", str(populated_project)]
+        ) == 0
+        md = populated_project / "docs" / "handoffs" / "alpha_plan.md"
+        md.write_text("drifted")
+        capsys.readouterr()
+
+        assert migrate_to_step_b_command(
+            ["--to-step-b", "--dir", str(populated_project)]
+        ) == 0
+        conn = db.connect(project_dir=str(populated_project))
+        try:
+            assert md.read_text() == db.render_cycle(conn, "alpha", "plan")
+        finally:
+            conn.close()
+
+    def test_render_failure_aborts_that_cycle_move(
+        self, populated_project, monkeypatch, capsys
+    ):
+        from tagteam import auto_export
+        real_render = auto_export.render_cycle_to_file
+
+        def fail_impl(conn, project_dir, phase, cycle_type):
+            if phase == "alpha" and cycle_type == "impl":
+                return False
+            return real_render(conn, project_dir, phase, cycle_type)
+
+        monkeypatch.setattr(
+            "tagteam.auto_export.render_cycle_to_file", fail_impl
+        )
+
+        rc = migrate_to_step_b_command(
+            ["--to-step-b", "--dir", str(populated_project)]
+        )
+        assert rc == 1
+        out = capsys.readouterr().out
+        assert "alpha_impl: render_failed" in out
+
+        rounds, status, md = _cycle_file_paths(populated_project, "alpha", "impl")
+        assert rounds.exists()
+        assert status.exists()
+        assert not md.exists()
+
+        plan_rounds, plan_status, plan_md = _cycle_file_paths(
+            populated_project, "alpha", "plan"
+        )
+        assert not plan_rounds.exists()
+        assert not plan_status.exists()
+        assert plan_md.exists()
+
+    def test_partial_move_failure_is_recoverable(
+        self, populated_project, monkeypatch, capsys
+    ):
+        from tagteam import migrate as migrate_mod
+
+        real_move = migrate_mod.shutil.move
+        calls = {"n": 0}
+
+        def fail_second(src, dst):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise OSError("simulated move failure")
+            return real_move(src, dst)
+
+        monkeypatch.setattr("tagteam.migrate.shutil.move", fail_second)
+        rc = migrate_to_step_b_command(
+            ["--to-step-b", "--dir", str(populated_project)]
+        )
+        assert rc == 1
+        assert "move_failed" in capsys.readouterr().out
+
+        monkeypatch.setattr("tagteam.migrate.shutil.move", real_move)
+        rc = migrate_to_step_b_command(
+            ["--to-step-b", "--dir", str(populated_project)]
+        )
+        assert rc == 0
+
+        conn = db.connect(project_dir=str(populated_project))
+        try:
+            cycles = {
+                (c["phase"], c["type"]) for c in db.list_cycles(conn)
+            }
+            assert cycles == {("alpha", "plan"), ("alpha", "impl")}
+        finally:
+            conn.close()
+
+        legacy = populated_project / ".tagteam" / "legacy"
+        for phase, cycle_type in (("alpha", "plan"), ("alpha", "impl")):
+            rounds, status, md = _cycle_file_paths(
+                populated_project, phase, cycle_type
+            )
+            assert md.exists()
+            assert not rounds.exists()
+            assert not status.exists()
+            assert (legacy / rounds.name).exists()
+            assert (legacy / status.name).exists()
+
+    def test_step_b_malformed_source_reports_file_inconsistent(
+        self, populated_project, capsys
+    ):
+        rounds, _status, _md = _cycle_file_paths(
+            populated_project, "alpha", "plan"
+        )
+        rounds.write_text("1\n")
+
+        rc = migrate_to_step_b_command(
+            ["--to-step-b", "--dir", str(populated_project)]
+        )
+
+        assert rc == 1
+        out = capsys.readouterr().out
+        assert "file_inconsistent" in out
+        assert "alpha_plan" in out
+        assert "object_shape" in out
