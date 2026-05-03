@@ -1,0 +1,52 @@
+# Plan Review Cycle: iterm-cold-launch-followup
+
+- **Phase:** iterm-cold-launch-followup
+- **Type:** plan
+- **Date:** 2026-04-18
+- **Lead:** Claude
+- **Reviewer:** Codex
+
+## Round 1
+
+### Lead
+
+**Action:** SUBMIT_FOR_REVIEW
+
+Phase 19 cold-launch fix did not resolve the bug. User repro on 2026-04-18 produced 'osascript failed: 50:56: syntax error: Expected end of line, etc. but found class name.' Root cause hypothesis: iTerm2's scripting dictionary isn't registered when osascript compiles the main script, even though the process is alive. Fix: replace process-existence poll with a scripting-readiness probe ('count windows') in a retry loop; bump timeout to 10s; rename helper to _ensure_iterm_ready. Scoped to iterm.py + test_iterm.py. See docs/phases/iterm-cold-launch-followup.md for full plan.
+
+### Reviewer
+
+**Action:** REQUEST_CHANGES
+
+1. The proposed exact call-count assertion in `test_ensure_iterm_ready_retries_until_probe_compiles` is internally inconsistent. The plan says to simulate 5 failed probes followed by success and then assert exactly 6 `_osascript` calls in the cold-launch path, but that path is 1 `launch` call + 5 failed probes + 1 successful probe = 7 calls. Please fix the arithmetic and make the expected sequence explicit so the test does not encode an impossible expectation.
+
+2. The new helper intentionally swallows a `launch` failure and continues polling so it can surface a consistent timeout with the last probe error. That is a meaningful behavior change, but the plan does not pin it down with a test. Add coverage for the `launch`-raises-but-helper-keeps-retrying` path so this fallback behavior is intentional and stable.
+
+## Round 2
+
+### Lead
+
+**Action:** SUBMIT_FOR_REVIEW
+
+Addressed both review items.
+
+1. Fixed the test arithmetic. Replaced the single muddled test with two explicit tests that pin the exact call sequence:
+   - `test_ensure_iterm_ready_cold_path_retries_until_probe_compiles`: cold path = 1 launch + 5 failed probes + 1 successful probe = exactly 7 _osascript calls, in that order.
+   - `test_ensure_iterm_ready_warm_path_retries_until_probe_compiles`: warm path = 5 failed probes + 1 successful probe = exactly 6 _osascript calls; the 'launch' string must not appear in any call.
+
+2. Added `test_ensure_iterm_ready_continues_when_launch_raises` to pin the intentional swallow-and-retry behavior of a failing `launch` call. Rationale note in the plan explains why we swallow it (LaunchServices can still bring iTerm2 up even when the AppleScript `launch` directly errors, and we care about the scripting readiness signal, not the launch verb itself). This locks the contract so future refactors can't silently change it.
+
+Updated Success Criteria to reflect 3 new tests instead of 1.
+
+### Reviewer
+
+**Action:** APPROVE
+
+Approved.
+
+---
+
+<!-- CYCLE_STATUS -->
+READY_FOR: None
+ROUND: 2
+STATE: approved
