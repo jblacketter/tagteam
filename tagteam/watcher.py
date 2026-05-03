@@ -712,10 +712,49 @@ def watch(
 
 # --- CLI entry point ---
 
+def _auto_detect_mode(project_dir: str = ".") -> tuple[str, str | None]:
+    """Pick the best send-keys mode based on what's actually set up.
+
+    Returns (mode, reason). `reason` is a human-readable one-liner the
+    caller can log so the operator knows why this mode was chosen
+    (or why we fell back to notify).
+
+    Priority:
+      1. iterm2 — if `.handoff-session.json` has session IDs for BOTH
+         lead and reviewer roles. Means `tagteam session start
+         --backend iterm2 --launch` ran successfully.
+      2. tmux — if the default tmux session exists. Means
+         `tagteam session start --backend tmux --launch` ran.
+      3. notify — fallback. The watcher will pop macOS notifications
+         but won't auto-type into either agent's terminal.
+    """
+    try:
+        from tagteam.iterm import get_session_id
+        lead_sid = get_session_id("lead", project_dir)
+        reviewer_sid = get_session_id("reviewer", project_dir)
+        if lead_sid and reviewer_sid:
+            return "iterm2", "iterm2 session IDs found"
+    except Exception:
+        pass
+
+    try:
+        from tagteam.session import session_exists
+        if session_exists():
+            return "tmux", "tmux session 'tagteam' found"
+    except Exception:
+        pass
+
+    return "notify", (
+        "no iterm2 session file or tmux session detected — "
+        "watcher will only post notifications. Run "
+        "`tagteam session start --launch` to enable auto-send."
+    )
+
+
 def watch_command(args: list[str]) -> int:
     """Parse CLI args and start the watcher."""
     interval = 10
-    mode = "notify"
+    mode = None  # None = auto-detect; explicit --mode overrides.
     lead_pane = "tagteam:0.0"
     reviewer_pane = "tagteam:0.2"
     confirm = False
@@ -762,7 +801,8 @@ def watch_command(args: list[str]) -> int:
             print()
             print("Options:")
             print("  --interval N       Poll interval in seconds (default: 10)")
-            print("  --mode MODE        'notify', 'tmux', or 'iterm2' (default: notify)")
+            print("  --mode MODE        'notify', 'tmux', or 'iterm2'")
+            print("                     (default: auto-detect from session state)")
             print("  --lead-pane TARGET tmux pane target for lead (default: tagteam:0.0)")
             print("  --reviewer-pane T  tmux pane target for reviewer (default: tagteam:0.2)")
             print("  --confirm          Pause for confirmation before sending commands")
@@ -774,6 +814,10 @@ def watch_command(args: list[str]) -> int:
         else:
             print(f"Unknown argument: {arg}")
             return 1
+
+    if mode is None:
+        mode, reason = _auto_detect_mode(".")
+        _log(f"[mode] auto-detected: {mode} ({reason})")
 
     watch(
         interval=interval,

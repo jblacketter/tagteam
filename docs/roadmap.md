@@ -277,16 +277,15 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
   - How are schema migrations versioned and rolled forward? (Probably: `PRAGMA user_version` + migration scripts in `tagteam/migrations/`.)
   - Concurrent access between watcher daemon and CLI commands — WAL mode should handle it, but worth load-testing.
 
-### Phase 29: iTerm2 send-keys for watcher
-- **Status:** Not started
-- **Motivation:** Today the watcher daemon has two modes: macOS notify (just a system notification — operator must manually trigger the next agent) and `tmux send-keys` (actually types the prompt into the next agent's pane). iTerm2 has no equivalent — `iterm.py` only handles session creation, not runtime nudging. This means the iTerm2 backend can never run the loop end-to-end without a human in the middle, defeating the point of the watcher. Surfaced 2026-05-03 during the first live two-agent loop on this repo: cycle init → watcher detected the turn flip → posted a notification → Codex's tab sat idle until the operator hand-relayed.
-- **Sketch:**
-  - Add `iterm.send_text_to_session(session_id, text)` using AppleScript (`tell session id "..." to write text "..."`)
-  - Wire `watcher.py`'s "send to agent" branch to dispatch on backend: tmux → existing `tmux send-keys`, iterm2 → new `iterm.send_text_to_session`, notify → existing notification path
-  - Pane discovery: reuse the iTerm session-ID model already in `session.py` (the same one used to create panes during `session start --launch`)
-  - Mirror tmux-mode's busy-detection: capture the pane's recent output and skip send if the agent appears mid-response
-- **Estimated scope:** ~50–80 lines + tests; one cycle.
-- **Why it's now its own phase:** would have been a Phase 8 sub-item but wasn't scoped at the time; current Phase 28 work makes the missing capability painful enough to justify a dedicated phase.
+### Phase 29: Watcher mode auto-detection
+- **Status:** Complete (2026-05-03).
+- **Motivation:** During the first live two-agent loop on this repo, the watcher detected the turn flip but only posted a notification — Codex's tab sat idle until manually relayed. Original assumption was that iTerm2 send-keys infrastructure didn't exist. Investigation revealed it ALL existed: `iterm.write_text_to_session`, `watcher.send_iterm_command`, `is_agent_idle_iterm`, `wait_for_idle_iterm`, and `tagteam watch --mode iterm2` were all wired up. The actual gap was UX: `tagteam watch` defaulted to `mode=notify`, and `--mode iterm2` only worked when `.handoff-session.json` existed (populated by `session start --launch`, NOT by manually opening tabs).
+- **What shipped:**
+  - `_auto_detect_mode(project_dir)` in `tagteam/watcher.py`: returns `iterm2` if both lead+reviewer iterm session IDs exist in `.handoff-session.json`, `tmux` if the default tmux session exists, else `notify` with a helpful pointer to `tagteam session start --launch`.
+  - `tagteam watch` CLI: when `--mode` is not explicitly given, calls `_auto_detect_mode` and logs the picked mode + reason on startup.
+  - 6 new tests in `tests/test_watcher_auto_detect.py` covering each mode-detection branch + graceful fallback when `session_exists()` raises.
+- **Final scope:** ~50 lines + tests, one session. Smaller than the original 50–80 estimate because the underlying send-keys plumbing was already done.
+- **Followup discovered, not done:** if you manually open iTerm tabs (instead of letting `session start --launch` create them), there's no way to register them as the watcher's lead/reviewer panes after-the-fact. Would need a `tagteam session adopt --lead <session-id> --reviewer <session-id>` command, or auto-detection by working directory + agent process. Backlog candidate.
 
 ## Backlog
 
