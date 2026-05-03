@@ -815,40 +815,51 @@ def list_cycles(project_dir: str = ".") -> list[dict]:
 
     JSONL takes precedence when both formats exist for the same cycle.
     Returns list of {id, format, phase, type} dicts.
+
+    Scans both `docs/handoffs/` (active cycle source) AND
+    `.tagteam/legacy/` (post-Step-B-activation source location).
+    Without the legacy scan, migrated cycles disappear from web/TUI
+    discovery once `migrate --to-step-b` moves their files.
     """
     project_dir = _resolve(project_dir)
     handoffs = _handoffs_dir(project_dir)
-    if not handoffs.is_dir():
-        return []
+    legacy = Path(project_dir) / ".tagteam" / "legacy"
 
-    cycles = {}
+    cycles: dict[str, dict] = {}
 
-    # Scan for JSONL-backed cycles (status.json files)
-    for f in handoffs.iterdir():
-        m = re.match(r"^(.+)_(plan|impl)_status\.json$", f.name)
-        if m:
-            phase, cycle_type = m.group(1), m.group(2)
-            cycle_id = f"{phase}_{cycle_type}"
-            cycles[cycle_id] = {
-                "id": cycle_id,
-                "format": "jsonl",
-                "phase": phase,
-                "type": cycle_type,
-            }
-
-    # Scan for legacy markdown cycles (only if no JSONL version exists)
-    for f in handoffs.iterdir():
-        m = re.match(r"^(.+)_(plan|impl)_cycle\.md$", f.name)
-        if m:
-            phase, cycle_type = m.group(1), m.group(2)
-            cycle_id = f"{phase}_{cycle_type}"
-            if cycle_id not in cycles:  # JSONL takes precedence
+    # Scan JSONL status.json files in both locations. docs/handoffs/
+    # takes precedence over .tagteam/legacy/ (active source wins on
+    # rerun-after-edit, mirrors `_step_b_source_files` priority).
+    for d in (legacy, handoffs):
+        if not d.is_dir():
+            continue
+        for f in d.iterdir():
+            m = re.match(r"^(.+)_(plan|impl)_status\.json$", f.name)
+            if m:
+                phase, cycle_type = m.group(1), m.group(2)
+                cycle_id = f"{phase}_{cycle_type}"
                 cycles[cycle_id] = {
                     "id": cycle_id,
-                    "format": "markdown",
+                    "format": "jsonl",
                     "phase": phase,
                     "type": cycle_type,
                 }
+
+    # Scan for legacy markdown cycles in docs/handoffs/ only — these
+    # are pre-Phase-12 free-form _cycle.md files, never migrated.
+    if handoffs.is_dir():
+        for f in handoffs.iterdir():
+            m = re.match(r"^(.+)_(plan|impl)_cycle\.md$", f.name)
+            if m:
+                phase, cycle_type = m.group(1), m.group(2)
+                cycle_id = f"{phase}_{cycle_type}"
+                if cycle_id not in cycles:  # JSONL takes precedence
+                    cycles[cycle_id] = {
+                        "id": cycle_id,
+                        "format": "markdown",
+                        "phase": phase,
+                        "type": cycle_type,
+                    }
 
     return sorted(cycles.values(), key=lambda c: c["id"])
 

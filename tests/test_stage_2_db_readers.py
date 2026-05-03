@@ -222,3 +222,80 @@ class TestDivergenceStillDetectsDrift:
         post_md = render_cycle_from_files("alpha", "plan", str(populated))
         assert post_md is not None
         assert post_md == pre_md
+
+
+# ---------- list_cycles after Step B activation ----------
+
+class TestListCyclesAfterStepB:
+    def test_list_cycles_includes_migrated_cycles(self, populated):
+        """After migrate --to-step-b moves cycle files to .tagteam/legacy/,
+        list_cycles must still surface them so the web dashboard / TUI
+        can enumerate cycle history. Without this, migrated cycles
+        disappear from discovery."""
+        pre_count = len(cycle.list_cycles(str(populated)))
+        assert pre_count >= 1
+
+        rc = migrate_to_step_b_command(
+            ["--to-step-b", "--dir", str(populated)]
+        )
+        assert rc == 0
+
+        # All cycles should still be enumerated post-activation.
+        post_cycles = cycle.list_cycles(str(populated))
+        assert len(post_cycles) == pre_count
+        ids = {c["id"] for c in post_cycles}
+        assert "alpha_plan" in ids
+
+
+# ---------- Fresh-clone regression (the test that should have caught both blockers) ----------
+
+class TestFreshClonePostActivation:
+    def test_clean_checkout_can_read_migrated_cycle(self, populated, tmp_path):
+        """Simulates a fresh clone after Step B activation lands in git.
+
+        Activates Step B in `populated`, then copies only the GIT-TRACKED
+        files (no `.tagteam/tagteam.db`, no `handoff-state.json`) to a
+        clean directory and verifies cycle reads still work there. This
+        is the test that would have caught the original PR #7 blockers:
+        without `.tagteam/legacy/` un-ignored AND `list_cycles`
+        scanning it, a fresh clone has no cycle history at all.
+        """
+        import shutil
+        # Activate Step B.
+        rc = migrate_to_step_b_command(
+            ["--to-step-b", "--dir", str(populated)]
+        )
+        assert rc == 0
+
+        # Simulate a fresh clone: copy only the artifacts that would
+        # be in git after the activation commits.
+        clone = tmp_path / "fresh_clone"
+        clone.mkdir()
+        (clone / "docs" / "handoffs").mkdir(parents=True)
+        (clone / ".tagteam" / "legacy").mkdir(parents=True)
+        # Copy auto-rendered .md files
+        for md in (populated / "docs" / "handoffs").glob("*.md"):
+            shutil.copy2(md, clone / "docs" / "handoffs" / md.name)
+        # Copy legacy source files (these MUST be in git for the fresh
+        # clone to work — that's blocker #1)
+        for f in (populated / ".tagteam" / "legacy").iterdir():
+            shutil.copy2(f, clone / ".tagteam" / "legacy" / f.name)
+        # Note: NOT copying .tagteam/tagteam.db or handoff-state.json.
+
+        # Reads must work in the clean checkout.
+        status = read_status("alpha", "plan", str(clone))
+        assert status is not None, (
+            "Fresh clone read failed — Step B activation has no recoverable "
+            "source for migrated cycles."
+        )
+        assert status["state"] == "approved"
+
+        rounds = read_rounds("alpha", "plan", str(clone))
+        assert len(rounds) == 2
+
+        # list_cycles must enumerate the migrated cycle (blocker #2).
+        cycle_ids = {c["id"] for c in cycle.list_cycles(str(clone))}
+        assert "alpha_plan" in cycle_ids, (
+            "list_cycles failed to find migrated cycle in fresh clone — "
+            "web/TUI discovery would be broken."
+        )

@@ -33,4 +33,8 @@ handoff-state.json
 # User project artifacts (created by setup command or TUI, not part of this repo)
 projects/
 /.spike-output/
-/.tagteam/
+# Track .tagteam/legacy/ (Step B canonical pre-activation cycle source —
+# fresh clones need it for cycle history reads) but ignore everything
+# else under .tagteam/ (DB, transient sentinels, watcher state, etc.).
+/.tagteam/*
+!/.tagteam/legacy/
