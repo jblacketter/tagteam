@@ -214,7 +214,7 @@ def migrate_to_sqlite_command(args: list[str]) -> int:
 _STEP_B_CYCLE_FILE_RE = re.compile(
     r"^(.+)_(plan|impl)_(status\.json|rounds\.jsonl)$"
 )
-STEP_B_READERS_READY = False
+STEP_B_READERS_READY = True
 
 
 def _step_b_readers_ready() -> bool:
@@ -222,7 +222,8 @@ def _step_b_readers_ready() -> bool:
 
     Moving legacy cycle files before readers switch away from
     `_rounds.jsonl` / `_status.json` breaks historical CLI/TUI/web
-    reads. Keep this guard closed until the read-path migration ships.
+    reads. Stage 2 (DB-backed runtime readers with legacy file
+    fallback in `tagteam/cycle.py`) flipped this to True.
     """
     return STEP_B_READERS_READY
 

@@ -119,7 +119,11 @@ def check_cycle_divergence(
             "detail": f"import_failed: {e}",
         }
 
-    file_md = cycle_mod.render_cycle(phase, cycle_type, str(project_dir))
+    # Stage 2: cycle.render_cycle is now DB-backed; use the dedicated
+    # file-side renderer so divergence stays a real file-vs-DB check.
+    file_md = cycle_mod.render_cycle_from_files(
+        phase, cycle_type, str(project_dir)
+    )
     db_md = db_mod.render_cycle(conn, phase, cycle_type)
 
     if file_md is None and db_md is None:

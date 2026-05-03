@@ -19,12 +19,16 @@ def find_cycle_doc(phase: str, step_type: str, project_dir: str = ".") -> Path |
     Checks for JSONL-backed cycle first (returns rounds.jsonl path),
     then falls back to legacy _cycle.md.
     """
-    handoffs = Path(project_dir) / "docs" / "handoffs"
+    project_path = Path(project_dir)
+    handoffs = project_path / "docs" / "handoffs"
+    legacy = project_path / ".tagteam" / "legacy"
 
-    # JSONL takes precedence
-    jsonl_path = handoffs / f"{phase}_{step_type}_rounds.jsonl"
-    if jsonl_path.exists():
-        return jsonl_path
+    # JSONL takes precedence — check docs/handoffs/ then .tagteam/legacy/
+    # (post-Step-B-activation location).
+    for d in (handoffs, legacy):
+        jsonl_path = d / f"{phase}_{step_type}_rounds.jsonl"
+        if jsonl_path.exists():
+            return jsonl_path
 
     # Legacy markdown
     md_path = handoffs / f"{phase}_{step_type}_cycle.md"
