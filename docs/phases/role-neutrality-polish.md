@@ -4,8 +4,8 @@
 - [x] Planning
 - [x] Approved: plan round 1 (2026-09-09)
 - [x] Implementation: fix/role-neutrality-review-nits
-- [ ] Implementation Review
-- [ ] Complete
+- [x] Implementation Review: approved round 2 (2026-09-09)
+- [x] Complete: approved implementation; PR delivery, merge pending
 
 ## Summary
 Address Phase 51's four non-blocking review nits in a separate PR before
@@ -66,3 +66,11 @@ and the generic template helpers retain compatibility.
 
 Focused verification: 119 passed across templates, participants, setup and plugin
 checks. The on_submit gate supplies the recorded full-suite result for review.
+
+
+## Closeout
+Reviewer approved all four fixes at impl round 2. Recorded on-submit gate at
+`8d854b3`: 1,789 passed, 5 skipped; scope and plan-document checks passed.
+Closeout only updates documentation and commits the cycle records; no duplicate
+suite run. Version remains 3.12.0, unpublished. Phase 52 is still required before
+downstream migration.
