@@ -359,3 +359,22 @@ tagteam serve --theme saloon --dir ~/projects/myproject     # legacy Saloon
 | `docs/roadmap.md`, `docs/decision_log.md`, `docs/checklists/`, `templates/`, `.claude/skills/handoff/SKILL.md` | `tagteam setup` / `tagteam upgrade` | the framework files (created once; skill/templates/checklists refreshed on upgrade) |
 | `~/.tagteam/projects.json` | `tagteam setup` (register), `tagteam upgrade` (prune), `tagteam registry unregister` | the registry of set-up projects the hub and `upgrade` read |
 | `~/.tagteam/worktrees.json` | `tagteam roadmap worktree` (create/remove) | phase-worktree metadata: path, parent, phase, branch, target (integration branch), base sha, created_at |
+
+## Role neutrality (Phase 51)
+
+Either configured agent can lead or review. `tagteam state` shows current names,
+launch commands, project root and the canonical `tagteam contract` entry point.
+Terminal handoffs use plain-text requests, including approval completion notices;
+Claude plugin slash commands are not sent to Codex's command dispatcher.
+
+Complete a cycle before swapping roles, then stop/recreate the watcher and agent
+sessions. Active participant mismatches refuse ordinary submissions and automated
+dispatch; restoring the recorded configuration lets the existing cycle finish.
+Human rulings and read/status remain available. Pane identity is not tracked, and
+these checks do not prevent arbitrary edits by an already-running agent.
+
+Framework readiness no longer requires Claude or its plugin. New AGENTS.md and
+CLAUDE.md pointers refer to installed docs/workflows.md and tagteam contract;
+existing instruction files are never edited. Customized artifact migration and
+extended capability diagnostics remain Phases 52 and 53. Wait for Phase 52 before
+using these changes to migrate downstream projects.

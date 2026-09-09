@@ -214,7 +214,7 @@ _BACKEND_SURFACE = {
 def _print_priming_box(lead_name: str, reviewer_name: str, surface: str) -> None:
     """Print a boxed 'SESSION READY' message with backend-appropriate terminology."""
     prime_body = (
-        "Read tagteam.yaml, then run the handoff contract: "
+        "Read tagteam.yaml, project instructions and docs/workflows.md, then read the handoff contract: "
         "/tagteam:handoff in Claude Code (/handoff if this project "
         "vendors the skill); other agents: `tagteam contract`"
     )
@@ -284,6 +284,8 @@ def quickstart_command(args: list[str]) -> int:
     lead_name = agents.get("lead", {}).get("name", "Lead")
     reviewer_name = agents.get("reviewer", {}).get("name", "Reviewer")
 
+    from tagteam.onboarding import describe_roles
+    print(describe_roles(project_dir))
     print(HANDOFF_EXPLAINER)
 
     if outcome == "exists":
@@ -477,13 +479,14 @@ def main() -> int:
     deeper in the package — surfaces here as one message, exit 2.
     """
     from tagteam.dualwrite import ReadOnlyError, read_only
+    from tagteam.participants import ParticipantMismatch
     try:
         if read_only():
             detail = read_only_refusal(sys.argv[1:])
             if detail is not None:
                 raise ReadOnlyError(detail)
         return _dispatch()
-    except ReadOnlyError as exc:
+    except (ReadOnlyError, ParticipantMismatch) as exc:
         print(str(exc), file=sys.stderr)
         return 2
 

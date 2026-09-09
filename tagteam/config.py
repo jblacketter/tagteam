@@ -351,8 +351,10 @@ def get_launch_commands(config: dict) -> tuple[str, str]:
     lead = agents.get("lead", {}) if isinstance(agents.get("lead"), dict) else {}
     reviewer = agents.get("reviewer", {}) if isinstance(agents.get("reviewer"), dict) else {}
 
-    lead_cmd = lead.get("command") or (lead.get("name") or "claude").lower()
-    reviewer_cmd = reviewer.get("command") or (reviewer.get("name") or "codex").lower()
+    if not lead.get("name") or not reviewer.get("name"):
+        raise ValueError("Configure both lead and reviewer in tagteam.yaml before launching agents")
+    lead_cmd = lead.get("command") or lead["name"].lower()
+    reviewer_cmd = reviewer.get("command") or reviewer["name"].lower()
 
     return lead_cmd, reviewer_cmd
 

@@ -241,21 +241,13 @@ class TestGetLaunchCommands:
         assert lead_cmd == "claude"
         assert reviewer_cmd == "codex"
 
-    def test_missing_agents_uses_defaults(self):
-        lead_cmd, reviewer_cmd = get_launch_commands({})
-        assert lead_cmd == "claude"
-        assert reviewer_cmd == "codex"
+    def test_missing_agents_refuses_implicit_provider_defaults(self):
+        with pytest.raises(ValueError, match="Configure both"):
+            get_launch_commands({})
 
-    def test_malformed_agent_entry_uses_defaults(self):
-        config = {
-            "agents": {
-                "lead": "not a dict",
-                "reviewer": {"name": "Gemini"},
-            }
-        }
-        lead_cmd, reviewer_cmd = get_launch_commands(config)
-        assert lead_cmd == "claude"
-        assert reviewer_cmd == "gemini"
+    def test_malformed_agent_entry_refuses_launch(self):
+        with pytest.raises(ValueError, match="Configure both"):
+            get_launch_commands({"agents": {"lead": "bad", "reviewer": {"name": "Gemini"}}})
 
     def test_mixed_explicit_and_default(self):
         config = {

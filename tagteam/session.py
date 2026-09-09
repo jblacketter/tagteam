@@ -26,7 +26,9 @@ TAB_BACKENDS_FOR_MESSAGES = tuple(_TAB_BACKEND_LABELS)
 from tagteam.contract import CONTRACT_HOWTO  # noqa: E402
 
 PRIME_MESSAGE = (
-    f"Read tagteam.yaml to see your role, then read {CONTRACT_HOWTO} for the workflow."
+    "Read tagteam.yaml to see your role, project instructions in AGENTS.md "
+    "and CLAUDE.md if present, and docs/workflows.md, "
+    f"then read {CONTRACT_HOWTO} for the workflow."
 )
 
 # Markers that an agent TUI (not the shell) has drawn its input prompt and
@@ -222,7 +224,11 @@ def _read_launch_commands(project_dir: str | None) -> tuple[str, str] | None:
         print("Warning: tagteam.yaml not found; skipping auto-launch.")
         print("  Run 'python -m tagteam init' to create it.")
         return None
-    return get_launch_commands(config)
+    try:
+        return get_launch_commands(config)
+    except ValueError as exc:
+        print(f"Cannot launch agents: {exc}")
+        return None
 
 
 def _quote_shell_arg(value: str) -> str:
@@ -284,6 +290,10 @@ def create_tmux_session(project_dir: str | None = None, launch: bool = False) ->
         return False
 
     start_dir = project_dir or "."
+    from tagteam.config import read_config, get_agent_names
+    names = get_agent_names(read_config(Path(start_dir) / "tagteam.yaml") or {})
+    lead_title = f"{names[0]} (Lead)" if names[0] else "Lead"
+    reviewer_title = f"{names[1]} (Reviewer)" if names[1] else "Reviewer"
 
     try:
         _tmux("new-session", "-d", "-s", SESSION_NAME, "-n", "handoff", "-c", start_dir)
@@ -291,9 +301,9 @@ def create_tmux_session(project_dir: str | None = None, launch: bool = False) ->
         _tmux("split-window", "-h", "-t", f"{SESSION_NAME}:0.1", "-c", start_dir)
         _tmux("select-layout", "-t", f"{SESSION_NAME}:0", "even-horizontal")
 
-        _tmux("select-pane", "-t", f"{SESSION_NAME}:0.0", "-T", "CLAUDE (Lead)")
+        _tmux("select-pane", "-t", f"{SESSION_NAME}:0.0", "-T", lead_title)
         _tmux("select-pane", "-t", f"{SESSION_NAME}:0.1", "-T", "WATCHER")
-        _tmux("select-pane", "-t", f"{SESSION_NAME}:0.2", "-T", "CODEX (Reviewer)")
+        _tmux("select-pane", "-t", f"{SESSION_NAME}:0.2", "-T", reviewer_title)
 
         _tmux("set-option", "-t", SESSION_NAME, "pane-border-status", "top")
         _tmux("set-option", "-t", SESSION_NAME, "pane-border-format", " #{pane_title} ")

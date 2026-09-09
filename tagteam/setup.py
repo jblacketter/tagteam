@@ -35,26 +35,16 @@ def get_data_dir() -> Path:
 def needs_setup(project_dir: str = ".", plugin: PluginStatus | None = None) -> bool:
     """Check if framework setup is needed.
 
-    Setup is considered complete when all of these hold:
-    - the handoff skill is available: a project-local
-      .claude/skills/handoff/SKILL.md, **or** (Phase 48) the tagteam plugin is
-      installed and enabled for this project (`plugin_status`, fail-closed —
-      an uncertain plugin still requires the local skill)
-    - templates/ directory with at least one .md file
-    - docs/checklists/ directory with at least one .md file
-
-    Intentionally excludes project-specific docs (roadmap, decision_log,
-    workflows) which may be edited or removed by users. Pass ``plugin`` when
-    the caller already computed the status.
+    Readiness is independent of Claude's optional plugin or vendored skill.
+    The plugin argument remains accepted for API compatibility.
     """
     target = Path(project_dir)
-
-    skill = target / SKILL_RELDIR / "SKILL.md"
-    if not skill.exists():
-        if plugin is None:
-            plugin = plugin_status(target)
-        if not plugin.installed:
+    from tagteam.contract import contract_text
+    try:
+        if not contract_text().strip():
             return True
+    except (OSError, UnicodeError):
+        return True
 
     templates = target / "templates"
     if not templates.exists() or not any(templates.glob("*.md")):
@@ -70,8 +60,8 @@ def needs_setup(project_dir: str = ".", plugin: PluginStatus | None = None) -> b
 def run_setup(project_dir: str = ".", *, no_plugin: bool = False,
               report_user_skills: bool = True) -> None:
     """Idempotent setup wrapper. Skips if setup is already complete."""
-    plugin = PluginStatus(False, "--no-plugin") if no_plugin else plugin_status(project_dir)
-    if not needs_setup(project_dir, plugin=plugin):
+    if not needs_setup(project_dir) and not (
+            no_plugin and not (Path(project_dir) / SKILL_RELDIR / "SKILL.md").is_file()):
         print("Framework files already present — skipping setup.")
         # Phase 49: an already-configured project (quickstart rerun) still
         # gets the one read-only note per invocation.
@@ -258,6 +248,18 @@ def main(target_dir: str = ".", *, no_plugin: bool = False,
         decision_log_src = source / "templates" / "decision_log.md"
         if decision_log_src.exists():
             copy_md_file(decision_log_src, decision_log_dst, variables)
+
+    # Instruction adapters are seeded only when absent. Existing project rules
+    # belong to the user, even when they contain outdated workflow references.
+    for name in ("AGENTS.md", "CLAUDE.md"):
+        pointer = target / name
+        try:
+            with pointer.open("x", encoding="utf-8") as out:
+                out.write("# Project workflow\n\nRead `tagteam.yaml` for current roles, "
+                          "`docs/workflows.md` for onboarding, and run "
+                          "`tagteam contract` for the authoritative workflow.\n")
+        except FileExistsError:
+            pass
 
     # Register this project for future upgrades
     from tagteam.registry import register_project

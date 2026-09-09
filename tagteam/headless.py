@@ -1621,6 +1621,14 @@ class HeadlessEngine:
         ``no_round``/``cancelled``, any handoff transition, any tree change,
         or an UNSUPPORTED fingerprint → pause immediately.
         """
+        from tagteam.participants import check_participants, ParticipantMismatch
+        try:
+            fresh = check_participants(self.project_root)
+            if fresh is not None and fresh.get("agents") != self.config.get("agents"):
+                raise ParticipantMismatch("Agent configuration changed; restart the headless watcher before dispatch.")
+        except ParticipantMismatch as exc:
+            self._log(f"   REFUSED: {exc}")
+            return None
         if self.paused():
             self.log_paused(force=True)
             return None

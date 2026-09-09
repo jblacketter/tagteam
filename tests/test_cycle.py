@@ -596,17 +596,14 @@ class TestCLIInitDefaults:
         # No impl cycle was created
         assert read_status("feat-y", "impl", str(configured_project)) is None
 
-    def test_explicit_flags_override_yaml(self, configured_project):
-        cycle_command([
-            "init",
-            "--phase", "feat-z",
-            "--lead", "Charlie",
-            "--reviewer", "Dana",
-            "--content", "Custom roster.",
-        ])
-        status = read_status("feat-z", "plan", str(configured_project))
-        assert status["lead"] == "Charlie"
-        assert status["reviewer"] == "Dana"
+    def test_explicit_flags_cannot_override_configured_participants(self, configured_project):
+        from tagteam.participants import ParticipantMismatch
+        with pytest.raises(ParticipantMismatch):
+            cycle_command([
+                "init", "--phase", "feat-z", "--lead", "Charlie",
+                "--reviewer", "Dana", "--content", "Custom roster.",
+            ])
+        assert read_status("feat-z", "plan", str(configured_project)) is None
 
     def test_explicit_type_impl_works(self, configured_project):
         cycle_command([

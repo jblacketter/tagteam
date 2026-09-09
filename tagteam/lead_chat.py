@@ -292,6 +292,13 @@ def start_turn(project_root: str | Path, cid: str, text: str, *, config: dict | 
     failure after the row exists ends the row as `failed`."""
     from tagteam import db
     root = Path(project_root)
+    from tagteam.participants import check_participants, ParticipantMismatch
+    try:
+        fresh = check_participants(root)
+    except ParticipantMismatch as exc:
+        raise LeadChatError(str(exc)) from exc
+    if fresh is not None:
+        config = fresh
     if not CONVERSATION_ID_RE.match(cid or ""):
         raise LeadChatError(f"invalid conversation id: {cid!r}")
     if not isinstance(text, str) or not text.strip():
