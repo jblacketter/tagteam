@@ -9,8 +9,8 @@
 - [ ] Complete
 
 ## Roles
-- Lead: {{lead}}
-- Reviewer: {{reviewer}}
+- Lead: Lead (read current tagteam.yaml)
+- Reviewer: Reviewer (read current tagteam.yaml)
 - Arbiter: Human
 
 ## Summary

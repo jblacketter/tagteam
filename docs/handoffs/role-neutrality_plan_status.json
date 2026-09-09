@@ -1,0 +1,40 @@
+{
+  "state": "approved",
+  "ready_for": null,
+  "round": 3,
+  "phase": "role-neutrality",
+  "type": "plan",
+  "lead": "codex",
+  "reviewer": "claude",
+  "date": "2026-09-09",
+  "baseline": {
+    "sha": "8175db7c256a7743e6d2f718dd4eac6fbf9d69b5",
+    "dirty_paths": [
+      " D .claude/skills/handoff/SKILL.md",
+      " M docs/roadmap.md",
+      " M docs/workflows.md",
+      " M tagteam.yaml",
+      "?? docs/phases/role-neutrality.md",
+      "?? docs/role-neutrality-recommendations-2026-09-09.md",
+      "?? docs/tagteam-issue-iterm-lead-tab-cd-dropped-2026-09-04.md"
+    ],
+    "captured_at": "2026-09-09T16:25:55.113478+00:00",
+    "source": "plan-init"
+  },
+  "impl_boundary": {
+    "sha": "8175db7c256a7743e6d2f718dd4eac6fbf9d69b5",
+    "dirty": {
+      ".claude/skills/handoff/SKILL.md": null,
+      "docs/roadmap.md": "2392428bc98f1fee1c40a337fafd4ae72097f52ed1bbde4357890ecfe03ea6a5",
+      "docs/workflows.md": "b564d5ed7619046e3a041c4a03632e738c26b4a8ba98e9dc6fb42d3d71edad85",
+      "tagteam.yaml": "94bf1ae237661e6be6dee577f7629de4d892a343d4721af822da03126e23dcb7",
+      "docs/handoffs/role-neutrality_plan_rounds.jsonl": "7aa882637b60fbb097309ee8cc8ee717c1d29506e77cfb6ec3707716b272d03a",
+      "docs/handoffs/role-neutrality_plan_status.json": "294064cf582d17c39224d4d7e66e9bea3dae28c2067d9bfbbd60c4083260c5de",
+      "docs/phases/role-neutrality.md": "a5981a4e0f26cee9a861c60b6e29a420fc557853e3c77104cc8ba76223cc38da",
+      "docs/role-neutrality-recommendations-2026-09-09.md": "388fe0ba21d610a6d8fb6459af522cb5cbd3ccacdb8e5f7fc36cd07f7d61ff98",
+      "docs/tagteam-issue-iterm-lead-tab-cd-dropped-2026-09-04.md": "636fe002faacd0f5b01fa2b29aa744cd233d6cf3c96188658207d092a1181550"
+    },
+    "captured_at": "2026-09-09T16:32:47.459612+00:00",
+    "source": "plan-approve"
+  }
+}

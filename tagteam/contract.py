@@ -39,6 +39,25 @@ def handoff_command(project_root: str | Path) -> str:
     return PLUGIN_SKILL_COMMAND
 
 
+def terminal_turn_message(command: str) -> str:
+    """Translate workflow slash requests into text accepted by either CLI.
+
+    State retains its structured start command for headless verification, but
+    terminal input must not depend on a provider's installed slash commands.
+    """
+    if command.strip() in (LOCAL_SKILL_COMMAND, PLUGIN_SKILL_COMMAND):
+        return STANDARD_TURN_COMMAND
+    for prefix in (LOCAL_SKILL_COMMAND, PLUGIN_SKILL_COMMAND):
+        if command.startswith(prefix + " start "):
+            return (
+                f"Read {CONTRACT_HOWTO}, tagteam.yaml, and handoff-state.json. "
+                f"Follow the contract's workflow request: {command}. "
+                "For an impl request, implement the approved plan before "
+                "opening the implementation review cycle."
+            )
+    return command
+
+
 def contract_text() -> str:
     return PACKAGED_SKILL_PATH.read_text(encoding="utf-8")
 

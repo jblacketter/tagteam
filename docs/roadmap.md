@@ -9,8 +9,21 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 
 ## Phases
 
+### Phase 51: Role Neutrality
+- **Status:** Planning (2026-09-09). See `docs/phases/role-neutrality.md`.
+- **Depends on:** Phase 50
+- **Description:** Provider-independent readiness, shared onboarding, neutral instructions and participant guards at cycle writes/watcher dispatch. First upstream stage; downstream migration waits for Phase 52.
+
+### Phase 52: Safe framework migration
+- **Status:** Scheduled — manifest/provenance-aware setup and upgrade, per-project preview, git recovery and installed-distribution smoke coverage.
+- **Depends on:** Phase 51
+
+### Phase 53: Legacy diagnostics and capability visibility
+- **Status:** Scheduled — report-only workflow artifact diagnostics and bounded context/capability visibility.
+- **Depends on:** Phase 52
+
 ### Phase 50: Read-only Mode
-- **Status:** ✅ Impl approved round 4 (2026-09-04; plan approved round 3). PR #32 open on `phase-50-read-only-mode`; release **3.11.0** after merge. See `docs/phases/read-only-mode.md`
+- **Status:** ✅ Complete — impl approved round 4 (2026-09-04; plan approved round 3); PR #32 merged; released as **3.11.0**. See `docs/phases/read-only-mode.md`
 - **Description:** The one-cycle-writing-call rule is enforced by prose, not by the CLI: panel lenses get a `TAGTEAM_PANEL_LENS` env var nobody reads (the panel only *detects* a stray write after the fact), and the `codex-brief` / verifier agents have Bash and honor-system "never write" rules. Add `TAGTEAM_READ_ONLY=1`, enforced at the two write chokepoints (`dualwrite.writer_lock` and the `db` writer functions) before anything touches disk, surfaced by the CLI as one refusal line with exit 2. Panel lens children get it; headless turns do not. Contract gains a "read-only helpers" paragraph. Prerequisite for ever shipping reviewer agents in the plugin (deferred from Phase 48).
 - **Depends on:** Phase 39
 
@@ -452,6 +465,9 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 
 ### Reviewer wake delivery (possible one-off, unscheduled)
 - **Status:** Observed once on 2026-08-30 (Codex not woken when the turn flipped to reviewer; the human had to nudge it). Arbiter ruling 2026-09-03: not reproduced, treat as a possible one-off, no fix scheduled. Evidence and suggested diagnostics in `docs/tagteam-issue-reviewer-wake-delivery-2026-08-30.md` — if it recurs, promote to a phase from that note.
+
+### iTerm2 backend: injected `cd` eaten by shell-startup input (reproduced, unscheduled)
+- **Status:** Reproduced 2026-09-04 on sonicgrid (CLI 3.11.0). `create_session` writes `cd <project_dir>` into each tab before the shell reaches its prompt; anything that reads the tty during startup (here the oh-my-zsh `[Y/n]` update prompt) swallows the first character, the tab stays in `~`, and `claude` launches with the home-directory trust prompt. State layer was correct throughout — it presents as "handoff defaulting to my user root". Fix belongs in the backend: gate the `cd` on a shell-prompt readiness poll (reuse `wait_for_agent_ready`), then verify `session.path` before launching agents. Evidence, screen capture, and suggested fix in `docs/tagteam-issue-iterm-lead-tab-cd-dropped-2026-09-04.md`. Dotfile workaround (`zstyle ':omz:update' mode reminder`) covers only oh-my-zsh.
 
 ### Reviewer agents in the plugin (deferred from Phase 48)
 - **Status:** Deferred 2026-09-03 by arbiter ruling; depends on Phase 50 (read-only mode). Ship `codex-brief` (the submission drafter) in the plugin only after Phase 50 gives the CLI an enforced read-only mode, and extend Phase 49's user-level conflict report to agents. `doc-drift` is generic, not tagteam-specific — leave it out of the plugin. Before scheduling: check whether the user-level `codex-brief` briefs are actually what gets submitted or get rewritten; if rewritten, the agent is not earning its keep.

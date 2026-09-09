@@ -3,7 +3,7 @@
 This document describes how the lead and reviewer agents collaborate on a
 project using tagteam. It is installed by `tagteam setup` and refreshed by
 `tagteam upgrade`; the authoritative, versioned contract the agents follow is
-the handoff skill.
+the output of `tagteam contract`.
 
 > **Note**: Agent names are configured in `tagteam.yaml`. Read that file to see
 > which agent is the lead and which is the reviewer for your project.
@@ -23,10 +23,13 @@ The handoff contract is one document, served three ways:
 | How | Who | Command |
 |-----|-----|---------|
 | Claude Code plugin (`tagteam`) | Claude | `/tagteam:handoff` |
-| Vendored copy at `.claude/skills/handoff/SKILL.md` | any project that still carries one | `/handoff` |
+| Vendored copy at `.claude/skills/handoff/SKILL.md` | Claude Code in a project that still carries one | `/handoff` |
 | The tagteam CLI | Codex, or any agent with a shell | `tagteam contract` |
 
-Either slash command follows the same rules. The state file's command line tells
+Slash commands are Claude Code entry points. In Codex or another shell agent,
+read `tagteam contract` and follow the described workflow; do not type a Claude
+slash command into that agent's command dispatcher. Either entry point follows
+the same rules. The state file's command line tells
 an agent which to use: *"Read the handoff contract (`tagteam contract`; in
 Claude Code: /tagteam:handoff) and handoff-state.json, then act on your turn."*
 
@@ -101,3 +104,35 @@ reviewer reads the diff and does not re-run the suite.
 | `docs/roadmap.md` | The phase list and each phase's status |
 | `docs/escalations/` | Decision briefs for escalated cycles |
 | `.tagteam/` | Watcher and headless runtime state (not for editing) |
+
+## Choosing and changing roles
+
+Both assignments use the same workflow. For Codex lead / Claude reviewer:
+
+```yaml
+agents:
+  lead:
+    name: codex
+  reviewer:
+    name: claude
+```
+
+Swap the two names for Claude lead / Codex reviewer. Custom display names may
+specify an explicit `command`. `tagteam state` shows the resolved roles, launch
+commands, project root and contract entry point.
+
+Finish the active cycle before switching roles. Stop the watcher and agent
+sessions, edit `tagteam.yaml`, then recreate the sessions and watcher. An active
+participant mismatch refuses ordinary cycle writes and automated dispatch;
+restore the recorded assignment to finish the cycle. Historical participants
+are preserved. Human rulings and read/status remain available.
+
+The guard protects workflow submissions, not arbitrary agent edits or external
+actions. Existing terminal panes are not identified or replaced automatically.
+`TAGTEAM_READ_ONLY=1` likewise protects Tagteam writes, not every filesystem/API
+operation. Desktop and headless sessions may have different tools and access.
+
+Existing project instruction files are preserved. New instruction pointers are
+created only when absent. Safe migration of customized legacy framework files
+is separate work: do not treat readiness as confirmation that an old project's
+skills and rules are synchronized.

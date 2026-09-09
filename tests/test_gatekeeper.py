@@ -1392,7 +1392,7 @@ class TestCockpitAndDocs:
             conn.close()
 
     def test_skill_copies_identical_and_mention_gate(self):
-        a = (REPO / ".claude" / "skills" / "handoff" / "SKILL.md").read_text(encoding="utf-8")
+        a = (REPO / "plugin" / "skills" / "handoff" / "SKILL.md").read_text(encoding="utf-8")
         b = SKILL_SRC.read_text(encoding="utf-8")
         assert a == b
         assert "tagteam gate check" in b and "GATE_BOUNCE" in b and "role: gatekeeper" in b

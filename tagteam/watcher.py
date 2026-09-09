@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from tagteam.tabs import TAB_BACKENDS
-from tagteam.contract import handoff_command
+from tagteam.contract import handoff_command, terminal_turn_message, STANDARD_TURN_COMMAND
 from tagteam.config import read_config, get_agent_names
 from tagteam.state import read_state, update_state, get_state_path, normalize_phase_key
 
@@ -934,6 +934,16 @@ class _StateProcessor:
         return True
 
     def _dispatch(self, state: dict) -> None:
+        from tagteam.participants import check_participants, ParticipantMismatch
+        from tagteam.config import get_agent_names
+        try:
+            config = check_participants(self.project_dir)
+        except ParticipantMismatch as exc:
+            _log(f"   REFUSED: {exc}")
+            return
+        if config is not None:
+            self.lead_name, self.reviewer_name = get_agent_names(config)
+
         current_status = state.get("status")
         current_turn = state.get("turn")
         command = state.get("command", "")
@@ -962,6 +972,7 @@ class _StateProcessor:
 
     def _handle_ready(self, agent_name, pane, session_id,
                       command, phase, round_num, state=None):
+        command = terminal_turn_message(command)
         _log(f">> {agent_name}'s turn"
              f" (phase: {phase}, round: {round_num})")
         # Phase 32: the pause marker holds dispatch in EVERY mode. Do not
@@ -1053,7 +1064,13 @@ class _StateProcessor:
             self.idle_since = time.time()
             return
 
-        done_msg = handoff_command(self.project_dir)
+        done_msg = STANDARD_TURN_COMMAND
+        if state.get("type") == "plan" and result == "approved":
+            done_msg += (
+                f". The plan for {state.get('phase', '?')} is approved: "
+                "implement it now, then submit the implementation for review "
+                "using the contract's start impl workflow."
+            )
         if result == "roadmap-complete":
             _log("** Roadmap complete: all phases finished!")
             notify_macos("Tagteam", "Roadmap complete!")

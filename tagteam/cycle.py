@@ -364,6 +364,8 @@ def init_cycle(phase: str, cycle_type: str, lead: str, reviewer: str,
     from tagteam import dualwrite
 
     project_dir = _resolve(project_dir)
+    from tagteam.participants import check_participants
+    check_participants(project_dir, proposed=(lead, reviewer))
     handoffs = _handoffs_dir(project_dir)
     handoffs.mkdir(parents=True, exist_ok=True)
 
@@ -401,6 +403,7 @@ def init_cycle(phase: str, cycle_type: str, lead: str, reviewer: str,
     rp = _rounds_path(phase, cycle_type, project_dir)
 
     with dualwrite.writer_lock(project_dir):
+        check_participants(project_dir, proposed=(lead, reviewer))
         # File writes — canonical during Step A.
         rp.write_text(json.dumps(entry) + "\n", encoding="utf-8")
         sp.write_text(json.dumps(status, indent=2) + "\n", encoding="utf-8")
@@ -482,6 +485,9 @@ def add_round(phase: str, cycle_type: str, role: str, action: str,
         raise ValueError("add_round meta is not supported for AMEND")
 
     project_dir = _resolve(project_dir)
+    from tagteam.participants import check_participants
+    if not _skip_stale_gate:
+        check_participants(project_dir, cycle=(phase, cycle_type))
     now = datetime.now(timezone.utc).isoformat()
 
     # AMEND: lead-only mid-review update. No round advance, no state
@@ -509,6 +515,8 @@ def add_round(phase: str, cycle_type: str, role: str, action: str,
         rp = _rounds_path(phase, cycle_type, project_dir)
 
         with dualwrite.writer_lock(project_dir):
+            if not _skip_stale_gate:
+                check_participants(project_dir, cycle=(phase, cycle_type))
             with open(rp, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry) + "\n")
             # AMEND is rounds-only on the DB side too — no status
@@ -535,6 +543,8 @@ def add_round(phase: str, cycle_type: str, role: str, action: str,
     rp = _rounds_path(phase, cycle_type, project_dir)
 
     with dualwrite.writer_lock(project_dir):
+        if not _skip_stale_gate:
+            check_participants(project_dir, cycle=(phase, cycle_type))
         with open(rp, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
 

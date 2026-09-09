@@ -18,7 +18,7 @@ This log tracks important decisions made during the project.
 
 **Rationale:** [Why this option was chosen]
 
-**Decided By:** [{{lead}} / {{reviewer}} / Human / Consensus]
+**Decided By:** [Lead (read current tagteam.yaml) / Reviewer (read current tagteam.yaml) / Human / Consensus]
 
 **Phase:** [Which phase this relates to]
 

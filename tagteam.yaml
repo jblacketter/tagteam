@@ -3,22 +3,17 @@
 
 agents:
   lead:
-    name: Claude
+    name: codex
   reviewer:
-    name: Codex
+    name: claude
 
-# Phase 33: escalation briefer (opt-in). Writes a decision brief when a
-# cycle escalates; see `tagteam brief` / `tagteam rule`.
+# Escalation briefer and synchronous implementation gate, restored from HEAD.
 briefer:
   enabled: true
 
-# Phase 38: gatekeeper pre-checks (opt-in). Runs the suite + the
-# implementation-work check before each reviewer turn on impl cycles;
-# fires from a running `tagteam watch` (any mode) or `tagteam gate run`.
-# `tagteam gate check` is the lead's pre-flight.
 gatekeeper:
   enabled: true
-  on_submit: true      # Phase 41: the lead's `cycle add` runs the gate — the round's one full-suite run
+  on_submit: true
   tests:
     command: ".venv/bin/python -m pytest -q -p no:cacheprovider"
     timeout_minutes: 15

@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from tagteam.watcher import _StateProcessor
+from tagteam.contract import STANDARD_TURN_COMMAND
 
 
 def _make_processor(mode="notify", **overrides):
@@ -46,6 +47,11 @@ def _state(seq, status="ready", turn="lead", command="/handoff",
     }
     s.update(extra)
     return s
+
+
+@pytest.fixture(autouse=True)
+def isolate_project(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
 
 
 # --- First-poll bootstrap ---
@@ -299,7 +305,7 @@ def test_iterm2_mode_calls_send_iterm_command():
                       command="/handoff"))
     send.assert_called_once()
     assert send.call_args[0][0] == "lead-sid"
-    assert send.call_args[0][1] == "/handoff"
+    assert send.call_args[0][1] == STANDARD_TURN_COMMAND
 
 
 def test_iterm2_mode_uses_reviewer_session_when_turn_is_reviewer():
@@ -425,3 +431,28 @@ def test_watch_pidfile_removed_on_exception(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError):
         watcher_mod.watch(mode="notify", project_dir=str(tmp_path), force_poll=True)
     assert watcher_mod.read_pidfile(tmp_path) is None
+
+
+@pytest.mark.parametrize("lead,reviewer", [("codex", "claude"), ("claude", "codex")])
+def test_plan_completion_is_portable_and_requests_implementation(tmp_path, lead, reviewer):
+    p = _make_processor(mode="iterm2", project_dir=str(tmp_path),
+                        lead_name=lead, reviewer_name=reviewer)
+    with patch("tagteam.watcher.send_iterm_command", return_value=True) as send, \
+         patch("tagteam.watcher.notify_macos"):
+        p._handle_done(_state(2, status="done", result="approved", type="plan"))
+    message = send.call_args.args[1]
+    assert send.call_args.args[0] == "lead-sid"
+    assert not message.startswith("/")
+    assert "tagteam contract" in message
+    assert "implement it now" in message
+
+
+@pytest.mark.parametrize("command", ["/handoff start p1 impl", "/tagteam:handoff start p1"])
+def test_start_delivery_is_text_and_preserves_state_command(tmp_path, command):
+    p = _make_processor(mode="iterm2", project_dir=str(tmp_path))
+    state = _state(1, command=command)
+    with patch("tagteam.watcher.send_iterm_command", return_value=True) as send:
+        p.tick(state)
+    assert not send.call_args.args[1].startswith("/")
+    assert command in send.call_args.args[1]
+    assert state["command"] == command

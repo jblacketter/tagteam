@@ -827,7 +827,7 @@ class TestCliDocs:
         assert "panel " in r.stdout
 
     def test_docs_and_package_data(self):
-        a = (REPO / ".claude" / "skills" / "handoff" / "SKILL.md").read_text(encoding="utf-8")
+        a = (REPO / "plugin" / "skills" / "handoff" / "SKILL.md").read_text(encoding="utf-8")
         assert a == SKILL_SRC.read_text(encoding="utf-8")
         assert "PANEL:" in a and "panel" in a.lower()
         readme = (REPO / "README.md").read_text(encoding="utf-8")
