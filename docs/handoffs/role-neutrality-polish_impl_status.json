@@ -1,0 +1,30 @@
+{
+  "state": "approved",
+  "ready_for": null,
+  "round": 2,
+  "phase": "role-neutrality-polish",
+  "type": "impl",
+  "lead": "codex",
+  "reviewer": "claude",
+  "date": "2026-09-09",
+  "baseline": {
+    "sha": "eeb3190060d22a4ba5eb90fb8d579c1b91847419",
+    "dirty_paths": [
+      " M docs/roadmap.md",
+      "?? docs/phases/role-neutrality-polish.md"
+    ],
+    "captured_at": "2026-09-09T17:35:15.255424+00:00",
+    "source": "copied-from-plan"
+  },
+  "impl_boundary": {
+    "sha": "eeb3190060d22a4ba5eb90fb8d579c1b91847419",
+    "dirty": {
+      "docs/roadmap.md": "a0ece725a120af60ff9743aa25dec87995f13daefd1d23ac20e42358aaf1dec6",
+      "docs/handoffs/role-neutrality-polish_plan_rounds.jsonl": "d1dd71661890855a8767e8aacdd16f5bd2583c9d5e9e5d277f5cca651f46c561",
+      "docs/handoffs/role-neutrality-polish_plan_status.json": "47a7cb407313903fa82327b4c61c0c14682790af2d28db8db665cc98028ed852",
+      "docs/phases/role-neutrality-polish.md": "d74de77607a98226928b9e484466fd8f5f84bad31f8f4be161f00ad8f40a58b1"
+    },
+    "captured_at": "2026-09-09T17:36:02.984991+00:00",
+    "source": "copied-from-plan"
+  }
+}

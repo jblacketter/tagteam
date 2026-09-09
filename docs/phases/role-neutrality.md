@@ -5,7 +5,7 @@
 - [x] Approved
 - [x] Implementation: phase-51-role-neutrality
 - [x] Implementation Review: approved round 2 (2026-09-09), gate passed at 06a9eda
-- [x] Complete: phase closed; PR delivery authorized, merge and 3.12.0 tag pending arbiter decision
+- [x] Complete: PR #33 merged (2026-09-09); 3.12.0 tag pending arbiter decision
 
 ## Roles
 Read current assignments from `tagteam.yaml`: initially codex lead, claude
