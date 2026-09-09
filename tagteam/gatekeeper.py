@@ -39,7 +39,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from tagteam import cycle as _cycle
-from tagteam.contract import handoff_command
+from tagteam.contract import CONTRACT_HOWTO
 from tagteam import db as _db
 from tagteam import headless as h
 from tagteam import procs
@@ -925,7 +925,7 @@ def on_submit_gate(project_root: str | Path, phase: str, cycle_type: str, *,
     tag = f" ({res.event_key})" if res.event_key else ""
     if res.status == "pass":
         print(f"gate: pass{tag}", file=out)
-        print(f"next: {who}'s turn — tell {who} to run {handoff_command(root)}", file=out)
+        print(f"next: {who}'s turn — tell {who} to read {CONTRACT_HOWTO}, then act on their turn", file=out)
     elif res.status == "bounce":
         print(f"gate: bounce{tag}", file=out)
         print("next: the lead's turn — the turn is already back with you; fix and re-submit with --round N+1", file=out)
@@ -1031,7 +1031,7 @@ def gate_command(args: list[str], project_root: str | Path | None = None, out=No
                 print(res.decision["content"], file=out)
             print(f"gate: {res.status} — {res.reason}" + (f" ({res.event_key})" if res.event_key else ""), file=out)
             if res.status == "pass":
-                print(f"next: the reviewer's turn (the watcher, if running, hands off; otherwise tell the reviewer to run {handoff_command(root)})", file=out)
+                print(f"next: the reviewer's turn (the watcher, if running, hands off; otherwise tell the reviewer to read {CONTRACT_HOWTO}, then act on their turn)", file=out)
             elif res.status == "bounce":
                 print("next: the lead's turn (turn handed back with the failing report)", file=out)
         return 0 if res.status in ("pass", "bounce", "not-applicable") else 1

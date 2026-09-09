@@ -230,3 +230,22 @@ class TestLegacyUserSkillNote:
         out = capsys.readouterr().out
         assert out.count("may conflict with the tagteam plugin") == 1
         assert self._snapshot(cfg) == before
+
+
+def test_setup_copies_shipped_templates_without_rendering(project, monkeypatch, capsys):
+    def unexpected_render(*args, **kwargs):
+        raise AssertionError("shipped files must not render role variables")
+    monkeypatch.setattr(su, "render_template", unexpected_render)
+    su.main(str(project), no_plugin=True, report_user_skills=False)
+    for source in (su.get_data_dir() / "templates").glob("*.md"):
+        assert (project / "templates" / source.name).read_bytes() == source.read_bytes()
+    output = capsys.readouterr().out
+    assert "Using agent names from config" not in output
+    assert "templates will have" not in output
+
+
+def test_copy_md_file_keeps_explicit_variable_compatibility(tmp_path):
+    source, target = tmp_path / "source.md", tmp_path / "target.md"
+    source.write_text("Lead: {{lead}}")
+    su.copy_md_file(source, target, {"lead": "Builder"})
+    assert target.read_text() == "Lead: Builder"

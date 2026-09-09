@@ -14,12 +14,12 @@ from tagteam.config import read_config, validate_config
 from tagteam.plugin import (PluginStatus, plugin_status,   # noqa: F401 — re-exported
                             vendored_skill_provenance,
                             legacy_handoff_skill_candidates, render_legacy_skill_note)
-from tagteam.templates import get_template_variables, render_template
+from tagteam.templates import render_template
 
 SKILL_RELDIR = Path(".claude") / "skills" / "handoff"
 
 
-def copy_md_file(src: Path, dst: Path, variables: dict[str, str]) -> None:
+def copy_md_file(src: Path, dst: Path, variables: dict[str, str] | None = None) -> None:
     """Copy a markdown file, applying variable substitution if variables provided."""
     content = src.read_text(encoding="utf-8")
     if variables:
@@ -160,7 +160,7 @@ def main(target_dir: str = ".", *, no_plugin: bool = False,
     for d in dirs_to_create:
         (target / d).mkdir(parents=True, exist_ok=True)
 
-    # Read config for template variable substitution
+    # Validate project configuration without baking roles into shipped templates
     config_path = target / "tagteam.yaml"
     config = read_config(config_path)
 
@@ -172,13 +172,6 @@ def main(target_dir: str = ".", *, no_plugin: bool = False,
             for err in errors:
                 print(f"  - {err}")
             print()
-
-    variables = get_template_variables(config)
-    if variables:
-        print(f"Using agent names from config: lead={variables.get('lead')}, reviewer={variables.get('reviewer')}")
-    else:
-        print("No config found - templates will have {{variable}} placeholders")
-    print()
 
     # Remove deprecated flat-file skills from previous versions
     # Uses glob to catch any handoff-*.md files, not just known ones
@@ -203,51 +196,51 @@ def main(target_dir: str = ".", *, no_plugin: bool = False,
     if report_user_skills and not no_plugin:
         report_legacy_user_skills()
 
-    # Copy templates (with variable substitution)
+    # Copy templates
     print("Copying templates...")
     templates_src = source / "templates"
     templates_dst = target / "templates"
     if templates_src.exists():
         for f in templates_src.glob("*.md"):
-            copy_md_file(f, templates_dst / f.name, variables)
+            copy_md_file(f, templates_dst / f.name)
             print(f"  - {f.name}")
     else:
         print(f"  Warning: Templates not found at {templates_src}")
 
-    # Copy checklists (with variable substitution)
+    # Copy checklists
     print("Copying checklists...")
     checklists_src = source / "checklists"
     checklists_dst = target / "docs" / "checklists"
     if checklists_src.exists():
         for f in checklists_src.glob("*.md"):
-            copy_md_file(f, checklists_dst / f.name, variables)
+            copy_md_file(f, checklists_dst / f.name)
             print(f"  - {f.name}")
     else:
         print(f"  Warning: Checklists not found at {checklists_src}")
 
-    # Copy workflow docs (with variable substitution)
+    # Copy workflow docs
     print("Copying workflow documentation...")
     workflows_src = source / "workflows.md"
     if workflows_src.exists():
-        copy_md_file(workflows_src, target / "docs" / "workflows.md", variables)
+        copy_md_file(workflows_src, target / "docs" / "workflows.md")
         print("  - workflows.md")
     else:
         print(f"  Warning: workflows.md not found at {workflows_src}")
 
-    # Initialize files if they don't exist (with variable substitution)
+    # Initialize files if they don't exist
     roadmap_dst = target / "docs" / "roadmap.md"
     if not roadmap_dst.exists():
         print("Creating roadmap template...")
         roadmap_src = source / "templates" / "roadmap.md"
         if roadmap_src.exists():
-            copy_md_file(roadmap_src, roadmap_dst, variables)
+            copy_md_file(roadmap_src, roadmap_dst)
 
     decision_log_dst = target / "docs" / "decision_log.md"
     if not decision_log_dst.exists():
         print("Creating decision log...")
         decision_log_src = source / "templates" / "decision_log.md"
         if decision_log_src.exists():
-            copy_md_file(decision_log_src, decision_log_dst, variables)
+            copy_md_file(decision_log_src, decision_log_dst)
 
     # Instruction adapters are seeded only when absent. Existing project rules
     # belong to the user, even when they contain outdated workflow references.

@@ -119,3 +119,13 @@ class TestGetTemplateVariables:
         }
         result = get_template_variables(config)
         assert result == {"reviewer": "Codex"}
+
+
+def test_shipped_handoff_labels_are_not_duplicated():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1] / "tagteam/data/templates"
+    for filename in ("handoff_plan.md", "handoff_impl.md"):
+        text = (root / filename).read_text()
+        assert "**From:** Lead (read current tagteam.yaml)\n" in text
+        assert "**To:** Reviewer (read current tagteam.yaml)\n" in text
+        assert ") (Lead)" not in text and ") (Reviewer)" not in text
