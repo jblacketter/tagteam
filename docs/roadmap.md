@@ -10,7 +10,7 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 ## Phases
 
 ### Phase 51: Role Neutrality
-- **Status:** Planning (2026-09-09). See `docs/phases/role-neutrality.md`.
+- **Status:** ✅ Complete — plan approved round 3, impl approved round 2 (2026-09-09); gate: 1,785 passed, 5 skipped at `06a9eda`. Branch `phase-51-role-neutrality`; merge and **3.12.0** tagging pending arbiter decision. See `docs/phases/role-neutrality.md`.
 - **Depends on:** Phase 50
 - **Description:** Provider-independent readiness, shared onboarding, neutral instructions and participant guards at cycle writes/watcher dispatch. First upstream stage; downstream migration waits for Phase 52.
 

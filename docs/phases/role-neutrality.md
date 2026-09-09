@@ -4,8 +4,8 @@
 - [x] Planning: approved round 3 (2026-09-09)
 - [x] Approved
 - [x] Implementation: phase-51-role-neutrality
-- [ ] Implementation Review
-- [ ] Complete
+- [x] Implementation Review: approved round 2 (2026-09-09), gate passed at 06a9eda
+- [x] Complete: phase closed; PR delivery authorized, merge and 3.12.0 tag pending arbiter decision
 
 ## Roles
 Read current assignments from `tagteam.yaml`: initially codex lead, claude
@@ -195,3 +195,19 @@ readiness improvements as safe migration. No human clarification is needed now.
   issue note are preserved; no blanket setup/upgrade was run on this repository.
 - Version metadata prepared as 3.12.0 using scripts/release.py. No publication or
   downstream installation. Phase 52 remains required before downstream migration.
+
+
+## Closeout (2026-09-09)
+Reviewer approved implementation round 2. Recorded gate at `06a9eda`: 1,785
+passed, 5 skipped; scope and plan-document checks passed. Closeout changes are
+status/documentation and recorded cycle artifacts; no repeat full-suite run.
+
+Per the arbiter, include the implementation cycle files, deleted local vendored
+handoff skill, refreshed local `docs/workflows.md`, and the existing iTerm startup
+issue note in the branch/PR. These supersede the earlier note that those local
+files remained outside the implementation commit. The iTerm issue remains open;
+including its note does not claim a fix.
+
+The review's four non-blocking nits remain recorded in the impl round-2 approval
+for a separate arbiter decision. No tag, publication, or downstream upgrade is
+part of this closeout. Phase 52 remains required before downstream migration.
