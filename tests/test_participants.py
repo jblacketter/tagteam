@@ -99,14 +99,41 @@ def test_human_ruling_still_available_on_mismatch(tmp_path):
 
 def test_direct_headless_entry_refuses_before_process(tmp_path):
     from tagteam.headless import HeadlessEngine
+    from tagteam.config import read_config
     configure(tmp_path, 'codex', 'claude')
+    original = read_config(tmp_path / 'tagteam.yaml')
     root = str(tmp_path)
     init_cycle('p1', 'plan', 'codex', 'claude', 'initial', root)
     configure(tmp_path, 'claude', 'codex')
-    engine = HeadlessEngine(root, {}, lead_name='codex', reviewer_name='claude')
+    messages = []
+    engine = HeadlessEngine(root, original, lead_name='codex', reviewer_name='claude',
+                            log=messages.append)
     with patch.object(engine, '_run_attempt') as attempt:
         assert engine.run_owed_turn(dict(status='ready', turn='lead')) is None
     attempt.assert_not_called()
+    assert len(messages) == 1
+    assert 'Participant mismatch:' in messages[0]
+    assert 'Agent configuration changed' not in messages[0]
+
+
+def test_direct_headless_refuses_stale_config_after_cycle_completed(tmp_path):
+    from tagteam.headless import HeadlessEngine
+    from tagteam.config import read_config
+    configure(tmp_path, 'codex', 'claude')
+    original = read_config(tmp_path / 'tagteam.yaml')
+    root = str(tmp_path)
+    init_cycle('p1', 'plan', 'codex', 'claude', 'initial', root)
+    add_round('p1', 'plan', 'reviewer', 'APPROVE', 1, 'ok', root)
+    configure(tmp_path, 'claude', 'codex')
+    messages = []
+    engine = HeadlessEngine(root, original, lead_name='codex', reviewer_name='claude',
+                            log=messages.append)
+    with patch.object(engine, '_run_attempt') as attempt:
+        assert engine.run_owed_turn(dict(status='ready', turn='lead')) is None
+    attempt.assert_not_called()
+    assert len(messages) == 1
+    assert 'Agent configuration changed' in messages[0]
+    assert 'Participant mismatch:' not in messages[0]
 
 
 def test_direct_lead_conversation_refuses_before_claim(tmp_path):

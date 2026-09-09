@@ -1,8 +1,8 @@
 # Handoff: [Phase Name] - Plan Review
 
 **Date:** [YYYY-MM-DD]
-**From:** Lead (read current tagteam.yaml) (Lead)
-**To:** Reviewer (read current tagteam.yaml) (Reviewer)
+**From:** Lead (read current tagteam.yaml)
+**To:** Reviewer (read current tagteam.yaml)
 **Type:** Planning Review
 
 ## Summary

@@ -9,6 +9,10 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 
 ## Phases
 
+### Phase 54: Role Neutrality Polish
+- **Status:** Planning — four non-blocking Phase 51 nits, separate PR before publishing 3.12.0. See `docs/phases/role-neutrality-polish.md`.
+- **Depends on:** Phase 51
+
 ### Phase 51: Role Neutrality
 - **Status:** ✅ Complete — plan approved round 3, impl approved round 2 (2026-09-09); gate: 1,785 passed, 5 skipped at `06a9eda`. Branch `phase-51-role-neutrality`; merge and **3.12.0** tagging pending arbiter decision. See `docs/phases/role-neutrality.md`.
 - **Depends on:** Phase 50

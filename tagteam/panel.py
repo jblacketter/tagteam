@@ -37,7 +37,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from tagteam import cycle as _cycle
-from tagteam.contract import handoff_command
+from tagteam.contract import CONTRACT_HOWTO
 from tagteam import db as _db
 from tagteam import dualwrite
 from tagteam import headless as h
@@ -971,7 +971,7 @@ def panel_command(args: list[str], project_root: str | Path | None = None, out=N
             if res.status == "merged":
                 print(f"next: the {'lead' if res.decision in ('REQUEST_CHANGES',) else 'arbiter' if res.decision in ('ESCALATE', 'NEED_HUMAN') else 'next phase'} — the panel's entry is the reviewer's response", file=out)
             elif res.status == "fallback":
-                print(f"next: the ordinary reviewer turn (tell the reviewer to run {handoff_command(root)})", file=out)
+                print(f"next: the ordinary reviewer turn (tell the reviewer to read {CONTRACT_HOWTO}, then act on their turn)", file=out)
         return 0 if res.status in ("merged", "fallback", "not-applicable") else 1
 
     info = panel_status(root, phase, ctype)

@@ -1,7 +1,9 @@
 """
 Template rendering utilities for Tagteam.
 
-Provides simple {{variable}} substitution for markdown templates.
+Provides simple {{variable}} substitution for older/custom template callers.
+Shipped framework templates read current roles from tagteam.yaml and are copied
+without substitution; these helpers remain callable for compatibility.
 """
 
 

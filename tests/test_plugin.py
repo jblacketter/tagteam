@@ -273,16 +273,40 @@ class TestRuntimeStringsAudit:
                                             handoff_cmd=handoff_command(tmp_path))
         assert "`/handoff start <phase>`" in vendored
 
-    @pytest.mark.parametrize("vendored", [False, True])
-    def test_gate_and_panel_next_lines_are_project_aware(self, tmp_path, vendored):
-        from tagteam.contract import handoff_command
-        if vendored:
-            d = tmp_path / ".claude" / "skills" / "handoff"; d.mkdir(parents=True); (d / "SKILL.md").write_text("x")
-        expect = "/handoff" if vendored else "/tagteam:handoff"
-        assert handoff_command(tmp_path) == expect
-        # the literal strings the two manual paths print are built from handoff_command(root)
-        src = (REPO / "tagteam" / "gatekeeper.py").read_text() + (REPO / "tagteam" / "panel.py").read_text()
-        assert src.count("tell the reviewer to run {handoff_command(root)}") == 2
+    @pytest.mark.parametrize("reviewer", ["codex", "claude"])
+    def test_gate_and_panel_next_lines_are_provider_neutral(self, tmp_path, reviewer):
+        from io import StringIO
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock, patch
+        from tagteam import gatekeeper, panel
+        from tagteam.contract import CONTRACT_HOWTO
+
+        spec = MagicMock(enabled=True, on_submit=True, problems=[])
+        result = SimpleNamespace(status="pass", decision=None, event_key=None, reason="ok")
+        outputs = []
+        with patch.object(gatekeeper, "load_spec", return_value=spec), \
+             patch.object(gatekeeper, "run_gate", return_value=result):
+            out = StringIO()
+            gatekeeper.on_submit_gate(tmp_path, "p", "impl", reviewer=reviewer,
+                                     out=out, err=StringIO())
+            assert f"tell {reviewer} to read" in out.getvalue()
+            outputs.append(out.getvalue())
+            out = StringIO()
+            assert gatekeeper.gate_command(["run", "--phase", "p", "--type", "impl"],
+                                           project_root=tmp_path, out=out) == 0
+            outputs.append(out.getvalue())
+        result = SimpleNamespace(status="fallback", content=None, event_key=None, reason="fallback")
+        with patch.object(panel, "load_spec", return_value=spec), \
+             patch.object(panel, "run_panel", return_value=result):
+            out = StringIO()
+            assert panel.panel_command(["run", "--phase", "p", "--type", "impl"],
+                                       project_root=tmp_path, out=out) == 0
+            outputs.append(out.getvalue())
+        for text in outputs:
+            assert CONTRACT_HOWTO in text
+            assert "then act on their turn" in text
+            assert "to run /" not in text
+
 
 
 class TestProvenance:
