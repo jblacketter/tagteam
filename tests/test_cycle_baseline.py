@@ -66,7 +66,7 @@ def _make_tagteam_project(tmp_path: Path, monkeypatch,
     proj.mkdir()
     if with_git:
         _seed_repo(proj, with_initial_commit=with_initial_commit)
-    (proj / "tagteam.yaml").write_text("agents: {}\n")
+    (proj / "tagteam.yaml").write_text("agents:\n  lead: {name: L}\n  reviewer: {name: R}\n")
     (proj / "docs" / "handoffs").mkdir(parents=True)
     if with_git and with_initial_commit:
         # Commit project scaffolding so the repo starts clean from the

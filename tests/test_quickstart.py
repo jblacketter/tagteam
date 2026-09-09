@@ -6,6 +6,9 @@ import sys
 import pytest
 from unittest.mock import MagicMock, patch
 
+# Import the re-exporting module before patching tabs helpers below; otherwise
+# its first import can permanently bind a temporary MagicMock.
+from tagteam import iterm  # noqa: F401
 from tagteam.setup import needs_setup, run_setup
 from tagteam.cli import (
     HANDOFF_EXPLAINER,
@@ -30,13 +33,13 @@ class TestNeedsSetup:
 
         assert needs_setup(str(tmp_path)) is False
 
-    def test_missing_skills(self, tmp_path):
+    def test_packaged_contract_needs_no_local_skill(self, tmp_path):
         (tmp_path / "templates").mkdir()
         (tmp_path / "templates" / "phase_plan.md").write_text("template")
         (tmp_path / "docs" / "checklists").mkdir(parents=True)
         (tmp_path / "docs" / "checklists" / "code_review.md").write_text("checklist")
 
-        assert needs_setup(str(tmp_path)) is True
+        assert needs_setup(str(tmp_path)) is False
 
     def test_missing_templates(self, tmp_path):
         (tmp_path / ".claude" / "skills" / "handoff").mkdir(parents=True)
@@ -66,9 +69,7 @@ class TestNeedsSetup:
 
 
 class TestNeedsSetupWithPlugin:
-    """Phase 48: the skill requirement is met by a local copy OR an
-    installed-and-enabled plugin; every uncertain plugin state still
-    requires the local copy (fail-closed)."""
+    """Canonical readiness is independent of optional Claude plugin status."""
 
     def _project(self, tmp_path):
         from tests._plugin_env import framework_files
@@ -81,15 +82,15 @@ class TestNeedsSetupWithPlugin:
         p = self._project(tmp_path); fake_plugin(tmp_path, monkeypatch)
         assert needs_setup(str(p)) is False
 
-    def test_disabled_requires_local_skill(self, tmp_path, monkeypatch):
+    def test_disabled_plugin_does_not_block_readiness(self, tmp_path, monkeypatch):
         from tests._plugin_env import fake_plugin
         p = self._project(tmp_path); fake_plugin(tmp_path, monkeypatch, enabled=False)
-        assert needs_setup(str(p)) is True
+        assert needs_setup(str(p)) is False
 
-    def test_malformed_cli_output_requires_local_skill(self, tmp_path, monkeypatch):
+    def test_malformed_plugin_output_does_not_block_readiness(self, tmp_path, monkeypatch):
         from tests._plugin_env import fake_plugin
         p = self._project(tmp_path); fake_plugin(tmp_path, monkeypatch, stdout="{")
-        assert needs_setup(str(p)) is True
+        assert needs_setup(str(p)) is False
 
     def test_project_scope_matching_is_complete(self, tmp_path, monkeypatch):
         from tests._plugin_env import fake_plugin
@@ -97,11 +98,11 @@ class TestNeedsSetupWithPlugin:
         fake_plugin(tmp_path, monkeypatch, scope="project", project_path=p)
         assert needs_setup(str(p)) is False
 
-    def test_project_scope_other_path_requires_local_skill(self, tmp_path, monkeypatch):
+    def test_other_project_plugin_does_not_block_readiness(self, tmp_path, monkeypatch):
         from tests._plugin_env import fake_plugin
         p = self._project(tmp_path); other = tmp_path / "other"; other.mkdir()
         fake_plugin(tmp_path, monkeypatch, scope="project", project_path=other)
-        assert needs_setup(str(p)) is True
+        assert needs_setup(str(p)) is False
 
     def test_plugin_does_not_excuse_templates_or_checklists(self, tmp_path, monkeypatch):
         from tests._plugin_env import fake_plugin
@@ -110,11 +111,11 @@ class TestNeedsSetupWithPlugin:
             f.unlink()
         assert needs_setup(str(p)) is True
 
-    def test_precomputed_status_is_honored(self, tmp_path, monkeypatch):
+    def test_precomputed_plugin_status_is_not_required(self, tmp_path, monkeypatch):
         from tagteam.setup import PluginStatus
         from tests._plugin_env import fake_plugin
         p = self._project(tmp_path); fake_plugin(tmp_path, monkeypatch)
-        assert needs_setup(str(p), plugin=PluginStatus(False, "forced")) is True
+        assert needs_setup(str(p), plugin=PluginStatus(False, "forced")) is False
 
     def test_launch_does_not_rerun_setup_on_migrated_project(self, tmp_path, monkeypatch):
         """session start --launch uses the same predicate."""

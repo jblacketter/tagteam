@@ -39,7 +39,7 @@ def _reset_root_cache():
 def project(tmp_path, monkeypatch):
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "tagteam.yaml").write_text("agents: {}\n")
+    (proj / "tagteam.yaml").write_text("agents:\n  lead: {name: L}\n  reviewer: {name: R}\n")
     (proj / "docs" / "handoffs").mkdir(parents=True)
     monkeypatch.chdir(proj)
     return str(proj)
