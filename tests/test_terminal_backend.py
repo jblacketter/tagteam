@@ -308,7 +308,7 @@ def test_processor_terminal_mode_binds_terminal_driver_and_sends_via_send_tab_co
         p.tick(_state(1, turn="reviewer"))
     send.assert_called_once()
     driver, sid, cmd = send.call_args[0][:3]
-    assert driver.__name__ == "tagteam.terminal" and sid == "/dev/ttys002" and cmd == "/handoff"
+    assert driver.__name__ == "tagteam.terminal" and sid == "/dev/ttys002" and "tagteam contract" in cmd and not cmd.startswith("/")
     isend.assert_not_called()
 
 
