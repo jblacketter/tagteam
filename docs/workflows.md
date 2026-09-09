@@ -1,219 +1,103 @@
 # Workflows: Lead/Reviewer Collaboration
 
-This document describes how lead and reviewer agents collaborate on projects using this framework.
+This document describes how the lead and reviewer agents collaborate on a
+project using tagteam. It is installed by `tagteam setup` and refreshed by
+`tagteam upgrade`; the authoritative, versioned contract the agents follow is
+the handoff skill.
 
-> **Note**: Agent names are configured in `tagteam.yaml`. Read that file to see which agent is the lead and which is the reviewer for your project.
+> **Note**: Agent names are configured in `tagteam.yaml`. Read that file to see
+> which agent is the lead and which is the reviewer for your project.
 
 ## Roles
 
 | Role | Responsibilities |
 |------|------------------|
-| **Lead** | Planning phases, implementing code, creating handoffs |
-| **Reviewer** | Reviewing plans and implementations, providing feedback |
-| **Arbiter** | Breaking ties, making final decisions, approving phases (typically Human) |
+| **Lead** | Plans phases, implements code, submits work for review |
+| **Reviewer** | Reviews plans and implementations, approves or requests changes |
+| **Arbiter** (human) | Rules on escalations, answers questions, steers with interjections |
 
-## Phase Workflow
+## One contract, three ways in
 
-Each phase follows this pattern:
+The handoff contract is one document, served three ways:
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        PLANNING CYCLE                           │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│   Lead: /handoff-plan create [phase]                            │
-│      │                                                          │
-│      ▼                                                          │
-│   Lead: /handoff-handoff plan [phase]  ► Reviewer: /handoff-review plan │
-│      │                                          │               │
-│      │◄─────────────────────────────────────────┘               │
-│      │  (feedback in docs/handoffs/[phase]_plan_feedback.md)    │
-│      ▼                                                          │
-│   Lead: /handoff-handoff read [phase]                           │
-│      │                                                          │
-│      ├── If APPROVED ──────────────────────────────────►        │
-│      │                                                          │
-│      └── If CHANGES REQUESTED ─► Lead: /handoff-plan update [phase] │
-│                                          │                      │
-│                                          └──► (repeat cycle)    │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                     IMPLEMENTATION CYCLE                        │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│   Lead: /handoff-implement start [phase]                        │
-│      │                                                          │
-│      ▼                                                          │
-│   [Lead implements the phase]                                   │
-│      │                                                          │
-│      ▼                                                          │
-│   Lead: /handoff-implement complete [phase]                     │
-│      │                                                          │
-│      ▼                                                          │
-│   Lead: /handoff-handoff impl [phase]  ► Reviewer: /handoff-review impl │
-│      │                                          │               │
-│      │◄─────────────────────────────────────────┘               │
-│      │  (feedback in docs/handoffs/[phase]_impl_feedback.md)    │
-│      ▼                                                          │
-│   Lead: /handoff-handoff read [phase]                           │
-│      │                                                          │
-│      ├── If APPROVED ──────────────────────────────────►        │
-│      │                                                          │
-│      └── If CHANGES REQUESTED ─► Lead fixes issues              │
-│                                          │                      │
-│                                          └──► (repeat cycle)    │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-                    /handoff-phase complete [phase]
-                              │
-                              ▼
-                    Start next phase...
-```
+| How | Who | Command |
+|-----|-----|---------|
+| Claude Code plugin (`tagteam`) | Claude | `/tagteam:handoff` |
+| Vendored copy at `.claude/skills/handoff/SKILL.md` | any project that still carries one | `/handoff` |
+| The tagteam CLI | Codex, or any agent with a shell | `tagteam contract` |
 
-## Available Skills
+Either slash command follows the same rules. The state file's command line tells
+an agent which to use: *"Read the handoff contract (`tagteam contract`; in
+Claude Code: /tagteam:handoff) and handoff-state.json, then act on your turn."*
 
-| Skill | Purpose | Who Uses |
-|-------|---------|----------|
-| `/handoff-plan` | Create/update phase plans | Lead |
-| `/handoff-handoff` | Create handoff documents | Lead |
-| `/handoff-review` | Review plans or implementations | Reviewer |
-| `/handoff-implement` | Start/track/complete implementation | Lead |
-| `/handoff-phase` | Manage phase lifecycle | Both |
-| `/handoff-status` | Check project status | Both |
-| `/handoff-decide` | Log decisions | Both |
-| `/handoff-escalate` | Escalate to human | Both |
-| `/handoff-sync` | Generate sync summary for sessions | Both |
-| `/handoff-cycle` | Automated review cycles (reduces copy-paste) | Both |
+## The cycle
 
-## Handoff Process
-
-### From Lead to Reviewer
-1. Lead completes work (plan or implementation)
-2. Lead creates handoff document with `/handoff-handoff`
-3. Human switches to reviewer session
-4. Reviewer reads sync with `/handoff-sync reviewer`
-5. Reviewer reviews with `/handoff-review`
-6. Reviewer saves feedback
-
-### From Reviewer to Lead
-1. Reviewer saves feedback to `docs/handoffs/[phase]_[type]_feedback.md`
-2. Human switches to lead session
-3. Lead reads sync with `/handoff-sync lead`
-4. Lead reads feedback with `/handoff-handoff read [phase]`
-5. Lead incorporates feedback or explains why not
-
-## Decision Authority
-
-| Decision Type | Who Decides |
-|---------------|-------------|
-| Technical approach within a phase | Lead |
-| Accepting/rejecting review feedback | Lead |
-| Blocking implementation issues | Reviewer can flag, lead decides |
-| Architecture affecting multiple phases | Requires consensus or Human |
-| Disagreements after 2 review cycles | Human (Arbiter) |
-| Scope changes to requirements | Human |
-
-## Session Transitions
-
-When switching between lead and reviewer:
-
-1. Generate sync summary: `/handoff-sync` or `/handoff-sync [lead|reviewer]`
-2. The sync summary captures current state
-3. In new session, read the sync file: `docs/sync_state.md`
-4. Continue work based on sync state
-
-## Quick Reference
-
-**Starting a new phase:**
-```
-/handoff-phase list           # See all phases
-/handoff-plan create [phase]  # Create the plan
-/handoff-handoff plan [phase] # Send to reviewer
-```
-
-**Reviewing:**
-```
-/handoff-sync reviewer        # Get context
-/handoff-review plan [phase]  # Or /handoff-review impl [phase]
-```
-
-**After review (Lead):**
-```
-/handoff-handoff read [phase] # See feedback
-/handoff-plan update [phase]  # Incorporate changes
-```
-
-**Implementing:**
-```
-/handoff-implement start [phase]
-[do the work]
-/handoff-implement complete [phase]
-/handoff-handoff impl [phase]
-```
-
-## Automated Review Cycle (Alternative)
-
-Use `/handoff-cycle` to reduce manual copy-paste during multi-round reviews. Instead of creating separate handoff/feedback files each round, both agents work from a single cycle document.
-
-### Cycle Workflow
+Each phase in `docs/roadmap.md` goes through a **plan** cycle and then an
+**impl** cycle. Every cycle is a sequence of rounds recorded under
+`docs/handoffs/`, and `handoff-state.json` says whose turn it is.
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    AUTOMATED REVIEW CYCLE                       │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│   Lead: /handoff-cycle start [phase] plan                       │
-│      │                                                          │
-│      ▼                                                          │
-│   (Human switches to reviewer terminal)                         │
-│      │                                                          │
-│      ▼                                                          │
-│   Reviewer: /handoff-cycle [phase]                              │
-│      │                                                          │
-│      ├── APPROVE ────────────────────────────────────────►      │
-│      │                                                          │
-│      └── REQUEST_CHANGES                                        │
-│              │                                                  │
-│              ▼                                                  │
-│      (Human switches to lead terminal)                          │
-│              │                                                  │
-│              ▼                                                  │
-│      Lead: /handoff-cycle [phase]  ─► address feedback          │
-│              │                                                  │
-│              └──► (repeat until approved or stale)              │
-│                                                                 │
-│   5+ stale rounds (no progress) ─► Auto-escalate to human       │
-└─────────────────────────────────────────────────────────────────┘
+Lead:      /tagteam:handoff start [phase]          → plan cycle, round 1
+Reviewer:  /tagteam:handoff                        → APPROVE or REQUEST_CHANGES
+Lead:      /tagteam:handoff                        → address feedback, round N+1
+   … until APPROVE …
+Lead:      implement, then
+           /tagteam:handoff start [phase] impl     → impl cycle, round 1
+Reviewer:  /tagteam:handoff                        → review the diff
+   … until APPROVE …
 ```
 
-### Cycle Commands
+Every turn makes exactly **one** cycle-writing call:
 
-| Command | Description |
-|---------|-------------|
-| `/handoff-cycle start [phase] plan` | Start a plan review cycle |
-| `/handoff-cycle start [phase] impl` | Start an implementation review cycle |
-| `/handoff-cycle [phase]` | Continue (auto-detects your role and turn) |
-| `/handoff-cycle status [phase]` | View current status |
-| `/handoff-cycle abort [phase]` | Cancel with a reason |
+| Action | Who | Command |
+|--------|-----|---------|
+| Open a cycle | Lead | `tagteam cycle init --phase P --type plan\|impl --lead L --reviewer R --updated-by L --content "…"` |
+| Submit a round | Lead | `tagteam cycle add --phase P --type T --role lead --action SUBMIT_FOR_REVIEW --round N --updated-by L --content "…"` |
+| Amend mid-review | Lead | `… --action AMEND --round N …` (same round, turn stays with the reviewer) |
+| Approve | Reviewer | `… --role reviewer --action APPROVE --round N …` |
+| Request changes | Reviewer | `… --role reviewer --action REQUEST_CHANGES --round N` (feedback on stdin) |
+| Escalate / ask a human | Reviewer | `… --action ESCALATE` / `… --action NEED_HUMAN` |
+| Read the cycle | Both | `tagteam cycle rounds --phase P --type T [--tail N]` |
 
-### Reviewer Actions
+A cycle ends when the reviewer approves. It escalates to the arbiter when the
+reviewer asks for it, asks a question only a human can answer, or after 10
+consecutive stale rounds. The arbiter reads `tagteam brief` and rules with
+`tagteam rule approve|request-changes|answer`.
 
-- **APPROVE**: Accept the submission, end the cycle
-- **REQUEST_CHANGES**: Provide feedback, continue to next round
-- **NEED_HUMAN**: Pause the cycle for human input
-- **ABORT**: Cancel the cycle
+## Verification: the one-run rule
 
-### When to Use Cycle vs Manual
+An impl submission costs **one** full-suite run — the one on the record. With
+`gatekeeper.on_submit: true` in `tagteam.yaml`, the gate runs it inside the
+lead's `cycle add` and records the verdict; the lead pre-flights with
+`tagteam gate check --skip-tests` and cites the gate. Without the gate, the lead
+runs the suite once right before submitting and cites the numbers. The
+reviewer reads the diff and does not re-run the suite.
 
-**Use `/handoff-cycle` when:**
-- Expecting multiple review rounds
-- Want to reduce file creation overhead
-- Prefer one command per turn
+## What runs by itself
 
-**Use manual handoff/review when:**
-- Simple one-round reviews
-- Need detailed structured feedback
-- Prefer separate files for each interaction
+| Mode | What happens |
+|------|--------------|
+| Manual | You paste each agent's handoff output into the other agent yourself |
+| `tagteam watch --mode notify\|tmux\|iterm2\|terminal` | The watcher reads `handoff-state.json` and nudges the right terminal on each turn |
+| `tagteam watch --mode headless` | Each turn is a fresh agent process (`claude -p` / `codex exec`) fed the contract, the state and the round tail; nobody is at the terminal |
+| Gatekeeper (`gatekeeper:` block) | Tests + scope + plan-doc checks before every reviewer turn; a failure bounces the lead |
+| Reviewer panel (`panel:` block) | 2–3 narrow lens reviews merged into one reviewer entry |
+| Full roadmap (`/tagteam:handoff start --roadmap`) | All incomplete phases, in dependency order, with review gates between them |
+
+## Steering
+
+- `tagteam interject "note" [--to lead|reviewer]` — a note the next turn must honor.
+- `tagteam pause --reason "…"` / `tagteam resume` — hold dispatch without losing state.
+- `tagteam cancel-turn` — abandon an in-flight headless turn.
+- `tagteam serve` — the cockpit: talk to the lead, launch, watch, rule.
+
+## Files tagteam writes
+
+| Path | What |
+|------|------|
+| `handoff-state.json` | Whose turn, what command, current phase/type/round |
+| `docs/handoffs/<phase>_<type>_rounds.jsonl` + `_status.json` | The cycle record |
+| `docs/phases/<phase>.md` | The plan (the lead writes it; the reviewer reads it) |
+| `docs/roadmap.md` | The phase list and each phase's status |
+| `docs/escalations/` | Decision briefs for escalated cycles |
+| `.tagteam/` | Watcher and headless runtime state (not for editing) |
