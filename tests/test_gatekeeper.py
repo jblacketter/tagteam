@@ -1451,7 +1451,9 @@ class TestOnSubmit:
                                       "--reviewer", "Codex", "--updated-by", "Claude", "--content", "impl v1"])
         out = capsys.readouterr()
         assert rc == 0
-        assert "Cycle created" in out.out and "gate: pass" in out.out and "tell Codex to run /handoff" in out.out
+        from tagteam.contract import CONTRACT_HOWTO
+        assert "Cycle created" in out.out and "gate: pass" in out.out
+        assert f"tell Codex to read {CONTRACT_HOWTO}, then act on their turn" in out.out
         assert "GATE: PASS" in out.out and "one full-suite run" in out.err
         assert _count(project) == 1
         rows, ents = _rows(project), _entries(project)
