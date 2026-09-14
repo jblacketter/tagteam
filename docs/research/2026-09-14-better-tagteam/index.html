@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Better tagteam — research pack</title>
+<link rel="stylesheet" href="shared.css"></head>
+<body><div class="wrap">
+<header class="top"><div class="brand">Better tagteam <span>research pack · 2026-09-14 · documentation only, no code changed</span></div>
+<nav class="crumbs"><a class="here" href="index.html">Overview</a><a href="01-cockpit-ux.html">Cockpit UX</a><a href="02-agents-and-models.html">Agents &amp; models</a><a href="03-features.html">Features</a><a href="04-engineering-and-adoption.html">Engineering</a></nav></header>
+
+<h1>Better tagteam: where the next weeks should go</h1>
+<p class="lede">Four pages, one argument. Tagteam's loop works and is well instrumented; what it lacks is the <em>use</em> of its own instrumentation. Measure a phase, grade a review, replay history as an eval, and every other decision on these pages (which model, which effort, which cockpit card) stops being a guess.</p>
+
+<h2>The argument in five points</h2>
+<div class="grid g2">
+<div class="card ok"><h3>1. Your instinct about cheap models is right, narrowly</h3><p>Test running, codebase search and summaries do not need a frontier model, and the gate already runs tests with no model. Correctness review, authoring and your chat with the lead do. For those, lower <em>effort</em> on the frontier model is the measured cheaper path, not a weaker model. <a href="02-agents-and-models.html">→ Agents &amp; models</a></p></div>
+<div class="card ok"><h3>2. Zero-code experiment available tomorrow</h3><p>The headless adapter already accepts <code>--model</code>, <code>--effort</code> and <code>--fallback-model</code> in <code>agents.&lt;role&gt;.headless.args</code>. Set the reviewer to <code>--effort medium</code> and run one phase. <a href="02-agents-and-models.html#plan">→ step 0</a></p></div>
+<div class="card"><h3>3. The biggest lever is round count, not price per token</h3><p>A reviewer turn on this repo averages 595k input tokens, 90% from cache. A missed bug costs a whole extra round on both agents plus a four-minute gate. Anything that removes a round (self-review pre-flight, better lenses) beats anything that discounts one.</p></div>
+<div class="card"><h3>4. Your handoff history is an eval set you have not used</h3><p>Every round in <code>docs/handoffs/*.jsonl</code> is a labeled example. A <code>tagteam bench</code> that replays reviewer packets at different model × effort cells turns "should scope run on Sonnet?" into a table. <a href="03-features.html#bench">→ Features #3</a></p></div>
+<div class="card warn"><h3>5. The cockpit needs one more pass, aimed at the morning</h3><p>The August passes made a running cycle legible. What is missing is the delta: "what happened while I was away, what did it cost, what needs me". A digest card, one primary action, a collapsed idle reviewer lane, and a usage tab that shows the window instead of a churn line. <a href="01-cockpit-ux.html">→ Cockpit UX</a></p></div>
+<div class="card warn"><h3>Underneath: suite time is round time</h3><p>The gate's ~4 minutes is paid every round. Profile, parallelize, add a quick profile for bounced retries. Target under two minutes. <a href="04-engineering-and-adoption.html">→ Engineering</a></p></div>
+</div>
+
+<h2>Impact vs. effort</h2>
+<p>Effort in tagteam phases (S = one impl cycle, L = several). Green: start now. Amber: after the measurement work. Grey: later or maybe.</p>
+<div class="matrix">
+<div class="q" style="left:12px;top:10px">high impact · low effort — do first</div>
+<div class="q" style="right:12px;top:10px">high impact · high effort — plan</div>
+<div class="q" style="left:12px;bottom:26px">low impact · low effort — when convenient</div>
+<div class="q" style="right:12px;bottom:26px">low impact · high effort — avoid</div>
+<div class="ax" style="left:50%;bottom:4px;transform:translateX(-50%)">effort →</div>
+<div class="ax" style="left:4px;top:50%;transform:rotate(-90deg) translateX(-50%);transform-origin:left top">impact →</div>
+<div class="dot now" style="left:14%;top:22%">Phase cost report</div>
+<div class="dot now" style="left:16%;top:40%">Effort on reviewer (config only)</div>
+<div class="dot now" style="left:22%;top:34%">Grade the review</div>
+<div class="dot now" style="left:38%;top:18%">Review bench</div>
+<div class="dot now" style="left:36%;top:28%">Since-you-left digest</div>
+<div class="dot later" style="left:30%;top:46%">Model policy by kind</div>
+<div class="dot later" style="left:48%;top:44%">Subagent kit</div>
+<div class="dot later" style="left:32%;top:56%">Self-review pre-flight</div>
+<div class="dot later" style="left:44%;top:36%">Cockpit pass 4</div>
+<div class="dot later" style="left:26%;top:62%">Faster suite / quick gate</div>
+<div class="dot later" style="left:52%;top:54%">Health tab</div>
+<div class="dot maybe" style="left:20%;top:72%">PR on approval</div>
+<div class="dot maybe" style="left:24%;top:84%">Events for Aegis</div>
+<div class="dot maybe" style="left:62%;top:70%">Rule from a phone</div>
+<div class="dot maybe" style="left:76%;top:80%">Theme packs (Phase 44)</div>
+<div class="dot maybe" style="left:12%;top:80%">Phase from issue</div>
+</div>
+
+<h2>A sequence, if you agree with the argument</h2>
+<div class="tablewrap"><table>
+<tr><th>Week</th><th>Phase (proposed)</th><th>What ships</th><th>Cycle</th><th>Depends on</th></tr>
+<tr><td>0</td><td>— (config only)</td><td>Reviewer at <code>--effort medium</code> with a Sonnet fallback; watch rounds and usage on one real phase</td><td>none</td><td>—</td></tr>
+<tr><td>1</td><td>55 · Measure the loop</td><td><code>usage --by model|kind</code>, Codex price estimate, phase cost block on approval, <code>tagteam grade</code></td><td>impl</td><td>—</td></tr>
+<tr><td>2</td><td>56 · Review bench</td><td><code>tagteam bench review</code> over historical rounds; first table for 20 rounds across 3 cells</td><td>plan + impl</td><td>55</td></tr>
+<tr><td>3</td><td>57 · Model policy by kind</td><td><code>models:</code> table, per-kind argv merge, resolved policy in <code>tagteam state</code>; move lenses the bench cleared</td><td>impl</td><td>56</td></tr>
+<tr><td>3–4</td><td>58 · Subagent kit</td><td><code>plugin/agents/</code>: test-runner, explore, verifier; <code>CLAUDE_CODE_SUBAGENT_MODEL</code> in the headless env; measured on one impl phase</td><td>plan + impl</td><td>55</td></tr>
+<tr><td>4–5</td><td>59 · Cockpit pass 4</td><td>Digest card, primary-action rule, idle reviewer collapse, window gauge, ⌘K</td><td>plan + impl</td><td>55</td></tr>
+<tr><td>5</td><td>60 · Quick gate</td><td>Suite profiling, xdist where safe, <code>tests.quick</code> for bounced retries</td><td>impl</td><td>—</td></tr>
+<tr><td>later</td><td>61+</td><td>Self-review pre-flight (if rounds/phase says so), Health tab, PR on approval, 44 theme packs</td><td></td><td>55, 56</td></tr>
+</table></div>
+
+<h2>What is verified and what is not</h2>
+<div class="grid g2">
+<div class="card ok"><h3>Read from the code, the DB or current docs</h3><ul class="tight">
+<li>No model names are hardcoded; selection is per-role via validated args (<code>headless.py</code>).</li>
+<li><code>--model</code>, <code>--effort</code>, <code>--fallback-model</code> already allowed for Claude; <code>-m</code> for Codex.</li>
+<li>The gate is model-free; on_submit runs it synchronously; ~4 min here.</li>
+<li>Usage table records model, kind, tokens, cache, cost per turn; Codex rows unpriced (0/25).</li>
+<li>This repo's means: 595k input / 4.7k output / 160 s per reviewer turn; $1.55 per lead chat turn.</li>
+<li>Plugin ships one skill and one hook; no subagents.</li>
+<li>Claude Code subagent frontmatter supports <code>model</code>, <code>effort</code>, <code>tools</code>, <code>disallowedTools</code>; <code>CLAUDE_CODE_SUBAGENT_MODEL</code> pins subagent model; usage rolls into <code>modelUsage</code>.</li>
+<li>Pricing table for current models (API rates), and Anthropic's measured effort/model curves.</li>
+</ul></div>
+<div class="card warn"><h3>Hypotheses that need the measurement phase</h3><ul class="tight">
+<li>That Sonnet finds the same blockers as Opus on the scope and verification lenses (the bench decides).</li>
+<li>That lower reviewer effort does not raise rounds per phase (week 0 tells you).</li>
+<li>How subscription rate limits weight Sonnet/Haiku vs Opus turns on your plan.</li>
+<li>The Codex CLI's effort flag name (<code>-c model_reasoning_effort=…</code>) — check <code>codex exec --help</code>.</li>
+<li>That a Haiku test-runner subagent materially shrinks a long impl turn's context (compare <code>modelUsage</code> before/after).</li>
+<li>That the digest card is what brings the cockpit back into daily use (hallway test: ten seconds to say what happened).</li>
+</ul></div>
+</div>
+
+<h2>Questions for you</h2>
+<ol>
+<li>Is the roadmap order above acceptable in principle: measure (55), bench (56), then policy/kit/cockpit? Or do you want the cockpit pass first because you would use it daily?</li>
+<li>Codex is lead and Claude is reviewer right now. Should the bench run the reviewer cells on Claude only (where effort and subagents are verifiable), or on both providers?</li>
+<li>For the phase cost block: is API-equivalent dollars the right unit to print, or would you rather see tokens and window percentage only, to avoid a misleading number on a subscription?</li>
+<li>Do you want the Aegis event stream (features #13) in scope for tagteam, or should Aegis read tagteam's DB directly?</li>
+</ol>
+
+<h2>How to read this pack</h2>
+<ul class="tight">
+<li><a href="02-agents-and-models.html">Agents &amp; models</a> — the answer to your model-tiering question, with a calculator and a measurement plan.</li>
+<li><a href="01-cockpit-ux.html">Cockpit UX</a> — heuristic audit of 3.8 with before/after mockups.</li>
+<li><a href="03-features.html">Features</a> — fourteen ideas scored, six recommended.</li>
+<li><a href="04-engineering-and-adoption.html">Engineering</a> — suite time, reliability, docs, portfolio.</li>
+</ul>
+<p class="principle">Open any page directly in a browser; no server, no build. Everything is static HTML with one shared stylesheet.</p>
+
+<div class="footer">Prepared by Claude (Fable 5.1) from the repo at commit b2c9ebd, the usage table in <code>.tagteam/tagteam.db</code>, Claude Code docs and Anthropic cost guidance as of 2026-09-14. No tagteam cycle was opened; no code was changed.</div>
+</div></body></html>

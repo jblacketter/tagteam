@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Feature ideas — scored</title>
+<link rel="stylesheet" href="shared.css"></head>
+<body><div class="wrap">
+<header class="top"><div class="brand">Better tagteam <span>research pack · 2026-09-14</span></div>
+<nav class="crumbs"><a href="index.html">Overview</a><a href="01-cockpit-ux.html">Cockpit UX</a><a href="02-agents-and-models.html">Agents &amp; models</a><a class="here" href="03-features.html">Features</a><a href="04-engineering-and-adoption.html">Engineering</a></nav></header>
+
+<h1>Feature ideas, scored</h1>
+<p class="lede">Fourteen ideas. Each one names the problem it solves, the evidence that the problem exists, and what would prove it worked. Scored on impact for you as the arbiter, and on effort in tagteam phases (S = one impl cycle, M = plan + impl, L = several phases). The ones marked <span class="tag now">now</span> are the ones I would put on the roadmap first.</p>
+
+<div class="tablewrap"><table>
+<tr><th>#</th><th>Idea</th><th>Solves</th><th>Impact</th><th>Effort</th><th>When</th></tr>
+<tr><td>1</td><td><a href="#digest">Since-you-left digest</a></td><td>Morning check-in takes minutes of scrolling</td><td>High</td><td>M</td><td><span class="tag now">now</span></td></tr>
+<tr><td>2</td><td><a href="#phase-cost">Phase cost report</a></td><td>No number says what a phase cost</td><td>High</td><td>S</td><td><span class="tag now">now</span></td></tr>
+<tr><td>3</td><td><a href="#bench">Review bench (history as eval)</a></td><td>Model/effort choices are guesses</td><td>High</td><td>M</td><td><span class="tag now">now</span></td></tr>
+<tr><td>4</td><td><a href="#policy">Model policy by activity kind</a></td><td>One model for every kind of work</td><td>Med–High</td><td>S</td><td><span class="tag later">after 3</span></td></tr>
+<tr><td>5</td><td><a href="#kit">Subagent kit in the plugin</a></td><td>Frontier context swallows pytest output</td><td>Med</td><td>M</td><td><span class="tag later">after 3</span></td></tr>
+<tr><td>6</td><td><a href="#grade">Grade the review</a></td><td>No signal on review quality</td><td>Med</td><td>S</td><td><span class="tag now">now</span></td></tr>
+<tr><td>7</td><td><a href="#preflight">Lead self-review pre-flight</a></td><td>Round 1 is often a scope/verification miss</td><td>Med</td><td>S</td><td><span class="tag later">measure first</span></td></tr>
+<tr><td>8</td><td><a href="#pr">PR on impl approval</a></td><td>Manual branch/PR chores after every phase</td><td>Med</td><td>S</td><td><span class="tag later">later</span></td></tr>
+<tr><td>9</td><td><a href="#issue">Phase from issue</a></td><td>Roadmap entries typed by hand</td><td>Low–Med</td><td>S</td><td><span class="tag maybe">maybe</span></td></tr>
+<tr><td>10</td><td><a href="#notes">Diff-anchored notes</a></td><td>Interjections lack context</td><td>Med</td><td>S</td><td><span class="tag later">UX pass</span></td></tr>
+<tr><td>11</td><td><a href="#palette">⌘K palette + shortcuts</a></td><td>Mouse-only cockpit</td><td>Med</td><td>S</td><td><span class="tag later">UX pass</span></td></tr>
+<tr><td>12</td><td><a href="#health">Health tab: trends across phases</a></td><td>No view of rounds/bounces/time over time</td><td>Med</td><td>M</td><td><span class="tag later">after 2</span></td></tr>
+<tr><td>13</td><td><a href="#events">Event stream for Aegis</a></td><td>Tagteam evidence is locked in its DB</td><td>Med for you</td><td>S</td><td><span class="tag maybe">maybe</span></td></tr>
+<tr><td>14</td><td><a href="#remote">Rule from a phone</a></td><td>Escalations wait for the desk</td><td>Low–Med</td><td>M</td><td><span class="tag maybe">maybe</span></td></tr>
+</table></div>
+
+<h2 id="digest">1. Since-you-left digest</h2>
+<div class="grid g2">
+<div class="card"><h3>Problem</h3><p>You start the agents, walk away, and come back hours later. The cockpit shows state, not change. The CLI has <code>tagteam state</code> and <code>cycle rounds --tail</code>, which also show state.</p>
+<h3>Idea</h3><p><code>tagteam digest [--since 9h]</code> and a card at the top of the cockpit: every round since your last visit with its verdict word, gates that bounced, phases closed, escalations waiting, tokens and window state. Deterministic first (it is a query over tables that exist). Optional second step: a Haiku one-paragraph narrative ("Codex approved search-index on round 2 after one gate bounce for two failing tests…").</p></div>
+<div class="card"><h3>Evidence it is needed</h3><p>Your own pattern in this request: "I'll review in the morning". The 2026-08-16 cockpit issue is the same complaint in a different form.</p>
+<h3>Proof it worked</h3><p>Cold-open the cockpit after a headless run; say what happened within ten seconds without scrolling.</p>
+<h3>Principle</h3><p>Visibility of system status. Recognition over recall.</p></div>
+</div>
+
+<h2 id="phase-cost">2. Phase cost report</h2>
+<div class="grid g2">
+<div class="card"><h3>Problem</h3><p>When a phase closes, nothing records what it took. <code>tagteam usage --phase</code> exists but nobody runs it, and Codex turns are unpriced.</p>
+<h3>Idea</h3><p>On impl approval, append one block to <code>docs/phases/&lt;phase&gt;.md</code> and the decision log: rounds, bounces, lead/reviewer/gate time, tokens by role and model, API-equivalent cost, wall clock start to approve. Add a Codex price table so the estimate is not blank. Show the same block in the cockpit when the Start card appears for the next phase.</p></div>
+<div class="card"><h3>Evidence</h3><p>The usage table has the columns; 0 of 25 Codex rows are priced; the roadmap's status lines already hand-record "gate 1,789 passed" but nothing about cost.</p>
+<h3>Proof</h3><p>Every closed phase has the block; the numbers feed the bench (#3) and the Health tab (#12). Also portfolio evidence for the showcase.</p></div>
+</div>
+
+<h2 id="bench">3. Review bench: your handoff history is an eval set</h2>
+<div class="grid g2">
+<div class="card"><h3>Problem</h3><p>"Should the reviewer run on Sonnet?" cannot be answered without a labeled set, and the standard advice is to build one. You already have one: every round in <code>docs/handoffs/*.jsonl</code> across every project, with the reviewer's verdict and, for escalations, your ruling.</p>
+<h3>Idea</h3><p><code>tagteam bench review --phase X --round N --cell opus:medium --cell sonnet:high</code>: check out the round's commit in a scratch worktree, rebuild the reviewer packet exactly as the orchestrator did, run each cell with the panel contract (writes <code>verdict.json</code>, never the cycle), and tabulate verdict agreement, blockers found, tokens, seconds. Extend to lenses and to the briefer.</p></div>
+<div class="card"><h3>Evidence</h3><p>Anthropic's guidance: sweep effort before model, price the tail, never swap a model without an eval. <code>tagteam panel preview</code> already rebuilds the exact prompt without spawning, so half the plumbing exists.</p>
+<h3>Proof</h3><p>A table for 20 historical rounds that shows which cells found the same blockers. That table decides #4 and #5.</p>
+<h3>Caveat</h3><p>Reviewer turns read the repo; the worktree must be at the checked commit, and the test command must be safe to run there. Both are already solved by the roadmap-worktree code.</p></div>
+</div>
+
+<h2 id="policy">4. Model policy by activity kind</h2>
+<p>Described in <a href="02-agents-and-models.html#plan">Agents &amp; models, step 3</a>. A <code>models:</code> table in <code>tagteam.yaml</code> keyed by kind (<code>lead.plan</code>, <code>reviewer.review</code>, <code>panel.scope</code>, <code>briefer</code>, <code>summaries</code>), every entry optional, merged into the role's validated args at spawn. <code>tagteam state</code> prints the resolved policy. Small change because argv is already built per kind.</p>
+
+<h2 id="kit">5. Subagent kit in the plugin</h2>
+<p>Described in <a href="02-agents-and-models.html#plan">Agents &amp; models, step 4</a>: <code>test-runner</code> (Haiku, read-only), <code>explore</code>, <code>codex-brief</code> (Sonnet), <code>verifier</code> (no write tools). Shipped under <code>plugin/agents/</code> so every project gets them from the plugin, respecting the backlog's condition (read-only mode shipped in 3.11). First experiment needs no agent files at all: set <code>CLAUDE_CODE_SUBAGENT_MODEL=haiku</code> in the headless child's environment and compare a long impl turn's <code>modelUsage</code> before and after.</p>
+
+<h2 id="grade">6. Grade the review</h2>
+<div class="grid g2">
+<div class="card"><h3>Problem</h3><p>You read every review. Your opinion of it ("caught a real bug" / "nitpick" / "missed the obvious") evaporates. That opinion is the only ground truth for review quality.</p>
+<h3>Idea</h3><p>One click on any verdict card in the reviewer lane, or <code>tagteam grade --round N good|nit|miss "note"</code>. Stored beside the round. Shown in the Health tab per model and effort. Feeds the bench as labels.</p></div>
+<div class="card"><h3>Evidence</h3><p>Anthropic's guidance on advisor/orchestrator shapes says the fragile variable is whether the cheap model's judgment holds; without labels you cannot tell. Cheapest possible labeling: the arbiter is already reading.</p>
+<h3>Proof</h3><p>After 30 grades, a table: grade by model × effort. If it is flat, tier down. If it is not, you know exactly where.</p></div>
+</div>
+
+<h2 id="preflight">7. Lead self-review pre-flight</h2>
+<p>Before <code>SUBMIT_FOR_REVIEW</code>, the lead runs the scope and verification lenses on Sonnet against its own diff (the lens briefs exist; <code>panel preview</code> can render them for the lead) and fixes what they flag. The gate already does this for tests; this does it for "did you do what the plan said" and "did you prove it". Measure rounds per phase (#2) before and after; if it does not reduce rounds, delete it.</p>
+
+<h2 id="pr">8. PR on impl approval</h2>
+<p>You already work phase → branch → PR, and merging is yours. On impl approval, with <code>git.pr: true</code> in <code>tagteam.yaml</code>, tagteam pushes the branch and opens the PR via <code>gh</code> with the phase doc as the body and the phase cost block (#2) at the end. Never merges. Opt-in, because Northstar is production and should keep doing it by hand.</p>
+
+<h2 id="issue">9. Phase from issue</h2>
+<p><code>tagteam roadmap add --from-issue 42</code> writes the roadmap entry and a phase-doc stub from a GitHub issue. Low impact for a solo maintainer; more useful if tagteam ever runs for a team. Park it.</p>
+
+<h2 id="notes">10. Diff-anchored notes · <span id="palette">11. ⌘K palette and shortcuts</span></h2>
+<p>Both in the <a href="01-cockpit-ux.html">cockpit audit</a>. Small, and they are what make the Diff and Notes tabs worth opening.</p>
+
+<h2 id="health">12. Health tab: trends across phases</h2>
+<p>Once #2 records per-phase numbers, a fifth tab: rounds per phase, gate bounce rate, minutes to approve, tokens per phase, review grades (#6), each as a small bar series over the last N phases. This is the view that tells you whether a change to the contract, the model policy or the lenses actually helped. Also the strongest portfolio screenshot tagteam could have: a graph of the loop getting cheaper.</p>
+
+<h2 id="events">13. Event stream for Aegis</h2>
+<p>Tagteam's evidence (rounds, gates, verdicts, grades, costs) is in a SQLite file per project. Aegis is your quality control plane. A <code>tagteam events --follow --json</code> firehose (or a JSONL file the watcher appends to, which <code>.tagteam/turns/*.events.jsonl</code> almost is) lets Aegis ingest tagteam without tagteam knowing about Aegis. Cheap, and it makes the two projects one story.</p>
+
+<h2 id="remote">14. Rule from a phone</h2>
+<p>Escalations wait until you are at the desk. The cockpit binds loopback with a page token; over Tailscale with <code>--host</code> it already works, and the Needs-you card is the only screen a phone needs. What is missing is a phone-width layout for that card and a hard rule that only rule/answer/resume are reachable remotely. Fun, but the security surface has to be designed, not added. Later.</p>
+
+<h2>Deliberately not on the list</h2>
+<ul class="tight">
+<li><b>Saloon theme packs (Phase 44).</b> Charming, scheduled, and the cheapest way to lose a week. Keep it after the measurement work.</li>
+<li><b>Thin MCP server.</b> The backlog says revisit only if headless proves insufficient for non-Claude agents; nothing since says it has.</li>
+<li><b>Auto-merge, scheduler that starts worktrees.</b> The roadmap-DAG phase excluded them on purpose; the reasons still hold.</li>
+<li><b>tmux / Windows work.</b> Per your standing note: later.</li>
+</ul>
+
+<div class="footer">Cross-references: <a href="02-agents-and-models.html">Agents &amp; models</a> for #3–#5 and #7; <a href="01-cockpit-ux.html">Cockpit UX</a> for #1, #10, #11; <a href="04-engineering-and-adoption.html">Engineering</a> for what has to be true underneath.</div>
+</div></body></html>

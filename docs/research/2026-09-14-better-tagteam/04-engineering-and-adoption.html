@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Engineering health & adoption</title>
+<link rel="stylesheet" href="shared.css"></head>
+<body><div class="wrap">
+<header class="top"><div class="brand">Better tagteam <span>research pack · 2026-09-14</span></div>
+<nav class="crumbs"><a href="index.html">Overview</a><a href="01-cockpit-ux.html">Cockpit UX</a><a href="02-agents-and-models.html">Agents &amp; models</a><a href="03-features.html">Features</a><a class="here" href="04-engineering-and-adoption.html">Engineering</a></nav></header>
+
+<h1>What else makes the project better: engineering health and adoption</h1>
+<p class="lede">The features pages assume a codebase that can take them. This page is the honest look at the base: size, test time, the reliability items already in the backlog, docs, and what "better" means for a project whose second purpose is to be a portfolio.</p>
+
+<h2>Where the codebase stands <span class="tag ok">verified</span></h2>
+<div class="kpi">
+<div><b>26k</b><span>lines of Python in <code>tagteam/</code></span></div>
+<div><b>1,789</b><span>tests passing (Phase 54 gate)</span></div>
+<div><b>58</b><span>test files</span></div>
+<div><b>~4 min</b><span>full suite on the gate (15 min timeout)</span></div>
+<div><b>1,791</b><span>lines in <code>watcher.py</code></span></div>
+<div><b>1,481</b><span>lines in <code>cockpit.js</code>, no framework, no build</span></div>
+<div><b>54</b><span>phases shipped since the roadmap began</span></div>
+</div>
+
+<h2>1. Suite time is round time</h2>
+<p>Every submission pays ~4 minutes for the gate, and every reviewer turn that runs tests pays part of it again. That is wall clock on every round of every phase, and it is the single number that would make the loop feel faster.</p>
+<ul class="tight">
+<li><b>Measure first:</b> <code>pytest --durations=25</code>. The watcher, session, headless and port-lease tests likely sleep or poll; those are the candidates.</li>
+<li><b>Parallelism:</b> <code>pytest-xdist</code> if the tests are as isolated as "no fixtures package, no conftest tricks" suggests. Tests that touch <code>~/.tagteam</code> or real ports need a marker and a serial group.</li>
+<li><b>Gate profile:</b> a <code>gatekeeper.tests.quick</code> command for plan cycles and bounced re-submissions, with the full command kept for the round on the record. The one-run rule stays intact; only the round that already bounced gets a faster retry.</li>
+</ul>
+<p>Target: gate under two minutes. That alone shortens every round by two minutes on both sides.</p>
+
+<h2>2. Reliability items already known</h2>
+<p>Three backlog entries describe real incidents in the wake path. They are the things most likely to make a headless night fail silently, which matters more once the digest (features #1) makes overnight runs the norm.</p>
+<div class="grid g3">
+<div class="card warn"><h3>iTerm2 <code>cd</code> eaten at shell startup</h3><p>Reproduced 2026-09-04. The fix is named in the note: gate the <code>cd</code> on prompt readiness, verify <code>session.path</code> before launching the agent. One impl cycle.</p></div>
+<div class="card warn"><h3>Reviewer wake delivery</h3><p>Observed once (2026-08-30), ruled a possible one-off. The diagnostics the note suggests would cost less than the next occurrence. Ship the diagnostics, not the fix.</p></div>
+<div class="card"><h3>Busy-detection by screen scrape</h3><p><code>BUSY_PATTERNS</code>/<code>IDLE_PATTERNS</code> match CLI spinner text. Both CLIs change their UI; a pattern that stops matching turns into a stuck turn. A tiny fixture test per CLI version (captured screens in <code>tests/fixtures/screens/</code>) would catch drift on upgrade.</p></div>
+</div>
+
+<h2>3. The watcher is the file to be careful with</h2>
+<p>At 1,791 lines it holds five backends, busy detection, the watchdog, the headless engine hand-off, the gate seam and the panel seam. Every feature on the other pages that says "at the watcher's reviewer seam" adds to it. Not a rewrite (your rule), but the next phase that touches it should pull the seams into their own module (<code>seams.py</code>: gate → panel → dispatch, as a pipeline over one <code>Submission</code> object) so the model-policy work has one place to hook. Say this in the plan cycle for that phase, not as its own phase.</p>
+
+<h2>4. Docs: one long page is doing three jobs</h2>
+<p><code>docs/how-tagteam-works.md</code> is the reference, the tutorial and the changelog in one file, with version numbers inline ("since 3.5", "3.8 — Phase 45"). It is accurate, which is rare, and it is hard to read cold.</p>
+<ul class="tight">
+<li>Keep it as the reference. Move the "since X.Y" history to <code>docs/releases/</code> (already started with 3.12.0).</li>
+<li>Write a five-minute <b>first session</b> page: install, setup, start, first handoff, first review, the two commands you will actually type. The README is close; the how-it-works page is not the place.</li>
+<li>Run <code>doc-drift</code> before each release and record it in the release note. It costs a Sonnet turn and catches the kind of thing the 3.12.0 role-neutrality work was about.</li>
+</ul>
+
+<h2>5. Release and install hygiene</h2>
+<ul class="tight">
+<li>3.12.0 is installed locally and untagged. The publish workflow rejects a tag that disagrees with <code>pyproject.toml</code>; the release script bumps both. Tag it or revert the bump so the next session starts clean.</li>
+<li>Two installs on one machine bit you in August (a stale cockpit). The SessionStart hook now warns on plugin/CLI skew; extend the same check to <code>uv tool</code> vs <code>pip</code> installs (<code>tagteam doctor</code>, which Phase 53's diagnostics could own).</li>
+<li>The Windows job stays manual per your standing decision; run it before any release touching procs, headless, pidfiles or port leases, and say so in the release checklist.</li>
+</ul>
+
+<h2>6. Adoption and the portfolio</h2>
+<p>Tagteam's second job is to be public proof of how you work. Three things would raise its value there without new engineering:</p>
+<ul class="tight">
+<li><b>A showcase that shows the loop getting cheaper.</b> The Health tab (features #12) over your own phases is the graph nobody else has: rounds per phase, bounce rate, cost per phase, across 54 phases of a real tool built by the tool.</li>
+<li><b>One case study per project type.</b> Aegis (uv, Python), Northstar (Behave suites, production), SonicGrid. Each is a page: what the loop caught, what it cost, what escalated to you and why.</li>
+<li><b>Name the role swap.</b> Codex-lead / Claude-reviewer since 2026-09-09 is an experiment worth writing up with numbers from #2. Which pairing produces fewer rounds is a question people will ask.</li>
+</ul>
+
+<h2>7. What I would not do</h2>
+<ul class="tight">
+<li>Rewrite the cockpit in a framework. 1,481 lines of plain JS with SSE is the right size for one user and no build step.</li>
+<li>Add an API-key path beside the CLI path. Subscription CLIs are the product's premise; a second auth path doubles every adapter.</li>
+<li>Move the DB off SQLite. Phase 28 made it canonical and it has been quiet since.</li>
+</ul>
+
+<div class="footer">Sources: <code>docs/roadmap.md</code> backlog, <code>docs/tagteam-issue-*.md</code>, <code>tagteam/watcher.py</code>, <code>tests/</code>, <code>CLAUDE.md</code>, memory notes on install method and Windows priority.</div>
+</div></body></html>
