@@ -40,7 +40,7 @@
 <div class="dot later" style="left:26%;top:62%">Faster suite / quick gate</div>
 <div class="dot later" style="left:52%;top:54%">Health tab</div>
 <div class="dot maybe" style="left:20%;top:72%">PR on approval</div>
-<div class="dot maybe" style="left:24%;top:84%">Events for Aegis</div>
+<div class="dot maybe" style="left:24%;top:84%">Event export (JSONL)</div>
 <div class="dot maybe" style="left:62%;top:70%">Rule from a phone</div>
 <div class="dot maybe" style="left:76%;top:80%">Theme packs (Phase 44)</div>
 <div class="dot maybe" style="left:12%;top:80%">Phase from issue</div>
@@ -50,7 +50,7 @@
 <div class="tablewrap"><table>
 <tr><th>Week</th><th>Phase (proposed)</th><th>What ships</th><th>Cycle</th><th>Depends on</th></tr>
 <tr><td>0</td><td>— (config only)</td><td>Reviewer at <code>--effort medium</code> with a Sonnet fallback; watch rounds and usage on one real phase</td><td>none</td><td>—</td></tr>
-<tr><td>1</td><td>55 · Measure the loop</td><td><code>usage --by model|kind</code>, Codex price estimate, phase cost block on approval, <code>tagteam grade</code></td><td>impl</td><td>—</td></tr>
+<tr><td>1</td><td>55 · Measure the loop</td><td><code>usage --by model|kind</code>, window signal per provider, phase cost block on approval (tokens, rounds, minutes; no dollars), <code>tagteam grade</code></td><td>impl</td><td>—</td></tr>
 <tr><td>2</td><td>56 · Review bench</td><td><code>tagteam bench review</code> over historical rounds; first table for 20 rounds across 3 cells</td><td>plan + impl</td><td>55</td></tr>
 <tr><td>3</td><td>57 · Model policy by kind</td><td><code>models:</code> table, per-kind argv merge, resolved policy in <code>tagteam state</code>; move lenses the bench cleared</td><td>impl</td><td>56</td></tr>
 <tr><td>3–4</td><td>58 · Subagent kit</td><td><code>plugin/agents/</code>: test-runner, explore, verifier; <code>CLAUDE_CODE_SUBAGENT_MODEL</code> in the headless env; measured on one impl phase</td><td>plan + impl</td><td>55</td></tr>
@@ -66,7 +66,7 @@
 <li><code>--model</code>, <code>--effort</code>, <code>--fallback-model</code> already allowed for Claude; <code>-m</code> for Codex.</li>
 <li>The gate is model-free; on_submit runs it synchronously; ~4 min here.</li>
 <li>Usage table records model, kind, tokens, cache, cost per turn; Codex rows unpriced (0/25).</li>
-<li>This repo's means: 595k input / 4.7k output / 160 s per reviewer turn; $1.55 per lead chat turn.</li>
+<li>This repo's means: 595k input / 4.7k output / 160 s per reviewer turn; 408k cache-read tokens per lead chat turn.</li>
 <li>Plugin ships one skill and one hook; no subagents.</li>
 <li>Claude Code subagent frontmatter supports <code>model</code>, <code>effort</code>, <code>tools</code>, <code>disallowedTools</code>; <code>CLAUDE_CODE_SUBAGENT_MODEL</code> pins subagent model; usage rolls into <code>modelUsage</code>.</li>
 <li>Pricing table for current models (API rates), and Anthropic's measured effort/model curves.</li>
@@ -81,13 +81,25 @@
 </ul></div>
 </div>
 
-<h2>Questions for you</h2>
+<h2>Decisions so far (Jack, 2026-09-14)</h2>
 <ol>
-<li>Is the roadmap order above acceptable in principle: measure (55), bench (56), then policy/kit/cockpit? Or do you want the cockpit pass first because you would use it daily?</li>
-<li>Codex is lead and Claude is reviewer right now. Should the bench run the reviewer cells on Claude only (where effort and subagents are verifiable), or on both providers?</li>
-<li>For the phase cost block: is API-equivalent dollars the right unit to print, or would you rather see tokens and window percentage only, to avoid a misleading number on a subscription?</li>
-<li>Do you want the Aegis event stream (features #13) in scope for tagteam, or should Aegis read tagteam's DB directly?</li>
+<li><b>Roadmap order:</b> fine as proposed. Measure (55), bench (56), then policy, kit, cockpit.</li>
+<li><b>Who leads:</b> Jack usually runs Claude as lead; roles must stay switchable. Whether Claude should <em>always</em> lead is an open discussion; see <a href="#lead">below</a>.</li>
+<li><b>Unit:</b> no API dollars anywhere. The project is designed around subscriptions and not funding extra tokens. Everything reports tokens, window state and minutes; the calculator on the models page now prints relative load with proxy weights.</li>
+<li><b>Aegis:</b> tagteam stays independent; anyone installs it without Aegis. Feature #13 is a consumer-agnostic JSONL export; Aegis would be one reader among any, and any Aegis-specific integration lives in Aegis.</li>
 </ol>
+
+<h2 id="lead">Who should lead: a recommendation to discuss</h2>
+<p><b>Default Claude as lead, Codex as reviewer; keep the swap one config line away; let Phase 55's numbers decide per project.</b> The reasoning:</p>
+<ul class="tight">
+<li><b>Different vendors matter more than which one leads.</b> The premise of the loop is a reviewer with different blind spots from the lead. Keep the pairing cross-vendor; the question is only the direction.</li>
+<li><b>The lead is where the tooling pays off.</b> Everything on the models page that makes a turn cheaper without making it dumber is Claude Code machinery: subagents with per-agent <code>model</code>/<code>effort</code>/<code>disallowedTools</code>, <code>--effort</code> and <code>--fallback-model</code> on the headless call, hooks, and the plugin. The lead's turns are the long ones (implementation, many test runs); that is where a test-runner subagent on Haiku keeps context small. A Codex lead cannot use any of it.</li>
+<li><b>The cockpit's chat is built for a Claude lead.</b> Continuity is <code>--session-id</code>/<code>--resume</code> for Claude; for Codex it is <code>resume &lt;thread&gt;</code> when the installed CLI supports it, else a transcript replay on stdin. The lead lane is your thinking partner; that is the seat where continuity matters.</li>
+<li><b>The reviewer needs judgment and a diff, not a toolkit.</b> A Codex reviewer with the panel contract (verdict.json, no cycle writes) loses nothing by lacking subagents.</li>
+<li><b>What the data says so far:</b> three phases with Codex as lead since 2026-09-09 (51: three rounds then two; 54: two rounds; polish: two) against a long history of Claude-led phases. Not enough to call. The phase cost block from 55 and <code>tagteam grade</code> give you rounds, bounces and review grades per pairing; after five phases each way you have an answer that is yours, not mine.</li>
+<li><b>One reason to swap deliberately:</b> the two subscriptions are two separate windows. The lead burns more of its window than the reviewer. If Claude's window is the tighter one that week, putting Codex in the lead seat moves the heavy burn. That argues for keeping the swap cheap (role neutrality already did the work) and for showing both windows side by side in the cockpit, not for a permanent answer.</li>
+</ul>
+<p>Bench scope follows from this: run the reviewer cells on Claude first, where effort and model are controllable and measurable; add Codex cells once it is clear what <code>codex exec</code> exposes.</p>
 
 <h2>How to read this pack</h2>
 <ul class="tight">

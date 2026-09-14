@@ -23,7 +23,7 @@
 <tr><td>10</td><td><a href="#notes">Diff-anchored notes</a></td><td>Interjections lack context</td><td>Med</td><td>S</td><td><span class="tag later">UX pass</span></td></tr>
 <tr><td>11</td><td><a href="#palette">⌘K palette + shortcuts</a></td><td>Mouse-only cockpit</td><td>Med</td><td>S</td><td><span class="tag later">UX pass</span></td></tr>
 <tr><td>12</td><td><a href="#health">Health tab: trends across phases</a></td><td>No view of rounds/bounces/time over time</td><td>Med</td><td>M</td><td><span class="tag later">after 2</span></td></tr>
-<tr><td>13</td><td><a href="#events">Event stream for Aegis</a></td><td>Tagteam evidence is locked in its DB</td><td>Med for you</td><td>S</td><td><span class="tag maybe">maybe</span></td></tr>
+<tr><td>13</td><td><a href="#events">Event export (JSONL, consumer-agnostic)</a></td><td>Tagteam evidence is locked in its DB</td><td>Med for you</td><td>S</td><td><span class="tag maybe">maybe</span></td></tr>
 <tr><td>14</td><td><a href="#remote">Rule from a phone</a></td><td>Escalations wait for the desk</td><td>Low–Med</td><td>M</td><td><span class="tag maybe">maybe</span></td></tr>
 </table></div>
 
@@ -38,9 +38,9 @@
 
 <h2 id="phase-cost">2. Phase cost report</h2>
 <div class="grid g2">
-<div class="card"><h3>Problem</h3><p>When a phase closes, nothing records what it took. <code>tagteam usage --phase</code> exists but nobody runs it, and Codex turns are unpriced.</p>
-<h3>Idea</h3><p>On impl approval, append one block to <code>docs/phases/&lt;phase&gt;.md</code> and the decision log: rounds, bounces, lead/reviewer/gate time, tokens by role and model, API-equivalent cost, wall clock start to approve. Add a Codex price table so the estimate is not blank. Show the same block in the cockpit when the Start card appears for the next phase.</p></div>
-<div class="card"><h3>Evidence</h3><p>The usage table has the columns; 0 of 25 Codex rows are priced; the roadmap's status lines already hand-record "gate 1,789 passed" but nothing about cost.</p>
+<div class="card"><h3>Problem</h3><p>When a phase closes, nothing records what it took. <code>tagteam usage --phase</code> exists but nobody runs it.</p>
+<h3>Idea</h3><p>On impl approval, append one block to <code>docs/phases/&lt;phase&gt;.md</code> and the decision log: rounds, bounces, lead/reviewer/gate time, tokens by role and model, window consumed where the CLI reports it, wall clock start to approve. No dollar figures: the project runs on subscriptions by design. Show the same block in the cockpit when the Start card appears for the next phase.</p></div>
+<div class="card"><h3>Evidence</h3><p>The usage table has the columns; the roadmap's status lines already hand-record "gate 1,789 passed" but nothing about rounds, tokens or time.</p>
 <h3>Proof</h3><p>Every closed phase has the block; the numbers feed the bench (#3) and the Health tab (#12). Also portfolio evidence for the showcase.</p></div>
 </div>
 
@@ -82,8 +82,8 @@
 <h2 id="health">12. Health tab: trends across phases</h2>
 <p>Once #2 records per-phase numbers, a fifth tab: rounds per phase, gate bounce rate, minutes to approve, tokens per phase, review grades (#6), each as a small bar series over the last N phases. This is the view that tells you whether a change to the contract, the model policy or the lenses actually helped. Also the strongest portfolio screenshot tagteam could have: a graph of the loop getting cheaper.</p>
 
-<h2 id="events">13. Event stream for Aegis</h2>
-<p>Tagteam's evidence (rounds, gates, verdicts, grades, costs) is in a SQLite file per project. Aegis is your quality control plane. A <code>tagteam events --follow --json</code> firehose (or a JSONL file the watcher appends to, which <code>.tagteam/turns/*.events.jsonl</code> almost is) lets Aegis ingest tagteam without tagteam knowing about Aegis. Cheap, and it makes the two projects one story.</p>
+<h2 id="events">13. Event export (JSONL, consumer-agnostic)</h2>
+<p>Tagteam's evidence (rounds, gates, verdicts, grades, usage) is in a SQLite file per project. A <code>tagteam events --follow --json</code> firehose, or a JSONL file the watcher appends to (which <code>.tagteam/turns/*.events.jsonl</code> almost is), lets <em>any</em> consumer ingest tagteam: a CI job, a dashboard, a spreadsheet, or a quality-control tool. Tagteam knows nothing about the consumer and depends on nothing. <b>Explicitly not an Aegis dependency:</b> anyone who installs tagteam gets the export; Aegis is one example of a reader, on Jack's machine only. If a specific Aegis integration ever earns its keep, it lives in Aegis.</p>
 
 <h2 id="remote">14. Rule from a phone</h2>
 <p>Escalations wait until you are at the desk. The cockpit binds loopback with a page token; over Tailscale with <code>--host</code> it already works, and the Needs-you card is the only screen a phone needs. What is missing is a phone-width layout for that card and a hard rule that only rule/answer/resume are reachable remotely. Fun, but the security surface has to be designed, not added. Later.</p>
