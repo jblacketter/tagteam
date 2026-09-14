@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agents & models — cheaper turns without dumber reviews</title>
+<link rel="stylesheet" href="shared.css"></head>
+<body><div class="wrap">
+<header class="top"><div class="brand">Better tagteam <span>research pack · 2026-09-14</span></div>
+<nav class="crumbs"><a href="index.html">Overview</a><a href="01-cockpit-ux.html">Cockpit UX</a><a class="here" href="02-agents-and-models.html">Agents &amp; models</a><a href="03-features.html">Features</a><a href="04-engineering-and-adoption.html">Engineering</a></nav></header>
+
+<h1>Agents &amp; models: where a cheaper model is safe, and where it is not</h1>
+<p class="lede">Your instinct is right, with one correction. Running and monitoring a test suite does not need a frontier model — and tagteam already knows that: the gatekeeper runs the suite with <em>no model at all</em>. The real waste is not "Fable watching pytest". It is frontier-model context growing inside a turn, and rounds that should never have happened. The plan below is: measure first, pull the free levers, then tier the activities that are provably safe to tier.</p>
+
+<div class="callout warn"><b>Verified vs. hypothesis.</b> Everything marked <span class="tag ok">verified</span> was read from the code, the usage table in this repo's <code>.tagteam/tagteam.db</code>, or the current Claude Code docs. Everything marked <span class="tag">hypothesis</span> needs the measurement in §6 before anyone builds on it.</div>
+
+<h2 id="today">1. What tagteam does today <span class="tag ok">verified</span></h2>
+<div class="grid g3">
+<div class="card ok"><h3>No model is hardcoded</h3><p>Model choice is entirely per-role, static, in <code>tagteam.yaml</code>: <code>agents.&lt;role&gt;.headless.args: ["--model","opus"]</code>. The Claude adapter's allowed-option table already accepts <code>--model</code>, <code>--fallback-model</code> and <code>--effort</code> (<code>tagteam/headless.py:166-168</code>); Codex accepts <code>-m/--model</code>.</p></div>
+<div class="card ok"><h3>The gate is model-free</h3><p><code>gatekeeper.py</code> runs the test command, the scope check and the plan-doc check with <code>subprocess</code>. A failing submission bounces before any reviewer tokens are spent. On this repo it runs ~4 min per submission.</p></div>
+<div class="card ok"><h3>Usage is already recorded per turn</h3><p>The <code>usage</code> table has <code>model</code>, <code>provider</code>, <code>kind</code>, tokens, cache reads/writes, cost and duration for every headless turn, panel lens, brief and chat turn. Nothing groups it by model yet.</p></div>
+<div class="card warn"><h3>No subagents ship</h3><p>The plugin is one skill and one hook. Nothing tells the lead "delegate the test run to a small model", so a frontier lead reads every line of pytest output into its own context.</p></div>
+<div class="card warn"><h3>Panel lenses inherit the reviewer's model</h3><p>The scope lens (a diff-vs-plan comparison) runs on the same model and effort as the correctness lens. There is no per-lens, per-kind or per-cycle-type override.</p></div>
+<div class="card warn"><h3>Codex turns are unpriced</h3><p><code>tagteam usage</code> shows <code>cost=-</code> for 25 of 25 reviewer turns. Half of every comparison is blind until an estimate exists.</p></div>
+</div>
+
+<h2 id="data">2. What the numbers in this repo say <span class="tag ok">verified</span></h2>
+<p>From <code>tagteam usage</code> on this repo (47 turns recorded since Phase 31; Codex was reviewer for the 3.0 arc, Claude ran the cockpit chat turns).</p>
+<div class="kpi">
+<div><b>595k</b><span>mean input tokens per reviewer turn</span></div>
+<div><b>90%</b><span>of reviewer input served from cache (13.4M of 14.9M)</span></div>
+<div><b>4.7k</b><span>mean output tokens per reviewer turn</span></div>
+<div><b>160 s</b><span>mean reviewer turn wall clock</span></div>
+<div><b>$1.55</b><span>mean cost per lead chat turn (22 turns, $34)</span></div>
+<div><b>$5.05</b><span>most expensive single chat turn (477 s, 1.1M cache reads)</span></div>
+</div>
+<figure>
+<svg viewBox="0 0 900 230" width="100%" role="img" aria-label="Where reviewer input tokens come from">
+<text x="0" y="18" font-size="13" font-weight="600">One average reviewer turn, by token class (this repo)</text>
+<rect x="0" y="40" width="810" height="34" fill="#c47dff" opacity=".85"/><text x="10" y="62" font-size="12" fill="#0b1320" font-weight="600">cache reads · 538k</text>
+<rect x="810" y="40" width="86" height="34" fill="#4ea1ff"/><text x="816" y="62" font-size="11" fill="#0b1320" font-weight="600">fresh 57k</text>
+<rect x="0" y="90" width="7" height="34" fill="#3ddc84"/><text x="14" y="112" font-size="12">output · 4.7k (the review itself)</text>
+<text x="0" y="150" font-size="12" class="muted">Cache reads are cheap per token (10% of input price, or less), but they are not free, and they scale with the packet the orchestrator pipes in: contract + state + last 3 rounds + whatever the agent reads from the repo.</text>
+<text x="0" y="170" font-size="12" class="muted">Model swap changes the price per token. Packet size and round count change the number of tokens. Both matter; the second is usually bigger.</text>
+</svg>
+</figure>
+<div class="callout"><b>You pay in a different currency.</b> Headless turns use the agents' signed-in CLIs on subscriptions, not API keys. So "token efficiency" for you means <em>rate-limit window</em> (the "claude five hour window" chip already on the Usage tab) and <em>wall clock</em>, not dollars. Dollar figures below are API-equivalent and are useful for ranking options. Whether subscription limits weight Sonnet/Haiku turns lower than Opus turns, and by how much, is something to confirm on your plan before assuming it. <span class="tag">hypothesis</span></div>
+
+<h2 id="taxonomy">3. The activity taxonomy: what each step actually needs</h2>
+<p>Break a session into the activities that consume a model, and sort them by what the activity requires, not by who happens to run it today.</p>
+<div class="tablewrap"><table>
+<tr><th>Activity</th><th>Who runs it today</th><th>What it really needs</th><th>Safe tier</th><th>Why</th></tr>
+<tr><td>Run the full test suite, report pass/fail</td><td>Gate (no model) at submit; the lead's own loop during work</td><td>Determinism, a summary</td><td><b>No model</b> at the gate; <b>Haiku subagent</b> inside a turn</td><td>Output is checkable. The value is keeping 10–50k tokens of pytest output out of the frontier context.</td></tr>
+<tr><td>"Where does X live / what calls Y"</td><td>The lead or reviewer itself</td><td>Search, bounded answer</td><td><b>Haiku / Sonnet subagent</b></td><td>Explore-style fan-out; hands back pointers, burns its own context.</td></tr>
+<tr><td>Draft the submission brief</td><td>Lead (frontier); <code>codex-brief</code> user agent exists</td><td>Summarize what changed + evidence</td><td><b>Sonnet</b></td><td>Checklist-shaped; the reviewer reads the diff anyway.</td></tr>
+<tr><td>Scope lens (diff vs. plan)</td><td>Reviewer's model</td><td>Compare two lists</td><td><b>Sonnet</b></td><td>Mostly mechanical; cheap signal, bounded output.</td></tr>
+<tr><td>Verification lens ("was this tested?")</td><td>Reviewer's model</td><td>Read diff + gate report + tests</td><td><b>Sonnet</b>, verify with the eval</td><td>Judgment with a checklist. Borderline; measure.</td></tr>
+<tr><td>Escalation brief</td><td>Lead's provider, default model</td><td>Summarize two positions, name the crux</td><td><b>Sonnet</b> (already configurable via <code>briefer.args</code>)</td><td>Read-only; the arbiter decides, not the briefer.</td></tr>
+<tr><td>Round summaries, "since you left" digest, hub one-liners</td><td>Nobody (feature does not exist)</td><td>Compress text</td><td><b>Haiku</b></td><td>Pure summarization with the source one click away.</td></tr>
+<tr><td>Doc-drift audit before a release</td><td><code>doc-drift</code> user agent, ad hoc</td><td>Grep + verify claims</td><td><b>Sonnet</b></td><td>Checkable output (paths exist, commands resolve).</td></tr>
+<tr><td>Correctness review</td><td>Reviewer (frontier)</td><td>Judgment on unbounded input</td><td><b>Frontier</b>, sweep effort</td><td>The tail is where the money and the bugs are.</td></tr>
+<tr><td>Plan authoring, implementation</td><td>Lead (frontier)</td><td>Long-horizon agentic work</td><td><b>Frontier</b>, effort high/xhigh</td><td>The cost guide's measured curve is steep here.</td></tr>
+<tr><td>Chat with the arbiter</td><td>Lead (frontier)</td><td>Your thinking partner</td><td><b>Frontier</b></td><td>Not the place to save.</td></tr>
+<tr><td>Cycle bookkeeping (state, rounds, roadmap status)</td><td><code>tagteam cycle add</code> (no model)</td><td>—</td><td><b>No model</b> (already)</td><td>Keep it that way.</td></tr>
+</table></div>
+
+<h3 id="tree">A decision rule you can apply to any new activity</h3>
+<figure>
+<svg viewBox="0 0 900 250" width="100%" role="img" aria-label="Decision tree for model tier">
+<defs><marker id="a" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#9aa4b5"/></marker></defs>
+<g font-size="12">
+<rect x="10" y="95" width="200" height="60" rx="8" fill="var(--panel)" stroke="#2a3342"/><text x="110" y="120" text-anchor="middle">Is the output checkable</text><text x="110" y="138" text-anchor="middle">by a program?</text>
+<line x1="210" y1="125" x2="250" y2="45" stroke="#9aa4b5" marker-end="url(#a)"/><text x="215" y="80" class="muted">yes</text>
+<rect x="255" y="15" width="180" height="50" rx="8" fill="var(--panel)" stroke="#3ddc84"/><text x="345" y="45" text-anchor="middle" fill="#3ddc84">No model. Gate / CLI.</text>
+<line x1="210" y1="125" x2="250" y2="125" stroke="#9aa4b5" marker-end="url(#a)"/><text x="215" y="118" class="muted">no</text>
+<rect x="255" y="95" width="200" height="60" rx="8" fill="var(--panel)" stroke="#2a3342"/><text x="355" y="120" text-anchor="middle">Bounded output, source</text><text x="355" y="138" text-anchor="middle">stays one click away?</text>
+<line x1="455" y1="125" x2="495" y2="45" stroke="#9aa4b5" marker-end="url(#a)"/><text x="460" y="80" class="muted">yes</text>
+<rect x="500" y="15" width="180" height="50" rx="8" fill="var(--panel)" stroke="#4ea1ff"/><text x="590" y="45" text-anchor="middle" fill="#4ea1ff">Haiku (summaries, search)</text>
+<line x1="455" y1="125" x2="495" y2="125" stroke="#9aa4b5" marker-end="url(#a)"/><text x="460" y="118" class="muted">no</text>
+<rect x="500" y="95" width="200" height="60" rx="8" fill="var(--panel)" stroke="#2a3342"/><text x="600" y="120" text-anchor="middle">Judgment against</text><text x="600" y="138" text-anchor="middle">a checklist?</text>
+<line x1="700" y1="125" x2="740" y2="45" stroke="#9aa4b5" marker-end="url(#a)"/><text x="705" y="80" class="muted">yes</text>
+<rect x="745" y="15" width="150" height="50" rx="8" fill="var(--panel)" stroke="#f5b83d"/><text x="820" y="45" text-anchor="middle" fill="#f5b83d">Sonnet + eval</text>
+<line x1="700" y1="125" x2="740" y2="200" stroke="#9aa4b5" marker-end="url(#a)"/><text x="705" y="170" class="muted">no</text>
+<rect x="745" y="180" width="150" height="60" rx="8" fill="var(--panel)" stroke="#c47dff"/><text x="820" y="205" text-anchor="middle" fill="#c47dff">Frontier,</text><text x="820" y="223" text-anchor="middle" fill="#c47dff">sweep effort first</text>
+</g></svg>
+<figcaption>Left to right: the cheaper the tier, the more the output has to be checkable. Judgment on unbounded input stays on the frontier model.</figcaption>
+</figure>
+
+<h2 id="guidance">4. What Anthropic's cost guidance says, applied to tagteam</h2>
+<p>These are the parts of the current cost-optimization guidance that change the plan. They argue against jumping straight to "swap the reviewer to Sonnet".</p>
+<ul class="tight">
+<li><b>Effort before model.</b> On current models, lower effort on the stronger model often matches a weaker model at high effort, and costs less per completed task. Measured: on long-horizon coding, Opus 5 gave up ~2 points at <code>medium</code> for half the cost, ~8 points at <code>low</code> for a quarter. Research-shaped work is nearly flat: <code>medium</code> matched default accuracy at 70–85% of the cost.</li>
+<li><b>Cost per completed task, not per request.</b> A cheaper reviewer that misses a bug costs a whole extra round: a lead turn, a gate run, a reviewer turn and one of the ten rounds' worth of attention. Price the tail.</li>
+<li><b>Re-run failures at higher effort.</b> When there is a checker, run at <code>low</code> and re-run failures at the default: same pass rate for ~half the cost in Anthropic's coding runs. Tagteam has a checker for the lead's work (the gate) but not for the reviewer's judgment. See §6 for how to get one.</li>
+<li><b>Caches are model-scoped.</b> A cascade forfeits cache reuse across its models. In tagteam each turn is a fresh process, so the cross-turn cache is already cold; what matters is the cache <em>within</em> a turn's agent loop. A subagent starts a fresh prefix with no cache shared with the parent.</li>
+<li><b>Orchestrator pays only when there is bulk to hand off.</b> Many independent pieces, or bulky intermediates the parent does not need. A dependent chain that fits one context is cheaper on one model. Test output and codebase search are exactly "bulky intermediates the parent does not need".</li>
+</ul>
+
+<h2 id="calc">5. Cost calculator: one review round under different policies</h2>
+<p>API-equivalent prices from the current model reference (cache read = 10% of input on Opus/Sonnet/Haiku; Fable 5.1 lists $0.25/MTok — confirm). Turn shape defaults to this repo's measured means. Change anything.</p>
+<div class="card">
+<div class="grid g3" style="gap:10px 20px">
+<label>Fresh input tokens / reviewer turn <input id="fresh" type="number" value="57000" style="width:100%"></label>
+<label>Cache-read tokens / reviewer turn <input id="cache" type="number" value="538000" style="width:100%"></label>
+<label>Output tokens / reviewer turn <input id="out" type="number" value="4700" style="width:100%"></label>
+<label>Rounds per phase <input id="rounds" type="number" value="3" style="width:100%"></label>
+<label>Extra rounds caused by a missed bug (per phase) <input id="miss" type="number" step="0.1" value="0" style="width:100%"></label>
+<label>Effort factor on output+thinking (1.0 = high) <input id="eff" type="number" step="0.05" value="1.0" style="width:100%"></label>
+</div>
+<div class="tablewrap"><table id="calc"><thead><tr><th>Reviewer model</th><th class="num">in $/M</th><th class="num">cache $/M</th><th class="num">out $/M</th><th class="num">$ / turn</th><th class="num">$ / phase (rounds + misses)</th></tr></thead><tbody id="calcbody"></tbody></table></div>
+<p class="principle">The "missed bug" field is the point: set it to 0.5 for a cheap model and watch the per-phase column. A missed bug costs a whole extra round on <em>both</em> agents; the calculator charges it at the frontier rate because that is what the re-do costs.</p>
+</div>
+<script>
+const models=[["Fable 5.1",10,0.25,50],["Opus 5",5,0.5,25],["Sonnet 5",2,0.2,10],["Haiku 4.5",1,0.1,5]];
+function calc(){const f=+fresh.value,c=+cache.value,o=+out.value*(+eff.value),r=+rounds.value,m=+miss.value;
+const t=document.getElementById('calcbody');t.innerHTML='';
+const frontier=(f*5+c*0.5+o*25)/1e6*2; // a missed round = lead+reviewer at Opus rates
+models.forEach(([n,i,cr,ou])=>{const per=(f*i+c*cr+o*ou)/1e6;const phase=per*r+m*frontier;
+const tr=document.createElement('tr');tr.innerHTML=`<td>${n}</td><td class="num">${i}</td><td class="num">${cr}</td><td class="num">${ou}</td><td class="num">$${per.toFixed(3)}</td><td class="num">$${phase.toFixed(2)}</td>`;t.appendChild(tr)})}
+document.querySelectorAll('#fresh,#cache,#out,#rounds,#miss,#eff').forEach(e=>e.addEventListener('input',calc));calc();
+</script>
+
+<h2 id="plan">6. Proposed plan, in the order the evidence supports</h2>
+
+<h3>Step 0 — Tomorrow, zero code: try effort and fallback on the reviewer <span class="tag now">now</span></h3>
+<p>The adapter already accepts these. Put them in <code>tagteam.yaml</code> and run one real phase:</p>
+<pre><code>agents:
+  reviewer:
+    name: claude
+    headless:
+      args: ["--model", "opus", "--effort", "medium", "--fallback-model", "sonnet"]
+  lead:
+    name: codex
+    headless:
+      args: ["-m", "&lt;codex model&gt;", "-c", "model_reasoning_effort=medium"]   # confirm flag names with `codex exec --help`</code></pre>
+<p>Watch <code>tagteam usage</code> and the round count. This is the "sweep effort before touching the model" step, and it costs nothing to try. Note the Codex effort flag was not verifiable from Anthropic docs; check the Codex CLI's own help. <span class="tag">verify</span></p>
+
+<h3>Step 1 — Measure: usage by model and kind, Codex price estimate, phase cost report <span class="tag now">now</span></h3>
+<ul class="tight">
+<li><code>tagteam usage --by model</code> and <code>--by kind</code> (the columns exist; only the roll-up is missing).</li>
+<li>A price table for Codex models so <code>cost</code> is an estimate instead of <code>-</code>. Mark estimates as such.</li>
+<li>On impl approval, write one line to the phase doc and decision log: rounds, bounces, tokens by role, API-equivalent cost, wall clock. This is portfolio evidence too.</li>
+<li>Per-model breakdown from <code>modelUsage</code> in the stream-json result, so subagent spend inside a turn shows up under the turn.</li>
+</ul>
+
+<h3>Step 2 — Your handoff history is an eval set <span class="tag now">now</span></h3>
+<p>Every past round in <code>docs/handoffs/*_rounds.jsonl</code> across your projects is a labeled example: a submission, a reviewer verdict, and (where it went to you) the arbiter's ruling. That is exactly what the cost guidance says you need before swapping a model and do not usually have.</p>
+<pre><code>tagteam bench review --phase X --round N --cell opus:medium --cell sonnet:high --cell haiku:high
+# replays the reviewer packet for that round in a scratch worktree at the checked commit,
+# runs each cell with the panel contract (verdict.json, no cycle writes),
+# and prints: verdict per cell vs. the recorded verdict, blockers found, tokens, seconds</code></pre>
+<p>Start with 10 rounds where the reviewer found a real blocker and 10 where it approved. If Sonnet at high effort finds the same blockers, the scope and verification lenses can move. If it does not, you have the number that says why not.</p>
+
+<h3>Step 3 — Model policy by activity kind, not just by role <span class="tag later">after step 2</span></h3>
+<pre><code># tagteam.yaml
+models:                      # every entry optional; falls back to agents.&lt;role&gt;.headless.args
+  lead.plan:      {effort: high}
+  lead.impl:      {effort: xhigh}
+  reviewer.review:{effort: medium}
+  panel.scope:    {model: sonnet}
+  panel.verification: {model: sonnet, effort: high}
+  briefer:        {model: sonnet}
+  summaries:      {model: haiku}     # digest, round one-liners (03-features)</code></pre>
+<p>Implementation is small: the spawn path already builds argv per kind; this merges a per-kind override into the role's validated args. The <code>kind</code> is already recorded in the usage table so the effect is measurable per kind.</p>
+
+<h3>Step 4 — Ship a subagent kit in the plugin <span class="tag later">after step 2</span></h3>
+<p>Claude Code subagents support <code>model</code>, <code>effort</code>, <code>tools</code> and <code>disallowedTools</code> in frontmatter, and their usage rolls into the parent's <code>modelUsage</code>. The kit gives the frontier agent a cheap place to put bulky steps:</p>
+<div class="grid g2">
+<div class="card"><h3>test-runner <span class="tag">haiku</span></h3><p><code>tools: Bash, Read</code> · <code>disallowedTools: Write, Edit</code>. Runs the command it is given, returns counts, failing test ids and the last lines of each failure. Never fixes. Keeps pytest output out of the parent's context; the parent's cache prefix stays stable for the rest of the turn.</p></div>
+<div class="card"><h3>explore <span class="tag">haiku / sonnet</span></h3><p>Read-only fan-out search. Returns pointers, not file dumps. Same shape as Claude Code's built-in Explore, shipped so both roles have it in every project.</p></div>
+<div class="card"><h3>codex-brief <span class="tag">sonnet</span></h3><p>Already exists at user level. Backlog note says: check whether its briefs are what actually gets submitted, or get rewritten. Step 1's data answers that.</p></div>
+<div class="card"><h3>verifier <span class="tag">sonnet</span> · no write tools</h3><p>Re-checks a claim in the submission ("12 new tests, all green") without being able to fix anything. Structural read-only via <code>disallowedTools</code>, per your rule that verifiers must not have write tools.</p></div>
+</div>
+<p>The headless spawn can also set <code>CLAUDE_CODE_SUBAGENT_MODEL</code> in the child's environment, which pins every subagent in that turn to a cheaper model without editing agent files. That is a one-line change and a good first experiment.</p>
+<div class="callout warn"><b>Subagents do not reduce the number of tokens the frontier model outputs.</b> They reduce what it <em>reads</em> back, and they keep its context small so each subsequent call in the loop is cheaper. Expect the win on long impl turns with many test runs; expect nothing on a short plan turn.</div>
+
+<h3>Step 5 — Lead self-review pre-flight <span class="tag later">measure rounds/phase first</span></h3>
+<p>Before submitting, the lead runs the scope and verification lenses on Sonnet against its own diff and fixes what they flag. A cheap round that never becomes a real round. Measure with the round count per phase from step 1; if rounds do not drop, remove it.</p>
+
+<h2 id="risks">7. What can go wrong</h2>
+<div class="grid g2">
+<div class="card bad"><h3>A cheap reviewer approves junk</h3><p>The failure mode that costs the most and shows up last. Mitigation: only move lenses whose output is checkable or checklist-shaped; keep correctness on the frontier; run the bench in step 2 before and after.</p></div>
+<div class="card bad"><h3>Effort too low on the lead</h3><p>Lower effort means fewer, more consolidated tool calls and terser output. On a hard impl phase that shows up as more rounds. The round count is the alarm; the per-phase report in step 1 rings it.</p></div>
+<div class="card warn"><h3>Two currencies, one dashboard</h3><p>Dollar estimates for subscription users are a proxy. Label them "API-equivalent" everywhere; surface the window signal next to them.</p></div>
+<div class="card warn"><h3>Policy sprawl</h3><p>A per-kind model table is a new config surface. Keep every entry optional, keep the role default as the fallback, and print the resolved policy in <code>tagteam state</code> so what ran is never a mystery.</p></div>
+</div>
+
+<h2 id="answer">8. Direct answer to the question you asked</h2>
+<p><b>Should activities be broken into subagents on cheaper models?</b> Yes for three specific activities, no as a general policy.</p>
+<ul class="tight">
+<li><b>Yes:</b> test running inside a turn (Haiku, read-only), codebase search (Haiku/Sonnet), and summaries that do not exist yet (digest, round one-liners: Haiku). All three have checkable or bounded output and bulky intermediates the frontier model does not need.</li>
+<li><b>Probably, after the bench:</b> scope lens, verification lens, briefer, submission drafting on Sonnet.</li>
+<li><b>No:</b> correctness review, plan and impl authoring, the arbiter chat. Sweep effort on the frontier model there instead; that is the measured cheaper path.</li>
+<li><b>Bigger than any of it:</b> fewer rounds and a smaller reviewer packet. A round avoided saves two frontier turns and a gate run.</li>
+</ul>
+
+<div class="footer">Sources: <code>tagteam/headless.py</code>, <code>tagteam/gatekeeper.py</code>, <code>tagteam/usage.py</code>, <code>tagteam/db.py</code>, <code>tagteam usage</code> on this repo; Claude Code docs (model-config, headless, sub-agents, hooks, cost-tracking); Anthropic cost-optimization guidance (effort sweeps, model selection, orchestrator/advisor shapes), read 2026-09-14.</div>
+</div></body></html>

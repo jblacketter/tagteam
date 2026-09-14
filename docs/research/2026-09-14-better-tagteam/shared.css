@@ -1,0 +1,87 @@
+/* Research pack — shared styles. Dark-first to match the cockpit; light via prefers-color-scheme. */
+:root{
+  --bg:#0f1218; --panel:#161b24; --panel2:#1c2330; --line:#2a3342; --ink:#e6e9ef; --muted:#9aa4b5; --dim:#6b7686;
+  --lead:#4ea1ff; --rev:#c47dff; --ok:#3ddc84; --warn:#f5b83d; --bad:#ff5f5f; --acc:#4ea1ff;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+}
+@media (prefers-color-scheme: light){
+  :root{ --bg:#f6f7f9; --panel:#ffffff; --panel2:#f0f2f5; --line:#d9dee7; --ink:#1b2130; --muted:#5a6473; }
+}
+*{box-sizing:border-box}
+html{color-scheme:light dark}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 var(--sans);padding:0 20px 80px}
+.wrap{max-width:1180px;margin:0 auto}
+header.top{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:baseline;justify-content:space-between;padding:22px 0 12px;border-bottom:1px solid var(--line);margin-bottom:28px}
+header.top .brand{font-weight:700;letter-spacing:.2px}
+header.top .brand span{color:var(--muted);font-weight:400;margin-left:8px;font-size:13px}
+nav.crumbs a{color:var(--muted);text-decoration:none;margin-right:16px;font-size:13px}
+nav.crumbs a:hover,nav.crumbs a.here{color:var(--ink)}
+h1{font-size:30px;line-height:1.2;margin:0 0 8px}
+h2{font-size:21px;margin:44px 0 12px;padding-top:8px;border-top:1px solid var(--line)}
+h3{font-size:16px;margin:26px 0 8px}
+p.lede{font-size:17px;color:var(--muted);max-width:820px;margin:0 0 20px}
+p{max-width:820px}
+a{color:var(--acc)}
+code,pre{font-family:var(--mono);font-size:13px}
+code{background:var(--panel2);padding:1px 6px;border-radius:4px}
+pre{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow-x:auto;max-width:100%}
+pre code{background:none;padding:0}
+.grid{display:grid;gap:16px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px}
+.card h3{margin-top:0}
+.card.lead{border-left:4px solid var(--lead)} .card.rev{border-left:4px solid var(--rev)}
+.card.ok{border-left:4px solid var(--ok)} .card.warn{border-left:4px solid var(--warn)} .card.bad{border-left:4px solid var(--bad)}
+.tag{display:inline-block;font:600 11px/1 var(--mono);letter-spacing:.4px;text-transform:uppercase;padding:4px 7px;border-radius:4px;background:var(--panel2);color:var(--muted);border:1px solid var(--line);margin-right:6px;vertical-align:middle}
+.tag.blocker{color:var(--bad);border-color:var(--bad)} .tag.friction{color:var(--warn);border-color:var(--warn)} .tag.polish{color:var(--muted)}
+.tag.p1{color:var(--ok);border-color:var(--ok)} .tag.p2{color:var(--lead);border-color:var(--lead)} .tag.p3{color:var(--muted)}
+.tag.now{color:var(--ok);border-color:var(--ok)} .tag.later{color:var(--warn);border-color:var(--warn)} .tag.maybe{color:var(--muted)}
+table{border-collapse:collapse;width:100%;font-size:14px;margin:12px 0}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.4px}
+td.num,th.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.tablewrap{overflow-x:auto}
+.finding{display:grid;grid-template-columns:110px 1fr;gap:10px;padding:12px 0;border-bottom:1px solid var(--line)}
+.finding .body > b:first-child{display:block;margin-bottom:3px}
+.finding .body .fix{color:var(--muted);margin-top:4px}
+.finding .body .fix::before{content:"→ fix: ";color:var(--ok);font-weight:600}
+.principle{font-size:12px;color:var(--muted);font-style:italic}
+.callout{border-left:4px solid var(--acc);background:var(--panel);padding:12px 16px;border-radius:0 8px 8px 0;margin:16px 0;max-width:860px}
+.callout.warn{border-color:var(--warn)} .callout.ok{border-color:var(--ok)} .callout.bad{border-color:var(--bad)}
+.kpi{display:flex;flex-wrap:wrap;gap:12px;margin:12px 0}
+.kpi div{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 14px;min-width:150px}
+.kpi b{display:block;font-size:22px;font-family:var(--mono)}
+.kpi span{color:var(--muted);font-size:12px}
+/* mock UI */
+.mock{background:#0f1218;color:#e6e9ef;border:1px solid #2a3342;border-radius:10px;padding:10px;font-size:12px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,.35)}
+.mock .strip{display:flex;gap:8px;align-items:center;padding:6px 8px;border-bottom:1px solid #2a3342;flex-wrap:wrap}
+.mock .chip{border:1px solid #2a3342;border-radius:6px;padding:3px 8px;background:#161b24;white-space:nowrap}
+.mock .chip.on{border-color:#3ddc84;color:#3ddc84} .mock .chip.hot{border-color:#f5b83d;color:#f5b83d}
+.mock .btn{border-radius:6px;padding:4px 10px;background:#1c2330;border:1px solid #2a3342;white-space:nowrap}
+.mock .btn.primary{background:#4ea1ff;color:#0b1320;border-color:#4ea1ff;font-weight:600}
+.mock .btn.danger{border-color:#ff5f5f;color:#ff5f5f}
+.mock .box{border:1px solid #2a3342;border-radius:8px;padding:8px;margin:8px 0;background:#161b24}
+.mock .box.lead{border-color:#4ea1ff} .mock .box.rev{border-color:#c47dff} .mock .box.red{border-color:#ff5f5f}
+.mock .lanes{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.mock .row{display:flex;justify-content:space-between;gap:8px;padding:5px 6px;border:1px solid #2a3342;border-radius:6px;margin:5px 0;background:#0f1218}
+.mock .muted{color:#9aa4b5}
+.mock .lbl{font-weight:700;color:#4ea1ff} .mock .lbl.rev{color:#c47dff}
+.mock .ok{color:#3ddc84} .mock .warn{color:#f5b83d} .mock .bad{color:#ff5f5f}
+.mock .empty{color:#9aa4b5;text-align:center;padding:20px 8px}
+.mock .caption, figcaption{font-size:12px;color:var(--muted);margin-top:8px;text-align:center}
+figure{margin:16px 0}
+.compare{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;align-items:start}
+.compare h4{margin:0 0 8px;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+/* small svg charts */
+svg text{font-family:var(--sans);fill:var(--ink)}
+svg .axis{stroke:var(--line)} svg .muted{fill:var(--muted)}
+.footer{margin-top:60px;color:var(--muted);font-size:12px;border-top:1px solid var(--line);padding-top:12px}
+ul.tight li{margin:3px 0}
+.toc{columns:2;column-gap:32px;max-width:900px} .toc li{break-inside:avoid;margin:4px 0}
+@media (max-width:700px){ .toc{columns:1} .finding{grid-template-columns:1fr} .mock .lanes{grid-template-columns:1fr} }
+.matrix{position:relative;height:420px;border:1px solid var(--line);border-radius:10px;background:var(--panel);margin:12px 0}
+.matrix .ax{position:absolute;color:var(--muted);font-size:12px}
+.matrix .dot{position:absolute;transform:translate(-50%,-50%);background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:4px 10px;font-size:12px;white-space:nowrap}
+.matrix .dot.now{border-color:var(--ok)} .matrix .dot.later{border-color:var(--warn)} .matrix .dot.maybe{border-color:var(--muted);opacity:.8}
+.matrix .q{position:absolute;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.4px;opacity:.7}

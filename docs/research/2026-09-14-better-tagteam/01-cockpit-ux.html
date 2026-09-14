@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cockpit UX — heuristic audit and proposals</title>
+<link rel="stylesheet" href="shared.css"></head>
+<body><div class="wrap">
+<header class="top"><div class="brand">Better tagteam <span>research pack · 2026-09-14</span></div>
+<nav class="crumbs"><a href="index.html">Overview</a><a class="here" href="01-cockpit-ux.html">Cockpit UX</a><a href="02-agents-and-models.html">Agents &amp; models</a><a href="03-features.html">Features</a><a href="04-engineering-and-adoption.html">Engineering</a></nav></header>
+
+<h1>Cockpit UX: audit of 3.8 and what the next pass should do</h1>
+<p class="lede">Three UX passes in August fixed the big legibility problems: the cycle is visible, the lanes are in loop order, the chat is above the fold. What is left is a different class of problem. The cockpit now shows everything; the next pass should make it show <em>the right thing for the moment you open it</em>, and give the arbiter tools that match how you actually use it: you leave, the agents work, you come back.</p>
+
+<h2>Diagnosis</h2>
+<p><b>Who:</b> the arbiter, alone, on a Mac, usually with a terminal open beside the browser. <b>Task, in your words:</b> "how do I begin, tell the lead something, does anything need me, what is it doing, what did it cost." Since 2026-08-16 the CLI loop has been the day-to-day tool and the cockpit is parked, which is itself the strongest finding: the cockpit is not yet earning a tab.</p>
+<p><b>Governing principles</b> (four, deliberately):</p>
+<ul class="tight">
+<li><b>Visibility of system status</b> — the page should answer "what happened while I was away" without scrolling.</li>
+<li><b>Feature consolidation (one feature, one home)</b> — rounds, verdicts and activity currently live in two places each.</li>
+<li><b>Von Restorff / Fitts</b> — one primary action per screen, sized and placed for the moment; nothing destructive where the eye lands first.</li>
+<li><b>Progressive disclosure</b> — the Usage, Diff and Notes tabs are power surfaces; they should stay below the fold but be reachable in one keystroke.</li>
+</ul>
+
+<h2>Findings</h2>
+<p>From the 3.7.1 screenshots in <code>docs/media/screenshots/</code>, <code>docs/cockpit-issues.md</code>, and the 3.8 lanes description. Severity: blocker stops the arbiter, friction costs time every session, polish is cosmetic.</p>
+
+<div class="finding"><div><span class="tag blocker">blocker</span></div><div class="body"><b>No "since you left" view.</b> Opening the cockpit after hours shows the current state, not the delta. The arbiter's real question at 7 a.m. is "what happened, what did it cost, what needs me" and the answer is scattered across the Rounds tab, the Usage tab and the Needs-you banner. <span class="principle">Visibility of status; recognition over recall.</span><div class="fix">a Digest card at the top when the last visit is older than N minutes: rounds since then with verdict words, phases closed, escalations, bounces, tokens and window state, one line each, dismiss with one key. Details in <a href="03-features.html#digest">Features</a>.</div></div></div>
+
+<div class="finding"><div><span class="tag friction">friction</span></div><div class="body"><b>Pause is the most prominent button on every screen, including when nothing is running.</b> In the idle screenshot the top-right still reads <b>Pause</b>. It is the one filled button in the strip, so the eye lands on a control that does nothing right now. <span class="principle">Von Restorff; error prevention.</span><div class="fix">Pause only when a turn is in flight or owed; otherwise the slot shows the state ("nothing running"). The primary action of the moment (Start / Approve / Resume / Send) is the only filled button on the page.</div></div></div>
+
+<div class="finding"><div><span class="tag friction">friction</span></div><div class="body"><b>Rounds live in two places.</b> Each verdict is a card in the reviewer lane <em>and</em> a row in the Rounds tab; each lead turn is a card in the lead lane <em>and</em> a row under "all activity". Two homes for one thing means two places to look and two renderers to keep in sync. <span class="principle">Feature consolidation.</span><div class="fix">The lanes are the timeline. The Rounds tab becomes "Round text" (full entries, searchable) and drops the duplicated verdict list; "all activity" becomes a filter on the lanes (show gates, show lenses), not a third list.</div></div></div>
+
+<div class="finding"><div><span class="tag friction">friction</span></div><div class="body"><b>The reviewer lane is an empty half-screen when idle.</b> "No reviews yet…" occupies 50% of the first viewport while the lead chat, the thing you came to use, gets the other half. <span class="principle">Empty states teach; visual hierarchy.</span><div class="fix">Idle reviewer lane collapses to a header strip that says what the reviewer <em>will</em> do ("gate: tests + scope · lenses: correctness, scope, verification · model: opus/medium"), giving the lead lane the width. It expands the moment a turn flips.</div></div></div>
+
+<div class="finding"><div><span class="tag friction">friction</span></div><div class="body"><b>The escalation brief is a wall of monospace.</b> Crux, Lead position, Reviewer position, Recommendation and the two suggested rulings are in one <code>pre</code> block; the two commands at the bottom are the useful part and they are not clickable. <span class="principle">Recognition over recall; Fitts.</span><div class="fix">Render the brief's sections as labeled rows (the briefer already writes them with headings). Each suggested ruling becomes a button that pre-fills the comment box with that text; Approve stays green-right, Request changes stays neutral-left.</div></div></div>
+
+<div class="finding"><div><span class="tag friction">friction</span></div><div class="body"><b>The Usage chart answers a question nobody asks.</b> "Tokens per turn by round" with cache reads folded in shows a purple line falling and a blue line at zero. What the arbiter needs on a subscription is "how much of the window is left and how fast is it going", and per phase, "what did this cost". <span class="principle">Match the real world.</span><div class="fix">Replace the churn line with (1) a window gauge with time-to-reset and burn rate, (2) bars per round: lead / reviewer / gate seconds and tokens side by side, (3) the phase total so far. Keep the roll-up tables under a disclosure.</div></div></div>
+
+<div class="finding"><div><span class="tag friction">friction</span></div><div class="body"><b>No keyboard path.</b> Every action is a mouse target; there is no command palette and no shortcut for "focus the composer", "approve", "open rounds". A terminal user expects ⌘K. <span class="principle">Jakob's law.</span><div class="fix">⌘K palette listing the same actions the confirm modal already knows (they map 1:1 to CLI commands); <code>/</code> focuses the composer; <code>1–4</code> switch tabs; <code>?</code> shows the map.</div></div></div>
+
+<div class="finding"><div><span class="tag polish">polish</span></div><div class="body"><b>"Saloon ↗" sits in the primary strip.</b> A theme link next to the connection status on a working surface. <span class="principle">Hierarchy.</span><div class="fix">Move it and the version into a small "…" menu with "Open in hub", "Copy project path", "Saloon".</div></div></div>
+
+<div class="finding"><div><span class="tag polish">polish</span></div><div class="body"><b>Residual engine words on the primary path.</b> "memory: resumed session · 2 messages", "what it said", "pre-check". Not wrong, but a new reader pauses on each. <span class="principle">Consistent language.</span><div class="fix">Add them to the existing glossary pass: "same chat, 2 messages"; "read the review"; keep "pre-check" (it is in the glossary already).</div></div></div>
+
+<div class="finding"><div><span class="tag polish">polish</span></div><div class="body"><b>Diff tab is read-only.</b> A QA engineer reading a scope-diff will want to say "this line" and have the note land as an interjection with a file:line anchor. Today the Notes tab is a free-text box with no context. <span class="principle">Match the real world.</span><div class="fix">Click a line in the Diff → "leave a note here" → interjection text is pre-filled with <code>path:line</code>. Small, and it makes the Diff tab worth opening.</div></div></div>
+
+<h2>Proposed first screen: now vs. next</h2>
+<div class="compare">
+<div><h4>Today (3.8, idle project)</h4>
+<div class="mock">
+<div class="strip"><b>demo-idle</b> <span class="chip">no phase in progress</span><span class="chip">idle · last: chat #2 — 20m ago</span><span class="chip">watcher: off · Start</span><span style="flex:1"></span><span class="btn">Pause</span><span class="chip on">Live</span><span class="muted">Saloon ↗</span></div>
+<div class="box"><b>Needs you</b><div class="row"><span><span class="lbl">START</span> Next: csv-export — plan</span><span class="btn primary">Start</span></div></div>
+<div class="lanes"><div class="box lead"><span class="lbl">Claude — lead</span> <span class="muted">waiting</span><div class="row"><span>chat…</span></div><div class="row"><span>chat…</span></div><div class="row muted">Message the lead…</div></div>
+<div class="box rev"><span class="lbl rev">Codex — reviewer</span> <span class="muted">waiting</span><div class="empty">No reviews yet. The reviewer's pre-checks and reviews appear here, round by round.</div></div></div>
+<div class="muted" style="padding:4px 6px">Rounds · Diff · Usage · Notes</div>
+</div><div class="caption">Half the first screen is an empty reviewer pane; Pause is the loudest control.</div></div>
+
+<div><h4>Next (proposal)</h4>
+<div class="mock">
+<div class="strip"><b>demo-idle</b> <span class="chip">no phase in progress</span><span class="chip">watcher: off</span><span style="flex:1"></span><span class="chip on">Live</span><span class="muted">⌘K · …</span></div>
+<div class="box"><b>Since you left · 9h 12m</b> <span class="muted">(dismiss: esc)</span>
+<div class="row"><span>✅ <b>search-index</b> impl approved · r2 · 41 min · 1.2M tok</span><span class="muted">read</span></div>
+<div class="row"><span>↩ gate bounced r1 (2 failing tests) · lead fixed in r2</span><span class="muted">log</span></div>
+<div class="row"><span>window: 38% used · resets 10:52</span><span class="muted">usage</span></div></div>
+<div class="box"><div class="row"><span><span class="lbl">NEXT</span> csv-export — plan · <span class="muted">/handoff start csv-export</span></span><span class="btn primary">Start</span></div></div>
+<div class="box lead" style="min-height:120px"><span class="lbl">Claude — lead</span> <span class="muted">waiting · same chat, 2 messages</span><div class="row"><span>chat…</span></div><div class="row muted">Message the lead… (/ to focus)</div></div>
+<div class="box rev" style="padding:6px 8px"><span class="lbl rev">Codex — reviewer</span> <span class="muted">idle · will run gate (tests, scope) then lenses correctness · scope · verification</span></div>
+<div class="muted" style="padding:4px 6px">Rounds · Diff · Usage · Notes <span style="float:right">1–4</span></div>
+</div><div class="caption">The delta first, one primary action, the chat gets the width, the reviewer explains itself while idle.</div></div>
+</div>
+
+<h2>Proposed first screen while a review runs</h2>
+<div class="compare">
+<div><h4>Today</h4>
+<div class="mock">
+<div class="strip"><b>demo-web</b> <span class="chip">checkout-validation — impl, r2</span><span class="chip hot">Codex is working · review r2 · 3m52s</span><span class="chip on">watcher: on</span><span style="flex:1"></span><span class="btn">Pause</span></div>
+<div class="box"><b>Needs you</b> <span class="muted">Codex is working — review, round 2 (3m38s).</span></div>
+<div class="lanes"><div class="box lead"><span class="lbl">Claude — lead</span> waiting<div class="row"><span>impl turn r1 · done · 4m00s</span><span class="muted">log</span></div><div class="row"><span>impl turn r2 · done · 4m00s</span><span class="muted">log</span></div><div class="row muted">Codex is working on its review — streaming in the reviewer lane…</div></div>
+<div class="box rev"><span class="lbl rev">Codex — reviewer</span> working · r2 · 3m52s<div class="row"><span>review r1 · <span class="warn">CHANGES REQUESTED</span></span></div><div class="row"><span>pre-check r2 · <span class="ok">PASSED</span></span></div><div class="row"><span>review r2 · working</span><span class="btn danger">stop turn</span></div><div class="row muted">[codex] tool: pytest -q tests/…<br>[codex] 14 passed in 3.2s<br>[codex] reading src/checkout/validate.py</div></div></div>
+</div><div class="caption">Correct, and it is where the August passes landed. The Needs-you banner repeats the strip chip.</div></div>
+<div><h4>Next</h4>
+<div class="mock">
+<div class="strip"><b>demo-web</b> <span class="chip">checkout-validation — impl, r2</span><span class="chip hot">Codex reviewing · r2 · 3m52s</span><span class="chip on">watcher: on</span><span style="flex:1"></span><span class="btn">Pause</span><span class="chip on">Live</span></div>
+<div class="lanes"><div class="box lead"><span class="lbl">Claude — lead</span> waiting<div class="row"><span>impl turn r2 · done · 4m00s · <span class="muted">12 files · +212 −40</span></span><span class="muted">diff</span></div><div class="row muted">Leave a note for the next turn… (/)</div></div>
+<div class="box rev"><span class="lbl rev">Codex — reviewer</span> working · r2 · 3m52s · <span class="muted">opus / medium</span><div class="row"><span>pre-check r2 · <span class="ok">PASSED</span> · 212 tests · 3m01s</span></div><div class="row"><span>review r2 · working · <span class="muted">reading 4 of 12 files</span></span><span class="btn danger">stop</span></div><div class="row muted">[codex] 14 passed in 3.2s<br>[codex] reading src/checkout/validate.py</div></div></div>
+<div class="box" style="display:flex;gap:12px"><span>this round so far: <b>7m 03s</b> · 2 turns · 0.6M tok</span><span class="muted">phase: 3 rounds · 41 min · 1.9M tok</span></div>
+</div><div class="caption">No banner when nothing needs you; the composer becomes a note box; cost of the round and phase in one line; model and effort shown where the work happens.</div></div>
+</div>
+
+<h2>Hub</h2>
+<p>The hub is in good shape for its job (triage across projects). Two small things:</p>
+<ul class="tight">
+<li>The <b>Waiting · stale</b> row prints the command to run but cannot run it, by design. Keep the design; add "copy" so it is one click, and show <em>which machine's</em> watcher would need starting when the project is a worktree.</li>
+<li>The strip's <b>24h burn / 7d</b> chips would be more useful as "window: 38% · resets 02:05" (the same gauge as the cockpit) since the window is one pool across projects; that is the number that stops you working.</li>
+</ul>
+
+<h2>Sequence for the next UX pass</h2>
+<ol>
+<li>Digest card + last-visit tracking (the blocker). Needs a small server change (record last GET per user) and a renderer; the optional Haiku summary can come later.</li>
+<li>Primary-action rule: Pause conditional, one filled button, reviewer lane collapses when idle.</li>
+<li>Consolidate rounds/activity into the lanes; Rounds tab becomes round text.</li>
+<li>Usage tab: window gauge, per-round bars, phase total; drop the churn line.</li>
+<li>⌘K palette and shortcuts; diff-anchored notes.</li>
+<li>Brief rendering as sections with ruling buttons.</li>
+</ol>
+<p>Items 1, 2 and 4 are the ones that would bring the cockpit back into daily use; 3, 5 and 6 make it pleasant. Hallway test after 1–2: open the cockpit cold the morning after a headless run and time how long it takes to say what happened. Under ten seconds is the bar.</p>
+
+<div class="footer">Evidence: <code>docs/media/screenshots/cockpit-*.png</code> (3.7.1), <code>docs/cockpit-issues.md</code>, <code>docs/how-tagteam-works.md</code> §Cockpit/§Hub, <code>tagteam/data/web/cockpit.html</code> (171 lines) / <code>cockpit.js</code> (1481) / <code>cockpit_api.py</code> (1270).</div>
+</div></body></html>
