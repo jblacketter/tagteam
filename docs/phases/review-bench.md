@@ -4,8 +4,8 @@
 - [x] Planning
 - [x] Approved: plan round 2 (2026-09-14)
 - [x] Implementation: phase/review-bench
-- [ ] Implementation Review
-- [ ] Complete
+- [x] Implementation Review: approved round 2 (2026-09-14)
+- [x] Complete: approved implementation; PR delivery, merge pending
 
 ## Summary
 "Should the reviewer run on Sonnet?" and "is medium effort enough?" are
@@ -360,3 +360,23 @@ First real run: 6 rounds × 2 cells, chosen from recent phases with
 `@BASE..REV` round commits (asserted) until enough snapshot rounds exist.
 Record what it used (`tagteam usage --by kind`) and the table; decide on the
 20-round run from that.
+
+## Closeout
+Implementation approved round 2; gate 1,976 passed, 5 skipped at `211a1b3`.
+Round 1 review changed the replay from `git archive` to raw tree objects,
+made artifacts per attempt, made replay cleanup liveness/keep-aware and
+aggregated the table per reviewed version. `tagteam report --phase
+review-bench`:
+
+```
+Phase report: review-bench — plan approved r2 · impl approved r2
+  plan   2 rounds · 1 change request · 0 bounces
+  impl   2 rounds · 1 change request · 0 bounces · gate 2 runs, 11m 18s
+  time   start→approve 36m 29s · implementation before first submit 13m 11s
+         lead 6m 46s (2 spans, 2 unknown) · reviewer 5m 13s (4 spans) · gate 11m 19s (2 spans)  (elapsed; includes relay wait)
+  usage  no usage rows stored under this phase
+  turns  matched 0 of 8 · no token data 0 · unmatched 6 · unknown 2
+```
+
+Not yet done: the first real bench run (6 rounds × 2 cells). The impl round 1
+and round 2 submissions of this phase are the first rounds with snapshots.
