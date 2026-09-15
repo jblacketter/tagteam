@@ -10,7 +10,7 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 ## Phases
 
 ### Phase 58: Cockpit session lifecycle
-- **Status:** Planning — plan cycle open (2026-09-15). Branch `phase/cockpit-session-lifecycle`. See `docs/phases/cockpit-session-lifecycle.md`.
+- **Status:** In progress — plan approved round 3 (2026-09-15); implementing. Branch `phase/cockpit-session-lifecycle`. See `docs/phases/cockpit-session-lifecycle.md`.
 - **Description:** One watcher per project (a lifetime lock in `tagteam watch`, refusal naming the running pid); SIGTERM stops a watcher cleanly (pidfile removed, in-flight turn killed via the existing interrupt path); Ctrl+C on `tagteam serve` stops the watchers that cockpit started and leaves others alone; the reviewer lane shows only the current cycle, blank by default, with a "Show last session" toggle, and verdict chips keyed by cycle. From the 2026-09-15 backlog entries below.
 
 ### Phase 57: Model policy by activity kind
