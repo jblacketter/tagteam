@@ -24,7 +24,8 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 - **Depends on:** Phase 51
 
 ### Phase 53: Legacy diagnostics and capability visibility
-- **Status:** Scheduled — report-only workflow artifact diagnostics and bounded context/capability visibility.
+- **Status:** Planning — plan cycle opened 2026-09-14 (slug `legacy-diagnostics`, branch `phase/legacy-diagnostics`). See `docs/phases/legacy-diagnostics.md`.
+- **Description:** Report-only workflow artifact diagnostics and bounded context/capability visibility: a read-only `tagteam doctor` (recognized legacy skills/instructions with evidence and remediation; per-role executables, contract entry points, instruction sources, tool configuration names, protection notes) plus a one-line pointer from `setup`/`upgrade`. Nothing is edited, deleted, probed or read from secrets.
 - **Depends on:** Phase 52
 
 ### Phase 50: Read-only Mode
