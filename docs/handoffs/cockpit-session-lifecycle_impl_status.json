@@ -1,0 +1,25 @@
+{
+  "state": "approved",
+  "ready_for": null,
+  "round": 1,
+  "phase": "cockpit-session-lifecycle",
+  "type": "impl",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-15",
+  "baseline": {
+    "sha": "e006cbdf984a0ceb4e2fd762860fd33df7d08455",
+    "dirty_paths": [],
+    "captured_at": "2026-09-15T14:21:41.422786+00:00",
+    "source": "copied-from-plan"
+  },
+  "impl_boundary": {
+    "sha": "038af2da4c119b48844e4fdaf9e35742596f7673",
+    "dirty": {
+      "docs/handoffs/cockpit-session-lifecycle_plan_rounds.jsonl": "a8e722a27985e67ccb30c39c04fb9bd926544a4ce667d4bcf4e5bf6a8ed4d79b",
+      "docs/handoffs/cockpit-session-lifecycle_plan_status.json": "ff83c6d887809659cae04675e281280c1ee688082ee5d32d5b66ee8bcac5e4db"
+    },
+    "captured_at": "2026-09-15T14:26:52.451917+00:00",
+    "source": "copied-from-plan"
+  }
+}

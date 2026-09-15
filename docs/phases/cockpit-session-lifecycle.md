@@ -4,8 +4,8 @@
 - [x] Planning
 - [x] Approved: plan round 3 (2026-09-15)
 - [x] Implementation: phase/cockpit-session-lifecycle
-- [ ] Implementation Review
-- [ ] Complete
+- [x] Implementation Review: approved round 1 (2026-09-15)
+- [x] Complete: approved implementation; PR delivery, merge pending
 
 ## Summary
 Two arbiter reports from 2026-09-15 (roadmap backlog, now scheduled here):
@@ -303,3 +303,23 @@ response, and the key format matches `CYCLE_ID`.)*
 8. Activity items for usage rows with v10 target identity carry the target
    cycle; older rows and older schemas fall back to the stored columns.
 9. Full suite passes (on the record via the on-submit gate).
+
+## Closeout
+Implementation approved round 1; gate 1,995 passed, 5 skipped at `97309f7`.
+The plan took three rounds: round 1 moved watcher ownership to spawn time and
+bound the verdict cache to its response cycle; round 2 made child creation and
+registration one critical section with the shutdown snapshot. One
+implementation deviation was accepted: the watcher lock lives at
+`~/.tagteam/watchers/<hash>.lock`, because a bare `tagteam watch` must write
+no new project file. Windows lock behaviour is not verified.
+`tagteam report --phase cockpit-session-lifecycle`:
+
+```
+Phase report: cockpit-session-lifecycle — plan approved r3 · impl approved r1
+  plan   3 rounds · 2 change requests · 0 bounces
+  impl   1 round · 0 change requests · 0 bounces · gate 1 run, 5m 54s
+  time   start→approve 27m 27s · implementation before first submit 14m 59s
+         lead 2m 29s (2 spans, 2 unknown) · reviewer 4m 05s (4 spans) · gate 5m 54s (1 span)  (elapsed; includes relay wait)
+  usage  no usage rows stored under this phase
+  turns  matched 0 of 8 · no token data 0 · unmatched 6 · unknown 2
+```
