@@ -1,0 +1,25 @@
+{
+  "state": "approved",
+  "ready_for": null,
+  "round": 2,
+  "phase": "legacy-diagnostics",
+  "type": "plan",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-15",
+  "baseline": {
+    "sha": "54370b0d1d7b4a125990ac120234d30a0057a4b8",
+    "dirty_paths": [],
+    "captured_at": "2026-09-15T03:10:21.658589+00:00",
+    "source": "plan-init"
+  },
+  "impl_boundary": {
+    "sha": "985d1d6cc5d59c91239dc7d8a2cc0ddf9233158a",
+    "dirty": {
+      "docs/handoffs/legacy-diagnostics_plan_rounds.jsonl": "7b29acdead00ca2bea571e89629b991a74ca047c6161b43d5f13b282deb9e751",
+      "docs/handoffs/legacy-diagnostics_plan_status.json": "df0e17f981d8184f4e2d130dd9084d3a3a2366979e67518da9aea2b72b1930b3"
+    },
+    "captured_at": "2026-09-15T03:13:48.299536+00:00",
+    "source": "plan-approve"
+  }
+}
