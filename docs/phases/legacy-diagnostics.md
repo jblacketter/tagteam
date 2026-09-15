@@ -18,8 +18,10 @@ which tool configuration is only configured and never verified, which
 protections are instructions rather than enforcement.
 
 This phase adds one read-only report, `tagteam doctor`, covering both, plus a
-one-line pointer from `setup`/`upgrade`. It reports. It never edits, deletes,
-probes a service, or reads a secret. Depends on Phase 52 (merged, PR #36).
+one-line pointer from `setup`/`upgrade`. It reports. It never edits, deletes
+or probes a service, and it never prints a configured value, argument or
+secret (see "Output boundary" for what is read versus what is printed).
+Depends on Phase 52 (merged, PR #36).
 
 Source of scope: priority 2 item 3 and priority 3 of
 `docs/role-neutrality-recommendations-2026-09-09.md`; the Phase 53 line in
@@ -52,8 +54,9 @@ sandboxes); downstream project cleanup (Northstar etc.); release/tag.
 ## Technical Approach
 
 ### Legacy workflow findings
-**Scanned paths** (project root only, lexical, no link following, regular
-files only, each file capped at 256 KB with a `truncated scan` note):
+**Scanned paths** (project root only, through the shape-checked reader in
+"Output boundary and config reads"; Markdown capped at 256 KB with a
+`truncated scan` note):
 - `.claude/skills/*/SKILL.md` and `.claude/skills/*.md`
 - `.claude/commands/*.md`
 - `AGENTS.md`, `CLAUDE.md`
@@ -94,29 +97,81 @@ never content-scanned. Phase 49's rule stands: a project tool reports on
 `~/.claude/`, it does not write there.
 
 ### Capability and context visibility
-Four states, used consistently: `configured` (a file says so), `found`
-(verified locally without contacting anything: an executable on `PATH`, a
-readable file), `missing`, `unknown` (not determinable without probing, which
-doctor never does).
+States, used consistently: `configured` (a file says so), `found` (verified
+locally without contacting anything: an executable on `PATH`, a readable
+regular file), `missing` (confirmed absent), `unknown` (could not be
+determined; the reason is always shown). A failed or unavailable check is
+`unknown`, never `missing`.
 
 Sections:
-1. **Roles.** `onboarding.describe_roles` plus, per role, argv0 of the launch
-   command resolved with `shutil.which` → `found <path>` / `missing`.
-2. **Contract.** `tagteam contract` always `found` (in-process). Plugin status
-   from `framework.version_line` (the `claude plugin list` call Phase 52
-   already makes; a missing `claude` executable reads `not installed` and is
-   not an error). The vendored skill with its Phase 52 classification.
-3. **Instruction sources.** For each of `AGENTS.md` / `CLAUDE.md`:
-   present/absent/symlink target, size. Per role, reuse `headless.PROVIDER_AUTOLOADS`,
-   `select_context_file` and `PROJECT_CONTEXT_MAX_CHARS` to state what that
-   provider auto-loads interactively, what a headless turn injects, and
-   whether injection truncates. Unknown provider → `unknown`, no guess.
+1. **Roles: two modes, observed separately.** Doctor does not call
+   `onboarding.describe_roles` (it prints the whole launch command). It builds
+   structured role data from `config.get_agent_names`,
+   `get_launch_commands`, `get_headless_spec` and `infer_headless_provider`:
+   - *Desktop / terminal launch*: display name; the command's first token
+     only (`shlex.split`), shown as its basename, resolved with
+     `shutil.which` → `found <resolved path>` / `missing`. A first token of
+     the form `NAME=value`, or a command `shlex` cannot split, is `unknown
+     (launch command not parsed)`, echoing nothing from it. Arguments are
+     never printed or put in JSON.
+   - *Headless*: provider from `infer_headless_provider` (an explicit
+     `headless.provider` wins; the display name is never used when a
+     provider or command says otherwise, exactly as the headless engine
+     resolves it), labelled with its source (`explicit` / `inferred from
+     command` / `inferred from name` / `unresolved`); executable =
+     `headless.executable` if configured, else the provider name, resolved
+     with `shutil.which` → `found` / `missing`; an unknown or unresolved
+     provider → `unknown`. `headless.args` are never printed.
+   The two modes are separate rows in text and separate objects in JSON, so
+   one executable check never stands for both.
+2. **Contract.** `tagteam contract` always `found` (in-process). The vendored
+   skill with its Phase 52 classification. **Plugin availability** is
+   derived from `plugin.list_plugins` with doctor's own classification, not
+   from `PluginStatus.installed` (whose `False` folds "could not ask" into
+   "not installed" for fallback selection; that behavior stays unchanged):
+   - `list_plugins` returned no records (CLI missing, timeout, non-zero exit,
+     malformed output) → `unknown (<reason>)`;
+   - records parsed, no applicable `tagteam@tagteam` record → `missing`;
+   - applicable, `enabled` not `true` → `configured, disabled`;
+   - applicable and enabled, handoff skill absent under `installPath` or no
+     `installPath` → `configured, broken (<reason>)`;
+   - unsupported scope or disagreeing records → `unknown (<reason>)`;
+   - enabled with the skill present → `found (<scope> scope)`.
+   The framework line shows package and manifest versions from Phase 52 and
+   this plugin state, not `version_line`'s `not installed` wording.
+3. **Instruction sources.** For each of `AGENTS.md` / `CLAUDE.md`: absent,
+   regular file with size, or unsupported shape (symlink, directory, other)
+   named without following it. Per role and per mode: *desktop* states the
+   file the configured launch executable's provider auto-loads
+   (`headless.PROVIDER_AUTOLOADS`, keyed by the launch basename when it is a
+   known provider, else `unknown`); *headless* uses the resolved headless
+   provider with `select_context_file` and `PROJECT_CONTEXT_MAX_CHARS` to
+   state which file a headless turn injects and whether it truncates.
+   Unknown provider → `unknown`, no guess.
 4. **Tool configuration.** Project `.mcp.json`: server *names* only →
    `configured (not probed)`. `.claude/settings.json` /
-   `.claude/settings.local.json`: presence, and hook event names/matchers
-   only. `.codex/config.toml` if present: presence only (no TOML parse, no
-   values). Nothing under the user's home is read except Phase 49's skill
-   directory listing. No values, env, headers or args are ever printed.
+   `.claude/settings.local.json`: hook event names and matchers only.
+   `.codex/config.toml`: presence only (not parsed). Nothing under the user's
+   home is read except Phase 49's skill directory listing.
+
+### Output boundary and config reads
+Every file doctor opens (legacy Markdown, instruction files, `.mcp.json`,
+Claude settings) goes through one reader with the Phase 52 shape rules:
+every component from the project root down is `lstat`ed; a symlink at the
+path or at any parent, a directory, or any non-regular file is not opened
+and is reported as `unsupported filesystem shape (<what>)`; reads are
+bounded: Markdown reads the first 256 KB and notes `truncated scan`; JSON
+config over 64 KB is `skipped: over size limit` and not parsed. Unreadable or malformed JSON
+→ `unknown (malformed <file>)`, and the report continues. So a project
+`.mcp.json` symlinked to a credential file in the home directory is never
+opened.
+
+What is read versus printed: parsing a config with `env` or `headers`
+necessarily reads those bytes into memory. The guarantee is about output:
+text and JSON carry only file paths, shapes, sizes, server names, hook event
+names and matchers, executable basenames and resolved paths, provider names
+and states. No config values, command arguments, `env`, `headers` or
+`args` are emitted, and nothing is logged or written.
 5. **Protections.** Static, accurate notes generated from what was found:
    a Claude hook applies to Claude processes only and does not bind the
    `<codex>` role; `TAGTEAM_READ_ONLY=1` blocks tagteam writes, not arbitrary
@@ -175,9 +230,31 @@ Fixtures in `tests/test_diagnostics.py` (temp projects, fake `HOME` and
   read.
 - Capability: launch executable present on a fake `PATH` vs absent; AGENTS.md
   only / CLAUDE.md only / both / neither / over the injection limit, for both
-  role assignments; `.mcp.json` with secrets in `env` → names printed, secret
-  string absent from text and JSON output; Claude hook present with Codex as
-  a role → the hook-scope note appears; unknown provider → `unknown`.
+  role assignments; Claude hook present with Codex as a role → the
+  hook-scope note appears; unknown provider → `unknown`.
+- Output boundary: a launch command `claude --api-key SENTINEL-1` and
+  `FOO=SENTINEL-2 codex`, `headless.args` containing `SENTINEL-3`, and
+  `.mcp.json` with `SENTINEL-4` in `env` and `headers` → no sentinel string
+  in text or JSON output; the assignment-prefixed command is `unknown`.
+- Config shapes: `.mcp.json` and `.claude/settings.json` as symlinks to a
+  fake-home file containing a sentinel; `.claude/` itself a symlink; each as
+  a directory; a FIFO; an oversized file; malformed JSON; valid JSON of the
+  wrong type → never opened (asserted by the sentinel and, for the FIFO, by
+  the run not blocking), reported as unsupported / skipped / `unknown`, and
+  the rest of the report is produced with exit 0.
+- Plugin availability: `TAGTEAM_CLAUDE_BIN=""` (CLI missing), a fake `claude`
+  that sleeps past a patched timeout, one that prints malformed JSON, one
+  that exits non-zero → `unknown` with the reason; a valid empty list →
+  `missing`; a disabled record → `configured, disabled`; an enabled record
+  without the skill → `configured, broken`; an enabled record with the skill
+  → `found`. `plugin_status` results for the same fixtures are unchanged.
+- Modes: a custom display name `Architect` with `command: claude --model x`
+  and `headless: {provider: codex, executable: /opt/fake/codex}` → desktop row
+  `claude` (found/missing on the fake `PATH`, auto-loads `CLAUDE.md`),
+  headless row `codex (explicit)` with executable `/opt/fake/codex` checked
+  separately and `AGENTS.md` not injected (Codex auto-loads it) — JSON keeps
+  the two modes as separate objects. A name-only agent with no command and
+  no headless block → both modes inferred from the name, labelled as such.
 - Read-only: tree + fake home unchanged after doctor, after `setup --preview`
   and after `upgrade --preview`; doctor succeeds with `TAGTEAM_READ_ONLY=1`
   and does not create `.tagteam/` or a DB.
@@ -200,7 +277,22 @@ suite for the impl submission. Plan revisions need document checks only.
   this plan delivers guidance in `workflows.md` and no `capabilities:` config
   key. A schema can follow once a real project uses the prose form.
 - **`claude plugin list` is a subprocess.** It is local and already runs from
-  `tagteam state`; doctor adds no new external calls.
+  `tagteam state`; doctor adds no new external calls. Doctor classifies its
+  result itself; `plugin_status` and every setup/fallback decision built on
+  it are untouched.
+- **Reading is not printing.** Config parsing reads secret-bearing bytes; the
+  guarantee is the output boundary plus the shape/size rules, stated as such
+  (reviewer, plan round 1).
+
+## Plan revision log
+Round 2 (reviewer round 1 findings): output boundary replaces
+`describe_roles` (no command args in text or JSON; sentinel fixtures); one
+shape-checked, bounded reader for every file including `.mcp.json` and
+Claude settings; "never reads a secret" narrowed to what is emitted; plugin
+availability classified from `list_plugins` with `unknown` distinct from
+`missing` / `disabled` / `broken`; desktop launch and headless
+provider/executable observed and reported as separate modes, headless via
+`get_headless_spec` / `infer_headless_provider`.
 - Scanning only project-level `.claude/` and root instruction files misses
   other agents' skill locations; out of scope until a concrete one is found.
 
