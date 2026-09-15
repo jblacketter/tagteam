@@ -88,6 +88,19 @@ def report_legacy_user_skills() -> bool:
     return False
 
 
+def report_legacy_workflow(target: Path) -> bool:
+    """Phase 53: one pointer line when the project carries recognized legacy
+    workflow artifacts. Report-only; never changes setup's exit code."""
+    from tagteam.diagnostics import legacy_findings, summary_line
+    try:
+        line = summary_line(legacy_findings(target), target)
+    except Exception as exc:  # a report must never break setup
+        line = f"note: legacy workflow scan failed ({exc.__class__.__name__})"
+    if line:
+        print(line)
+    return bool(line)
+
+
 def main(target_dir: str = ".", *, no_plugin: bool = False,
          report_user_skills: bool = True, preview: bool = False,
          accept: tuple[str, ...] | list[str] = (), force: bool = False) -> int:
@@ -148,6 +161,7 @@ def main(target_dir: str = ".", *, no_plugin: bool = False,
     if not preview:
         framework.apply(plan)
     print(framework.format_report(plan))
+    report_legacy_workflow(target)
     if report_user_skills and not no_plugin:
         report_legacy_user_skills()
 

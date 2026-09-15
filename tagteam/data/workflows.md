@@ -162,6 +162,50 @@ actions. Existing terminal panes are not identified or replaced automatically.
 operation. Desktop and headless sessions may have different tools and access.
 
 Existing project instruction files are preserved. New instruction pointers are
-created only when absent. Safe migration of customized legacy framework files
-is separate work: do not treat readiness as confirmation that an old project's
-skills and rules are synchronized.
+created only when absent. Readiness does not mean an old project's own skills
+and rules agree with the new assignment — run `tagteam doctor` after a switch.
+
+## Diagnostics: `tagteam doctor`
+
+`tagteam doctor [DIR] [--json]` is a read-only report. It writes nothing, probes
+no service, and prints no configured value, command argument or secret. It is
+safe for a read-only helper (`TAGTEAM_READ_ONLY=1`).
+
+- **Legacy workflow findings.** Project skills (`.claude/skills/`), commands
+  (`.claude/commands/`), `AGENTS.md` and `CLAUDE.md` that use retired command
+  syntax (the retired pre-plugin `handoff-*` slash commands) or name a fixed role holder ("Claude is
+  always the lead"). A fixed role that contradicts `tagteam.yaml` is a `warn`;
+  one that matches today is `info` (stale after a switch). Each finding shows
+  the line and a manual remediation. Findings are candidates: tagteam has no
+  provenance for these files and never edits or deletes them. `setup` and
+  `upgrade` print one line pointing here when a project has any.
+- **Per role, desktop and headless separately.** The launch executable and the
+  headless provider/executable (`found` / `missing` / `unknown`), which
+  instruction file each provider loads by itself, and what a headless turn
+  injects (and whether it is truncated).
+- **Contract and tools.** `tagteam contract`, the plugin (`unknown` when Claude
+  Code could not be asked — not the same as `missing`), the vendored skill,
+  `.mcp.json` server names and Claude hook events — configured, not probed.
+- **Protections.** Which guarantees are enforcement and which are instructions:
+  a Claude hook does not bind a Codex process.
+
+Symlinks and non-regular files are reported, never followed or opened.
+
+## Capabilities and alternatives
+
+Tagteam cannot know which tools a task needs. Record that in your project
+instructions (`AGENTS.md` or `CLAUDE.md`), in role-neutral terms, so both
+providers read the same thing:
+
+```markdown
+## Capabilities
+- Datadog (logs, monitors) — needed for incident triage evidence.
+  Without it: do not triage; ask the arbiter for an export.
+- Markdown/docs edits need no external tools.
+```
+
+A missing tool should block only the tasks whose evidence depends on it.
+`tagteam doctor` shows what is configured; it cannot show that a connection
+works in a given session, so a task that needs one should verify it first.
+Keep durable decisions and evidence in project files, not in a provider's
+private memory, and never copy credentials between tools.

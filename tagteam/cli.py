@@ -419,6 +419,8 @@ Commands:
   tui           Launch the Handoff Saloon terminal UI
   migrate       Migrate legacy projects to use tagteam.yaml
   upgrade       Migrate every registered project to the installed package (--preview)
+  doctor [dir]  Read-only report: legacy workflow findings, per-role executables, contract
+                entry points, instruction sources, tool config names (--json)
 
 Advanced setup (individual steps, from project root):
   tagteam setup
@@ -477,6 +479,7 @@ READ_ONLY_COMMANDS: dict[str, "callable"] = {
     "contract": lambda rest: True,
     "tail": lambda rest: True,
     "hook": lambda rest: True,
+    "doctor": lambda rest: True,
 }
 # Never a helper's business: parents, humans and installers only. Refused with
 # any arguments — `--help` included (see `read_only_refusal`).
@@ -505,7 +508,8 @@ def _read_only_summary() -> list[tuple[str, tuple[str, ...] | None]]:
     return [("cycle", ("status", "rounds")), ("state", ("diagnose",)), ("gate", ("status", "list")),
             ("panel", ("status", "lenses", "list")), ("roadmap", ("queue", "phases", "check", "graph", "ready")),
             ("interject --list", None), ("brief", None), ("hub list", None),
-            ("registry list", None), ("usage", None), ("contract", None), ("tail", None), ("hook", None)]
+            ("registry list", None), ("usage", None), ("contract", None), ("tail", None), ("hook", None),
+            ("doctor", None)]
 
 
 def main() -> int:
@@ -649,6 +653,10 @@ def _dispatch() -> int:
         return tui_command(sys.argv[2:])
     if command == "upgrade":
         return upgrade_command(sys.argv[2:])
+    if command == "doctor":
+        from tagteam.diagnostics import doctor_command
+
+        return doctor_command(sys.argv[2:])
     if command in ["-h", "--help", "help"]:
         print(HELP_TEXT)
         return 0

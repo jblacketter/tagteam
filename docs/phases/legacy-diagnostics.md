@@ -1,9 +1,9 @@
 # Phase 53: Legacy Diagnostics and Capability Visibility
 
 ## Status
-- [ ] Planning
-- [ ] Approved
-- [ ] Implementation
+- [x] Planning
+- [x] Approved: plan round 2 (2026-09-15)
+- [x] Implementation: phase/legacy-diagnostics
 - [ ] Implementation Review
 - [ ] Complete
 
@@ -297,3 +297,40 @@ provider/executable observed and reported as separate modes, headless via
   other agents' skill locations; out of scope until a concrete one is found.
 
 No human clarification is required for plan review.
+
+
+## Implementation notes
+Branch `phase/legacy-diagnostics`. `tagteam/diagnostics.py` (report model,
+text and `--json schema 1`), `tagteam doctor [DIR] [--json]` in `cli.py`
+(help, dispatch, `READ_ONLY_COMMANDS`), `setup.report_legacy_workflow` called
+after the framework report in `setup.main`, so `upgrade` prints it inside
+each project's section.
+
+As built, where the plan left room:
+- Roles are described whenever both names are present, not only when
+  `validate_config` passes: an explicit unknown `headless.provider` is
+  exactly the case the report should show as `unknown`.
+- A fixed-role claim is judged against the role's identities: display name,
+  launch basename and its provider, headless provider. "Claude is the lead"
+  under `name: Architect, command: claude` is `info`, not `warn`.
+- One finding per (rule, line): "Claude (Lead) / Codex (Reviewer)" on one line
+  is one finding.
+- The framework section reuses `framework.build_plan` with a `PluginStatus`
+  built from doctor's own plugin classification (no second `plugin list`).
+  The setup/upgrade pointer calls the scan without the plugin call.
+- A failing scan never breaks setup: it prints `note: legacy workflow scan
+  failed (<ExceptionClass>)` and setup's exit code is unchanged.
+- Shipped text avoids the literal retired command names so the Phase 49
+  shipped-docs audit stays meaningful; the vendored skill path is
+  `framework.SKILL_REL`, per the runtime-strings audit.
+- This repo's own `docs/workflows.md` is `custom` under Phase 52 (it predates
+  the manifest), so it was not refreshed; the shipped
+  `tagteam/data/workflows.md` carries the new sections.
+
+Verification: `tests/test_diagnostics.py` (47 tests) plus the neighbouring
+focused files (`test_readonly`, `test_plugin`, `test_setup`,
+`test_framework`, `test_onboarding`, `test_quickstart`, `test_state_sync`)
+pass; the on_submit gate supplies the recorded full-suite run. Manual:
+`tagteam doctor` on this repo (0 findings, tree unchanged) and on the
+Northstar project (6 info findings on its `plan` / `implement` skills,
+matching its current Claude-lead config). Not verified on Windows or Linux.
