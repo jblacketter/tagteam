@@ -36,7 +36,8 @@ import stat
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from tagteam.config import HEADLESS_PROVIDERS, get_headless_spec, read_config
+from tagteam import config as config_mod
+from tagteam.config import HEADLESS_PROVIDERS, get_headless_spec
 from tagteam.framework import SKILL_REL
 from tagteam.plugin import (PLUGIN_KEY, SKILL_IN_PLUGIN, PluginStatus, _same_path,
                             legacy_handoff_skill_candidates, list_plugins)
@@ -45,6 +46,7 @@ SCHEMA = 1
 MARKDOWN_LIMIT = 256 * 1024
 JSON_LIMIT = 64 * 1024
 EXCERPT_CHARS = 120
+CONFIG_NAME = "tagteam.yaml"
 ROLES = ("lead", "reviewer")
 INSTRUCTION_FILES = ("AGENTS.md", "CLAUDE.md")
 CLAUDE_SETTINGS = (".claude/settings.json", ".claude/settings.local.json")
@@ -454,13 +456,15 @@ def scan_file(rel: str, text: str, roles: list[dict]) -> list[dict]:
                          "excerpt": excerpt, "provenance": PROVENANCE, "remediation": remediation})
 
     for lineno, line in enumerate(text.splitlines(), 1):
-        excerpt = line.strip()[:EXCERPT_CHARS]
-        if _RETIRED.search(line):
-            add("retired-command", "warn", lineno, excerpt, RULES["retired-command"])
+        # Evidence is the recognised match alone, never the surrounding line:
+        # arguments and values next to a command must not reach the output.
+        for m in _RETIRED.finditer(line):
+            add("retired-command", "warn", lineno, m.group(0)[:EXCERPT_CHARS], RULES["retired-command"])
         for name in sorted(names):
             for pattern, fixed in _fixed_role_patterns(name):
                 for m in pattern.finditer(line):
                     role = fixed or m.group(1).lower()
+                    excerpt = m.group(0)[:EXCERPT_CHARS]
                     if not roles:
                         add("fixed-role", "info", lineno, excerpt, RULES["fixed-role"].format(roles=rtext))
                     elif name in ids.get(role, set()):
@@ -591,6 +595,30 @@ class Report:
         return d
 
 
+def read_role_config(root: Path) -> tuple[dict | None, dict | None]:
+    """``tagteam.yaml`` through :func:`read_bounded` and parsed from those
+    bytes — the path is never reopened. Returns (config, note); a link,
+    FIFO, oversized or malformed file is a note, and the report goes on
+    without roles."""
+    r = read_bounded(root, CONFIG_NAME, JSON_LIMIT, truncate=False)
+    if r.state == "absent":
+        return None, None
+    if r.state != "file":
+        why = f"unsupported filesystem shape ({r.detail})" if r.state == "unsupported" else (r.detail or r.state)
+        return None, {"path": CONFIG_NAME, "detail": f"not read: {why}"}
+    try:
+        text = r.data.decode("utf-8")
+        if config_mod.HAS_YAML:
+            data = config_mod.yaml.safe_load(text)
+        else:
+            data = config_mod._read_config_fallback(text)
+    except Exception:
+        data = None
+    if not isinstance(data, dict):
+        return None, {"path": CONFIG_NAME, "detail": f"not read: malformed {CONFIG_NAME}"}
+    return data, None
+
+
 def _managed(framework: dict) -> set[str]:
     return {i["path"] for i in framework.get("items", [])}
 
@@ -600,7 +628,7 @@ def legacy_findings(root: str | Path) -> list[dict]:
     the managed set is taken with the plugin treated as absent, which only
     widens the exclusion to the vendored skill path (excluded anyway)."""
     root = Path(root).resolve()
-    config = read_config(root / "tagteam.yaml")
+    config, _ = read_role_config(root)
     roles = observe_roles(root, config)
     fw = observe_framework(root, {"state": "missing", "reason": "not checked"})
     findings, _ = scan_legacy(root, roles, _managed(fw) | {SKILL_REL})
@@ -609,13 +637,15 @@ def legacy_findings(root: str | Path) -> list[dict]:
 
 def build_report(target: str | Path) -> Report:
     root = Path(target).resolve()
-    config = read_config(root / "tagteam.yaml")
+    config, config_note = read_role_config(root)
     roles = observe_roles(root, config)
     plugin = plugin_availability(root)
     fw = observe_framework(root, plugin)
     skill = next((i for i in fw["items"] if i["path"] == SKILL_REL), None)
     tools = observe_tools(root)
     findings, notes = scan_legacy(root, roles, _managed(fw) | {SKILL_REL})
+    if config_note:
+        notes.insert(0, config_note)
     return Report(
         root=str(root), roles=roles, roles_configured=bool(roles),
         contract={"shell": {"entry": "tagteam contract", "state": "found"}, "plugin": plugin,
@@ -633,7 +663,10 @@ def _obs(state: str, path: str, reason: str) -> str:
 
 def format_report(rep: Report) -> str:
     L = [f"Tagteam doctor — {rep.root}", "=" * 40, "", "Roles"]
-    if not rep.roles:
+    config_note = next((n for n in rep.notes if n["path"] == CONFIG_NAME), None)
+    if config_note:
+        L.append(f"  {CONFIG_NAME} {config_note['detail']}")
+    elif not rep.roles:
         L.append("  not configured; run tagteam init")
     for r in rep.roles:
         d, h = r["desktop"], r["headless"]
@@ -695,7 +728,7 @@ def format_report(rep: Report) -> str:
     for u in rep.user_level:
         L.append(f"  user-level candidate  {u} (not read; tagteam never modifies it)")
     if rep.notes:
-        L += ["", "Not scanned"] + [f"  {n['path']} — {n['detail']}" for n in rep.notes]
+        L += ["", "Not read"] + [f"  {n['path']} — {n['detail']}" for n in rep.notes]
     c = rep.counts
     L += ["", f"findings: {c['warn']} warn, {c['info']} info"]
     return "\n".join(L)
