@@ -19,9 +19,11 @@ last wrote:
 
 Recovery is git: an accepted overwrite or deletion needs the path tracked and
 clean so ``git checkout -- PATH`` restores it; ``--force`` lifts only that
-refusal. Every write and delete re-checks the (existence, type, sha256)
-preimage captured at classification. A second run on a migrated tree writes
-nothing. Nothing here follows a symlink or deletes directory contents.
+refusal. Every write and delete — including the framework directories, the
+once-only seed files and the manifest itself — re-checks the (existence,
+type, sha256) preimage captured at classification. A second run on a
+migrated tree writes nothing. Nothing here follows a symlink or deletes
+directory contents.
 
 Naming: ``tagteam/migrate.py`` already holds the legacy tagteam.yaml
 migration, so the plan's ``migrate.py`` lives here as ``framework.py``.
@@ -49,6 +51,19 @@ MANIFEST_SCHEMA = 1
 SKILL_DIR_REL = ".claude/skills/handoff"
 SKILL_REL = SKILL_DIR_REL + "/SKILL.md"
 SKILLS_DIR_REL = ".claude/skills"
+
+# Directories setup provides, and files it seeds once and never touches again
+# (round 3: these go through the same lexical-parent checks as managed files,
+# so setup never mkdirs or writes through a link or a non-directory).
+SEED_DIRS = (".claude/skills", "docs/phases", "docs/handoffs", "docs/escalations",
+             "docs/checklists", "templates")
+POINTER = ("# Project workflow\n\nRead `tagteam.yaml` for current roles, "
+           "`docs/workflows.md` for onboarding, and run "
+           "`tagteam contract` for the authoritative workflow.\n")
+# (project relpath, package source relative to data/ or None for POINTER)
+SEED_FILES = (("docs/roadmap.md", "templates/roadmap.md"),
+              ("docs/decision_log.md", "templates/decision_log.md"),
+              ("AGENTS.md", None), ("CLAUDE.md", None))
 
 UNSUPPORTED, ABSENT, CURRENT, FRAMEWORK, CUSTOM = (
     "unsupported", "absent", "current", "framework", "custom")
@@ -132,6 +147,12 @@ def observe_dir(root: Path, rel: str) -> Shape:
     return _walk(root, rel, "dir")
 
 
+def observe_parent(root: Path, rel: str) -> Shape:
+    """Shape of ``rel``'s lexical parent chain alone (``dir`` for the root)."""
+    parent = Path(rel).parent.as_posix()
+    return Shape("dir") if parent == "." else observe_dir(root, parent)
+
+
 # ---------------------------------------------------------------------------
 # Manifest
 # ---------------------------------------------------------------------------
@@ -140,25 +161,35 @@ def manifest_path(root: Path) -> Path:
     return Path(root) / MANIFEST_NAME
 
 
-def read_manifest(root: Path) -> tuple[dict | None, str]:
-    """(manifest, state) — state is ``ok`` / ``none`` / ``invalid (<why>)``.
-    Anything but ``ok`` means pre-manifest: no entry is trusted."""
+def read_manifest_shape(root: Path) -> tuple[dict | None, str, Shape]:
+    """(manifest, state, shape) — state is ``ok`` / ``none`` / ``invalid
+    (<why>)``. Anything but ``ok`` means pre-manifest: no entry is trusted.
+    ``shape`` is the preimage the eventual manifest write is checked against."""
     shape = observe(Path(root), MANIFEST_NAME)
     if shape.kind == "absent":
-        return None, "none"
+        return None, "none", shape
     if shape.kind != "file":
-        return None, f"invalid ({shape.detail})"
+        return None, f"invalid ({shape.detail})", shape
     try:
-        data = json.loads(manifest_path(root).read_text(encoding="utf-8"))
+        raw = manifest_path(root).read_bytes()
+        data = json.loads(raw.decode("utf-8"))
     except (OSError, ValueError, UnicodeDecodeError) as e:
-        return None, f"invalid ({e.__class__.__name__})"
+        return None, f"invalid ({e.__class__.__name__})", shape
+    # The bytes we parsed are the preimage, not whatever observe() hashed a
+    # moment earlier.
+    shape = Shape("file", sha256=sha256_bytes(raw))
     if (not isinstance(data, dict) or data.get("schema") != MANIFEST_SCHEMA
             or not isinstance(data.get("files"), dict)):
-        return None, "invalid (unrecognised schema)"
+        return None, "invalid (unrecognised schema)", shape
     files = {k: v for k, v in data["files"].items()
              if isinstance(k, str) and isinstance(v, dict) and isinstance(v.get("sha256"), str)}
     return {"schema": MANIFEST_SCHEMA, "tagteam": str(data.get("tagteam", "?")),
-            "written_at": str(data.get("written_at", "")), "files": files}, "ok"
+            "written_at": str(data.get("written_at", "")), "files": files}, "ok", shape
+
+
+def read_manifest(root: Path) -> tuple[dict | None, str]:
+    m, state, _ = read_manifest_shape(root)
+    return m, state
 
 
 def _manifest_bytes(m: dict) -> bytes:
@@ -179,9 +210,10 @@ def _same_manifest(a: dict | None, b: dict | None) -> bool:
 @dataclass
 class Item:
     rel: str
-    kind: str                       # file | skill | skill-handover | extra | legacy
+    kind: str                       # file | skill | skill-handover | extra | legacy | dir | seed
     source: Path | None = None
     source_rel: str = ""
+    content: bytes | None = None    # literal payload (seeds without a package file)
     package_sha: str | None = None
     shape: Shape = field(default_factory=lambda: Shape("absent"))
     cls: str = ""
@@ -213,6 +245,7 @@ class Plan:
     force: bool
     unknown_accepts: list[str] = field(default_factory=list)
     header: str = ""                # version line as observed at classification
+    manifest_shape: Shape = field(default_factory=lambda: Shape("absent"))   # preimage
     manifest_outcome: str = ""      # after apply: written | unchanged | refused: <why>
     applied: bool = False
 
@@ -370,6 +403,53 @@ def _legacy_items(root: Path, accept: set[str]) -> list[Item]:
     return out
 
 
+def _seed_items(root: Path, data_dir: Path) -> tuple[list[Item], list[Item]]:
+    """(directories, seed files). A directory is created when absent, a seed
+    file is written once when absent; neither is ever touched otherwise. Both
+    are refused when a parent component is not a plain directory — setup
+    never creates or writes through a link — and left alone (``keep``) when
+    something other than the expected shape already sits at the path itself."""
+    dirs: list[Item] = []
+    for rel in SEED_DIRS:
+        it = Item(rel, "dir")
+        pshape = observe_parent(root, rel)
+        if pshape.kind == "unsupported":
+            it.shape = Shape("unsupported", pshape.detail)
+            it.cls, it.reason, it.action = UNSUPPORTED, f"unsupported filesystem shape ({pshape.detail})", "refuse"
+            dirs.append(it)
+            continue
+        it.shape = observe_dir(root, rel)
+        if it.shape.kind == "absent":
+            it.cls, it.reason, it.action = ABSENT, "absent", "create"
+        elif it.shape.kind == "dir":
+            it.cls, it.reason, it.action = CURRENT, "present", "current"
+        else:
+            it.cls, it.reason, it.action = CUSTOM, f"{it.shape.detail}; never touched", "keep"
+        dirs.append(it)
+    seeds: list[Item] = []
+    for rel, src_rel in SEED_FILES:
+        src = data_dir / src_rel if src_rel else None
+        if src is not None and not src.is_file():
+            continue
+        it = Item(rel, "seed", source=src, source_rel=src_rel or "",
+                  content=None if src_rel else POINTER.encode("utf-8"))
+        pshape = observe_parent(root, rel)
+        if pshape.kind == "unsupported":
+            it.shape = Shape("unsupported", pshape.detail)
+            it.cls, it.reason, it.action = UNSUPPORTED, f"unsupported filesystem shape ({pshape.detail})", "refuse"
+            seeds.append(it)
+            continue
+        it.shape = observe(root, rel)
+        if it.shape.kind == "absent":
+            it.cls, it.reason, it.action = ABSENT, "seeded once; yours from now on", "create"
+        elif it.shape.kind == "file":
+            it.cls, it.reason, it.action = CUSTOM, "existing project file; never touched", "keep"
+        else:
+            it.cls, it.reason, it.action = CUSTOM, f"{it.shape.detail}; never touched", "keep"
+        seeds.append(it)
+    return dirs, seeds
+
+
 def build_plan(target: str | Path, *, data_dir: Path, no_plugin: bool = False,
                accept: tuple[str, ...] | list[str] = (), force: bool = False,
                plugin: PluginStatus | None = None) -> Plan:
@@ -378,11 +458,12 @@ def build_plan(target: str | Path, *, data_dir: Path, no_plugin: bool = False,
     accept_set = {Path(a).as_posix().strip("/") for a in accept}
     status = PluginStatus(False, "--no-plugin") if no_plugin else (plugin or plugin_status(root))
     vendor = not status.installed
-    manifest, mstate = read_manifest(root)
+    manifest, mstate, mshape = read_manifest_shape(root)
     entries = manifest["files"] if manifest else {}
     known = known_contract_hashes()
 
-    items: list[Item] = []
+    dirs, seeds = _seed_items(root, data_dir)
+    items: list[Item] = list(dirs)
     for rel, src, src_rel in _sources(data_dir):
         package = src.read_bytes()
         it = Item(rel, "file", source=src, source_rel=src_rel, package_sha=sha256_bytes(package),
@@ -391,10 +472,11 @@ def build_plan(target: str | Path, *, data_dir: Path, no_plugin: bool = False,
         items.append(it)
     items += _skill_items(root, data_dir, vendor, entries, known)
     items += _legacy_items(root, accept_set)
+    items += seeds
 
     matched: set[str] = set()
     for it in items:
-        if it.kind in ("skill-handover", "extra", "legacy"):
+        if it.kind in ("skill-handover", "extra", "legacy", "dir", "seed"):
             if it.action == "remove" and it.kind == "legacy":
                 matched.add(it.rel)
             continue
@@ -422,20 +504,23 @@ def build_plan(target: str | Path, *, data_dir: Path, no_plugin: bool = False,
             else:
                 it.action, it.reason = "refuse", f"not recoverable: {why} (use --force)"
     unknown = sorted(a for a in accept_set if a not in matched)
-    return Plan(root=root, package_version=package_version(), plugin=status, vendor_skill=vendor,
+    plan = Plan(root=root, package_version=package_version(), plugin=status, vendor_skill=vendor,
                 manifest=manifest, manifest_state=mstate, items=items,
                 accept=tuple(sorted(accept_set)), force=force, unknown_accepts=unknown,
-                header=_version_text(manifest, mstate, status))
+                header=_version_text(manifest, mstate, status), manifest_shape=mshape)
+    # Preview verdict for the manifest: a write that would be needed but is
+    # impossible at this shape is a refusal now, not a promise.
+    if mshape.kind == "unsupported" and manifest_pending(plan):
+        plan.manifest_outcome = f"refused: unsupported filesystem shape ({mshape.detail})"
+    return plan
 
 
 # ---------------------------------------------------------------------------
 # Apply
 # ---------------------------------------------------------------------------
 
-def _recheck(root: Path, item: Item) -> str | None:
-    """None if the preimage (existence, type, sha256) still holds, else why not."""
-    now = observe(root, item.rel)
-    before = item.shape
+def _compare(now: Shape, before: Shape) -> str | None:
+    """None if ``now`` still matches the preimage ``before``, else why not."""
     if now.kind == "unsupported":
         return f"changed since classification: {now.detail}"
     if now.kind != before.kind:
@@ -443,6 +528,12 @@ def _recheck(root: Path, item: Item) -> str | None:
     if now.sha256 != before.sha256:
         return "changed since classification: content differs"
     return None
+
+
+def _recheck(root: Path, item: Item) -> str | None:
+    """None if the preimage (existence, type, sha256) still holds, else why not."""
+    now = observe_dir(root, item.rel) if item.kind == "dir" else observe(root, item.rel)
+    return _compare(now, item.shape)
 
 
 def _mkdirs(root: Path, rel: str) -> None:
@@ -487,13 +578,18 @@ def _act(root: Path, item: Item) -> None:
     if why:
         item.outcome = f"refused: {why}"
         return
+    payload = (lambda: item.content if item.content is not None else item.source.read_bytes())
     try:
-        if item.action == "create":
+        if item.action == "create" and item.kind == "dir":
             _mkdirs(root, item.rel)
-            _write_exclusive(path, item.source.read_bytes())
+            os.mkdir(path)
+            item.outcome = "created"
+        elif item.action == "create":
+            _mkdirs(root, item.rel)
+            _write_exclusive(path, payload())
             item.outcome = "created"
         elif item.action in ("refresh", "accept"):
-            _replace(path, item.source.read_bytes())
+            _replace(path, payload())
             item.outcome = _DONE[item.action]
         elif item.action == "remove":
             os.unlink(path)
@@ -577,16 +673,26 @@ def _write_manifest(plan: Plan) -> None:
     if _same_manifest(proj, plan.manifest):
         plan.manifest_outcome = "unchanged"
         return
-    shape = observe(plan.root, MANIFEST_NAME)
-    if shape.kind == "unsupported":
-        plan.manifest_outcome = f"refused: unsupported filesystem shape ({shape.detail})"
+    before = plan.manifest_shape
+    if before.kind == "unsupported":
+        plan.manifest_outcome = f"refused: unsupported filesystem shape ({before.detail})"
+        return
+    # Same preimage rule as every managed path: the manifest we read (or its
+    # absence) must still be what is on disk, or the write is refused and the
+    # concurrent bytes are left alone.
+    why = _compare(observe(plan.root, MANIFEST_NAME), before)
+    if why:
+        plan.manifest_outcome = f"refused: {why}"
         return
     path = manifest_path(plan.root)
     try:
-        if shape.kind == "absent":
+        if before.kind == "absent":
             _write_exclusive(path, _manifest_bytes(proj))
         else:
             _replace(path, _manifest_bytes(proj))
+    except FileExistsError:
+        plan.manifest_outcome = "refused: appeared since classification"
+        return
     except OSError as e:
         plan.manifest_outcome = f"refused: {e.__class__.__name__}: {e}"
         return
@@ -642,7 +748,18 @@ def format_report(plan: Plan) -> str:
     if plan.force:
         lines.append("  --force: recoverability refusals lifted for accepted paths")
     current = 0
+    made_dirs = 0
     for it in plan.items:
+        if it.kind in ("dir", "seed"):
+            verb = it.outcome if plan.applied else it.action
+            if verb.startswith("refused"):
+                lines.append(f"  refused  {it.rel} — {verb[len('refused: '):] if verb.startswith('refused: ') else it.reason}")
+            elif it.kind == "dir" and verb in ("create", "created"):
+                made_dirs += 1
+            elif it.kind == "seed" and verb in ("create", "created"):
+                lines.append(f"  {verb:<8} {it.rel} — {it.reason}")
+            # present directories and existing seed files: silent
+            continue
         if it.kind == "skill-handover":
             if it.action == "remove":
                 verb = it.outcome or "remove"
@@ -676,6 +793,8 @@ def format_report(plan: Plan) -> str:
             elif it.action == "keep" and it.kind == "legacy":
                 text += f"; delete with: tagteam setup {plan.root} --accept {it.rel}"
         lines.append(text)
+    if made_dirs:
+        lines.append(f"  {'created' if plan.applied else 'create':<8} {made_dirs} director{'y' if made_dirs == 1 else 'ies'}")
     if current:
         lines.append(f"  current  {current} file(s) match the package — no change")
     for p in plan.unknown_accepts:
@@ -683,6 +802,9 @@ def format_report(plan: Plan) -> str:
     if plan.applied:
         lines.append(f"Manifest: {MANIFEST_NAME} {plan.manifest_outcome}")
     else:
-        lines.append(f"Manifest: {MANIFEST_NAME} {'would be written' if manifest_pending(plan) else 'unchanged'}"
-                     " (preview — nothing written)")
+        if plan.manifest_outcome.startswith("refused"):
+            verdict = f"would be {plan.manifest_outcome}"
+        else:
+            verdict = "would be written" if manifest_pending(plan) else "unchanged"
+        lines.append(f"Manifest: {MANIFEST_NAME} {verdict} (preview — nothing written)")
     return "\n".join(lines)

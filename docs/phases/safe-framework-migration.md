@@ -350,3 +350,38 @@ the wheel-installed run, `test_setup`, `test_quickstart`, `test_onboarding`,
 supplies the recorded full-suite run. Manual: fresh `setup`, `--preview`,
 untracked/tracked `--accept`, second run on a scratch git project — outputs
 match the report format above.
+
+### Round 3 (impl review): setup-level boundaries and the manifest preimage
+Two reviewer findings, both fixed in the engine rather than in `setup.py`:
+
+- **Directories and seeds go through the engine.** `setup.main` used to
+  `mkdir(parents=True)` the six framework directories before classification
+  and write the seeds (`docs/roadmap.md`, `docs/decision_log.md`, `AGENTS.md`,
+  `CLAUDE.md`) afterwards, both straight through whatever sat at `docs/` or
+  `.claude/`. They are now plan items (`kind: dir` / `kind: seed`,
+  `SEED_DIRS` / `SEED_FILES`): a parent component that is not a plain
+  directory refuses the item under every flag; an absent path is created
+  (`mkdir` one component at a time, `O_EXCL` for seeds) after the same
+  preimage re-check as every managed file; anything already at the path
+  itself — a file, a symlink such as `AGENTS.md → CLAUDE.md`, a dangling
+  link — is left alone and not reported, because the run would never touch
+  it. `setup.py` no longer writes to the project tree at all. The report
+  collapses created directories to one line and prints seeds only when
+  created or refused.
+- **Manifest preimage.** `read_manifest_shape` captures the manifest's shape
+  (absent / file + sha256 of the bytes parsed / unsupported) at
+  classification; `_write_manifest` re-observes and refuses on appearance,
+  disappearance, type change or content change, exactly like `_recheck`
+  for managed paths. Preview reports `would be refused: unsupported
+  filesystem shape (…)` — and exits 1 — when a symlink or directory sits at
+  the manifest path, instead of promising `would be written`.
+
+Tests: `tests/test_framework.py` round-3 section — docs and `.claude`
+symlinked to an empty outside directory under default / `--accept` /
+`--force` / `--no-plugin` (outside tree unchanged, other paths proceed,
+exit 1), regular file at `docs/` or `templates/` (subtree refused path by
+path, no traceback), seed-path symlinks left alone with exit 0, `docs`
+becoming a link between classification and apply, fresh-run report lines,
+manifest appear / edit / disappear between classification and apply
+(concurrent bytes preserved, refusal reported), manifest symlink and
+directory in preview and apply.

@@ -123,8 +123,11 @@ then run it without `--preview`:
   `--force` lifts only that check.
 
 Pre-plugin flat skills (`.claude/skills/handoff-*.md`) are never deleted
-without `--accept PATH`. Symlinks or directories at a managed path are refused
-and left for you to fix by hand. A second run changes nothing. `tagteam state`
+without `--accept PATH`. Symlinks or directories at a managed path — or at any
+directory above one — are refused and left for you to fix by hand; setup never
+creates or writes through a link, not for the framework directories, not for
+the once-only seeds (`docs/roadmap.md`, `docs/decision_log.md`, `AGENTS.md`,
+`CLAUDE.md`), not for the manifest. A second run changes nothing. `tagteam state`
 shows the package version, the manifest version and the plugin status side by
 side — a package update does not move the other two.
 
