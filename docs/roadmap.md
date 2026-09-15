@@ -10,7 +10,7 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 ## Phases
 
 ### Phase 58a: Watcher SIGTERM test in event mode
-- **Status:** In review — impl cycle open (2026-09-15); carried by PR #42. See `docs/phases/watcher-sigterm-test-event-mode.md`.
+- **Status:** ✅ Complete — impl approved round 1 (2026-09-15); gate: 1,995 passed, 5 skipped at `c75d52f`; PR #42 CI (with watchdog): 2,007 passed, 4 skipped. See `docs/phases/watcher-sigterm-test-event-mode.md`.
 - **Description:** CI (with `watchdog`) failed a Phase 58 test that asserted the poll loop's `Watcher stopped.` log line; the event loop exits cleanly without it. Assert the clean exit (code, pidfile, lock) instead.
 - **Depends on:** Phase 58
 
