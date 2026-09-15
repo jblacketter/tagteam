@@ -88,8 +88,12 @@ Inputs, all already in the project:
   `lead`, `reviewer`.
 - **Gate runs:** `db.gates_for_cycle(conn, phase, type)` (`status`,
   `duration_s`, `attempt`, `round`).
-- **Usage:** `db.get_usage(conn, phase=phase)`, grouped by type, role and
-  model.
+- **Usage:** two selections from one connection, merged by row `id` so a
+  row picked by both is held once: `db.get_usage(conn, phase=P)` (stored
+  phase, for consumption) and `db.get_usage(conn, target_phase=P)` (new
+  keyword; empty when the column is absent, for coverage of turns another
+  phase's state dispatched). Consumption uses only the first; coverage uses
+  the rule-appropriate candidates below.
 - **Rate limits:** `db.latest_rate_limits(conn)`, shown only for rows whose
   `ts` falls inside the phase span, labelled "last signal", never
   "consumed" (the table is a snapshot, not a history).
@@ -150,13 +154,21 @@ The denominator is the set of **workflow turns** in the phase's cycles: each
 lead `SUBMIT_FOR_REVIEW` entry and each reviewer verdict entry
 (`APPROVE`/`REQUEST_CHANGES`/`ESCALATE`/`NEED_HUMAN`). Gate entries,
 amendments and arbiter rulings are not turns. Each turn gets exactly one
-status, so the parts always sum to the denominator:
+status, so the parts always sum to the denominator. The status is about
+**token coverage only**; execution outcome is a separate flag:
 
-- `matched`: at least one usage row attributable to it by an exact rule
-  below has non-null tokens and status `ok`.
+- `matched`: at least one attributable row has non-null tokens, whatever
+  that row's `status` (a process can write its cycle entry and then exit
+  non-zero; its tokens were still recorded).
 - `matched, no token data`: attributable rows exist, none has tokens.
 - `unmatched`: the rule can be applied and finds no row.
 - `unknown`: no exact rule exists for this turn's historical rows.
+
+Independently, a turn with any attributable row whose `status` is not `ok`
+(`nonzero_exit`, `cancelled`, `timeout`, anything else) carries
+`non_ok_rows: K`; the text adds `· turns with non-ok rows J`. This count is
+not part of the partition and can overlap any status except `unmatched` and
+`unknown`.
 
 A turn is one unit however many rows match it: retries (several rows for one
 dispatch) and panel lenses (one row per lens) never raise the count above
@@ -165,16 +177,17 @@ one, and extra rows are listed as `rows per matched turn` for context.
 Attribution rules, in order:
 1. **Target identity (rows written from v10 on).** A row with non-null
    `target_phase/type/round` matches the turn with that phase, type, round
-   and role. Panel lens rows (`kind = panel:*`) match the reviewer turn of
+   and role, and only that turn: rule 2 never applies to it, so a start row
+   stored under phase A with target B cannot match a submission in A. Panel lens rows (`kind = panel:*`) match the reviewer turn of
    their round; a reviewer entry with `updated_by` ending in ` panel` is
    matched only by panel rows, any other reviewer entry only by `kind` null
    rows.
-2. **Owed-state identity (rows without target columns).** Stored identity
+2. **Owed-state identity (rows with null target columns only).** Stored identity
    is the state at dispatch (`headless.snapshot_identity`): a reviewer row
    `(P, T, N, reviewer)` → the reviewer verdict of round N; a lead row
    `(P, T, N, lead)` → the lead submission of round **N+1** (a lead owed a
    turn after a verdict or gate bounce at N submits N+1).
-3. **Round-1 lead submissions without a v10 row → `unknown`.** Round 1 is
+3. **Round-1 lead submissions no target row matches → `unknown`.** Round 1 is
    created by a start command, whose row is stored under whatever cycle the
    state named at dispatch (the previous phase, or the plan cycle for an
    impl start). The report cannot tell that row from an ordinary lead turn
@@ -182,8 +195,10 @@ Attribution rules, in order:
    lead row under rule 2 whose round N+1 has no lead submission in that
    cycle is shown as `unattributed lead rows: K`, not dropped silently.
 
-Text: `turns matched 5 of 8 · no token data 1 · unmatched 1 · unknown 1`.
-JSON: per turn `{type, round, role, status, row_ids}` plus the counts.
+Text: `turns matched 5 of 8 · no token data 1 · unmatched 1 · unknown 1 ·
+turns with non-ok rows 2`.
+JSON: per turn `{type, round, role, status, row_ids, non_ok_rows}` plus the
+counts.
 
 ### Read path
 Today `usage_command` calls `db.connect`, which creates `.tagteam/`, the DB
@@ -297,14 +312,27 @@ through `connect_for_read` with the new columns absent.
 - **Coverage, target rows (v10 shape):** a start-command row with target
   `(P, impl, 1)` stored under `(P, plan, 2, lead)` matches impl round 1
   only.
+- **Coverage, cross-phase start:** a row stored under `(A, impl, 3, lead)`
+  with target `(B, plan, 1)`, and phase A has an impl round-4 lead
+  submission. `report --phase B` loads it through `target_phase` and B's
+  round-1 submission is `matched`; `report --phase A` counts it in A's
+  stored consumption and A's round-4 submission is `unmatched` (no fallback
+  for a row with a target); a row selected by both queries is held once.
 - **Coverage, retries and panels:** three rows (two failed, one ok) for one
-  reviewer turn → one `matched` turn, `rows per matched turn` 3; three
+  reviewer turn → one `matched` turn, `rows per matched turn` 3,
+  `non_ok_rows` 2; three
   `panel:*` rows for a panel verdict → one turn; a panel verdict with only
   `kind` null rows → `unmatched`.
 - **Coverage, null tokens:** a row with all token fields null → `matched, no
   token data`, excluded from token sums, counted in `without token data`.
+- **Coverage, failed rows:** a turn whose only attributable row is
+  `nonzero_exit` with tokens → `matched`, `non_ok_rows` 1; a turn with one
+  `cancelled` row with tokens plus one `ok` row with null tokens →
+  `matched`, `non_ok_rows` 1; a turn with only a `cancelled` null-token row
+  → `matched, no token data`, `non_ok_rows` 1.
 - **Coverage invariant:** for every fixture, matched + no-token + unmatched
-  + unknown == number of workflow turns, and matched ≤ turns.
+  + unknown == number of workflow turns, matched ≤ turns, and turns with
+  non-ok rows ≤ matched + no-token.
 - **Report, no rows:** same cycles, no usage rows → `no usage rows` (no
   "interactive"); every other figure still present.
 - **Report, degraded:** entries without `ts` → timing `unknown`, counts
@@ -374,3 +402,10 @@ reinterpreted. (2) `db.connect_for_read` + keyword-only `conn` on the cycle
 readers so report and usage never create or migrate in either mode and read
 v9 (and older) schemas; ordinary-mode files-only and v9 checks added;
 Files list updated (`cycle.py`, `db.py`, `panel.py`).
+Round 3 (reviewer round 2): (1) coverage candidates also selected by
+`target_phase` (new `get_usage` keyword), merged by id with the stored-phase
+selection; consumption stays stored-phase only; rows with a target never
+fall back to owed-state matching; cross-phase start fixture. (2) status
+partition is token coverage only (`matched` no longer requires `ok`);
+execution outcome is a separate `non_ok_rows` flag outside the invariant;
+failed-row fixtures.
