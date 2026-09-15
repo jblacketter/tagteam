@@ -1,8 +1,8 @@
 # Phase 58: Cockpit Session Lifecycle
 
 ## Status
-- [ ] Planning
-- [ ] Approved
+- [x] Planning
+- [x] Approved: plan round 3 (2026-09-15)
 - [ ] Implementation: phase/cockpit-session-lifecycle
 - [ ] Implementation Review
 - [ ] Complete
@@ -155,8 +155,9 @@ owner.close()                 -> list[report lines]
   in one step. A start can therefore be in only two states when shutdown
   snapshots: it has not reached `Popen` (it will see `closing` and spawn
   nothing), or its child is already recorded. No child exists that `close`
-  cannot see. `close` never gives up waiting on the lock: `Popen` is a bounded
-  fork/exec, and the lock is never held across a scan or a readiness wait.
+  cannot see. `close` waits for the lock without a time limit: shutdown waits
+  for any in-progress spawn to finish registering. The lock is held only
+  around `Popen` and the record, never across a scan or a readiness wait.
 - `start_watcher(root, …, owner=None)`: with an owner, `Popen` is replaced by
   `owner.spawn(...)`. A `None` result is a refusal:
   `the cockpit is shutting down — not starting a watcher`. Without an owner
