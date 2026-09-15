@@ -4,8 +4,8 @@
 - [x] Planning
 - [x] Approved: plan round 3 (2026-09-14)
 - [x] Implementation: phase/measure-the-loop
-- [ ] Implementation Review
-- [ ] Complete
+- [x] Implementation Review: approved round 3 (2026-09-14)
+- [x] Complete: approved implementation; PR delivery, merge pending
 
 ## Summary
 Tagteam records a lot about its own loop and summarizes almost none of it.
@@ -437,3 +437,18 @@ failed-row fixtures.
   round-1 spans unknown), reviewer 4m 54s (72 + 40 + 120 + 63 s), gate 10m 35s
   (316.9 + 318.0 s), turns 8: unknown 2, unmatched 6 (no usage rows). This
   repo's DB stayed at `user_version` 9 after `report` and `usage`.
+
+## Closeout
+Implementation approved round 3; gate 1,938 passed, 5 skipped at `a43b370`.
+The first phase measured by its own command (`tagteam report --phase
+measure-the-loop`):
+
+```
+Phase report: measure-the-loop — plan approved r3 · impl approved r3
+  plan   3 rounds · 2 change requests · 0 bounces
+  impl   3 rounds · 1 change request · 1 bounce · gate 3 runs, 15m 48s
+  time   start→approve 42m 58s · implementation before first submit 14m 00s
+         lead 7m 46s (4 spans, 2 unknown) · reviewer 5m 24s (5 spans) · gate 15m 48s (3 spans)  (elapsed; includes relay wait)
+  usage  no usage rows stored under this phase
+  turns  matched 0 of 11 · no token data 0 · unmatched 9 · unknown 2
+```

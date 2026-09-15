@@ -1,7 +1,7 @@
 {
-  "state": "in-progress",
-  "ready_for": "lead",
-  "round": 2,
+  "state": "approved",
+  "ready_for": null,
+  "round": 3,
   "phase": "measure-the-loop",
   "type": "impl",
   "lead": "claude",
