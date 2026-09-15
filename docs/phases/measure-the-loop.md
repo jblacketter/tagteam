@@ -18,8 +18,9 @@ policy by kind, subagent kit, reviewer effort) assumes this measurement exists.
 This phase adds the measurement, read-only, from data tagteam already owns:
 
 1. `tagteam report --phase P [--json]`: a phase cost block (rounds, bounces,
-   gate time, per-role turn time, start-to-approve wall clock, and tokens
-   where headless turns recorded them).
+   gate time, per-role elapsed turn time, start-to-approve wall clock, the
+   tokens stored under the phase, and how many workflow turns those rows can
+   be matched to).
 2. `tagteam usage --by role|cycle|model|kind`: new roll-ups, with the cost
    column removed from the default text view.
 3. Per-model token capture for Claude turns (`modelUsage`), so a Haiku
@@ -48,23 +49,30 @@ In:
 2. `tagteam/usage.py`: `--by role|cycle|model|kind` (repeatable; default
    stays role + cycle), cost column and `cost=` summary dropped from text
    output, `cost_usd` / `cost_known_turns` kept in `--json`.
-3. Schema v10: one nullable `usage.model_usage_json` column (additive
-   `ALTER TABLE`, same pattern as v7's `kind`). `_usage_claude` stores the
-   stream result's `modelUsage` there (token fields only; see below).
-   The four `add_usage` writers (headless turn, panel lens, briefer, lead
-   chat) pass it through.
-4. `cli.py`: dispatch `report`; add `report` to `READ_ONLY_COMMANDS` and
+3. Schema v10, additive nullable `usage` columns (same `ALTER TABLE` pattern
+   as v7's `kind`): `model_usage_json` (Claude `modelUsage`, token fields
+   only) and `target_phase` / `target_type` / `target_round` (the cycle entry
+   the turn was dispatched to produce). The four `add_usage` writers
+   (headless turn, panel lens, briefer, lead chat) pass what they have.
+   **Scope addition (plan round 2):** target identity is new capture, needed
+   because the stored `phase/type/round` is the owed state at dispatch, not
+   the submission (see "Turn coverage"). Old rows are not reinterpreted.
+4. One read path that never creates or migrates: `db.connect_for_read`, and a
+   keyword-only `conn=` on `cycle.read_status` / `read_rounds` so the report
+   and `usage` read through that one connection (see "Read path").
+5. `cli.py`: dispatch `report`; add `report` to `READ_ONLY_COMMANDS` and
    `_read_only_summary`; help text.
-5. Cockpit and hub: remove the cost column from the usage table, the cost in
+6. Cockpit and hub: remove the cost column from the usage table, the cost in
    the per-turn tooltip, and the `$` part of the hub burn chip.
-6. `README.md` command list; `docs/workflows.md` / `tagteam/data/workflows.md`
+7. `README.md` command list; `docs/workflows.md` / `tagteam/data/workflows.md`
    one paragraph: closing a phase includes `tagteam report --phase P`.
 
 Out: reading any file outside the project (transcripts, Codex sessions,
 `~/.codex/config.toml`); a rate-limit history table (the `rate_limits` table
 keeps the latest row per provider+kind and stays that way); Codex model
 detection (its `--json` stream carries no model name; rows stay `model`
-null); estimating Codex cost; `tagteam grade`; any write on approval; the
+null); estimating Codex cost; backfilling target identity or inferring it
+for old start-command turns; `tagteam grade`; any write on approval; the
 review bench, model policy or subagent kit (Phases 56–58); a cockpit
 "phase report" card; backfilling `model_usage_json` for old rows.
 
@@ -72,10 +80,12 @@ review bench, model policy or subagent kit (Phases 56–58); a cockpit
 
 ### Phase report (`tagteam report --phase P`)
 Inputs, all already in the project:
-- **Rounds:** `cycle.read_rounds(phase, "plan"|"impl")`, the same reader the
-  CLI and gate use (JSONL, DB fallback). Entries carry `ts`, `role`,
-  `action`, `round`.
-- **Cycle status:** `state`, final `round`, `lead`, `reviewer`.
+- **Rounds:** `cycle.read_rounds(phase, "plan"|"impl", conn=…)`, the same
+  DB-first / file-fallback reader the CLI and gate use, given the report's
+  read connection. Entries carry `ts`, `role`, `action`, `round`,
+  `updated_by`.
+- **Cycle status:** `cycle.read_status(…, conn=…)`: `state`, final `round`,
+  `lead`, `reviewer`.
 - **Gate runs:** `db.gates_for_cycle(conn, phase, type)` (`status`,
   `duration_s`, `attempt`, `round`).
 - **Usage:** `db.get_usage(conn, phase=phase)`, grouped by type, role and
@@ -101,16 +111,13 @@ Derived figures, per cycle type and for the phase:
 - **Wall clock:** first plan entry → impl APPROVE (or last entry if not
   approved), plus the idle gap between plan approval and the first impl
   submission, shown separately as "implementation before first submit".
-- **Tokens** (only when usage rows exist): by role and by model, input /
-  output / cache read / cache write, turn count, failed turns. When no rows
-  exist for a cycle: `tokens: not recorded (turns ran interactively)`.
-  When some but not all reviewer/lead entries have a matching row, the block
-  says `tokens: partial (N of M turns recorded)`; matching is by
-  phase+type+round+role, which the existing rows already carry.
+- **Stored consumption** and **turn coverage** are reported separately, as
+  defined in the next two sections. Neither ever says why data is missing:
+  no rows means `no usage rows`, not "interactive".
 
 Missing data degrades per field, never the whole report: entries without
 `ts` (legacy markdown cycles) → timing `unknown`; no DB → rounds and timing
-from files only, tokens `not recorded`; no impl cycle yet → plan block only.
+from files only, usage sections `no database`; no impl cycle yet → plan block only.
 Unknown phase (no cycle files, no DB rows) → one error line, exit 1.
 
 Text output is a compact block meant to paste into a phase doc's Closeout
@@ -121,13 +128,92 @@ Phase 53 legacy-diagnostics — approved (plan r2, impl r2)
   plan   2 rounds · 1 change request · 0 bounces
   impl   2 rounds · 1 change request · 0 bounces · gate 2 runs, 10.3 min
   time   start→approve 1h 04m · lead 31m · reviewer 4m · gate 10m (elapsed; includes relay wait)
-  tokens not recorded (turns ran interactively)
+  usage  no usage rows · turns matched 0 of 8 (unmatched 8)
 ```
 
 `--json` returns the same figures, machine-shaped, with `null` for unknown.
-No dollar field in either form. Read-only: allowed under
-`TAGTEAM_READ_ONLY=1`, opens the DB read-only the way `usage` does
-(`DatabaseMissing` → files only), creates nothing.
+No dollar field in either form. Allowed under `TAGTEAM_READ_ONLY=1`; in
+either mode it creates, migrates and writes nothing (see "Read path").
+
+### Stored consumption
+Rows with `usage.phase == P` (the stored, owed-state phase), grouped by
+stored type, role, kind and model. Token sums include only rows whose token
+fields are non-null; rows with all four token fields null (a turn whose
+stream could not be parsed, `headless_usage_unparsed`) and failed or
+cancelled rows are counted separately: `rows 14 · with tokens 11 · without
+token data 3 (failed 1)`. The label says "stored under this phase" because
+a start-command turn is stored under the *previous* cycle's phase/type
+(see below); the report does not move those rows.
+
+### Turn coverage
+The denominator is the set of **workflow turns** in the phase's cycles: each
+lead `SUBMIT_FOR_REVIEW` entry and each reviewer verdict entry
+(`APPROVE`/`REQUEST_CHANGES`/`ESCALATE`/`NEED_HUMAN`). Gate entries,
+amendments and arbiter rulings are not turns. Each turn gets exactly one
+status, so the parts always sum to the denominator:
+
+- `matched`: at least one usage row attributable to it by an exact rule
+  below has non-null tokens and status `ok`.
+- `matched, no token data`: attributable rows exist, none has tokens.
+- `unmatched`: the rule can be applied and finds no row.
+- `unknown`: no exact rule exists for this turn's historical rows.
+
+A turn is one unit however many rows match it: retries (several rows for one
+dispatch) and panel lenses (one row per lens) never raise the count above
+one, and extra rows are listed as `rows per matched turn` for context.
+
+Attribution rules, in order:
+1. **Target identity (rows written from v10 on).** A row with non-null
+   `target_phase/type/round` matches the turn with that phase, type, round
+   and role. Panel lens rows (`kind = panel:*`) match the reviewer turn of
+   their round; a reviewer entry with `updated_by` ending in ` panel` is
+   matched only by panel rows, any other reviewer entry only by `kind` null
+   rows.
+2. **Owed-state identity (rows without target columns).** Stored identity
+   is the state at dispatch (`headless.snapshot_identity`): a reviewer row
+   `(P, T, N, reviewer)` → the reviewer verdict of round N; a lead row
+   `(P, T, N, lead)` → the lead submission of round **N+1** (a lead owed a
+   turn after a verdict or gate bounce at N submits N+1).
+3. **Round-1 lead submissions without a v10 row → `unknown`.** Round 1 is
+   created by a start command, whose row is stored under whatever cycle the
+   state named at dispatch (the previous phase, or the plan cycle for an
+   impl start). The report cannot tell that row from an ordinary lead turn
+   on that cycle, so it neither claims nor steals it. For the same reason a
+   lead row under rule 2 whose round N+1 has no lead submission in that
+   cycle is shown as `unattributed lead rows: K`, not dropped silently.
+
+Text: `turns matched 5 of 8 · no token data 1 · unmatched 1 · unknown 1`.
+JSON: per turn `{type, round, role, status, row_ids}` plus the counts.
+
+### Read path
+Today `usage_command` calls `db.connect`, which creates `.tagteam/`, the DB
+and migrates it in ordinary mode; `cycle.read_status` / `read_rounds` each
+open their own `db.connect`. Under `TAGTEAM_READ_ONLY=1`, `db.connect`
+routes to `read_only_connect(require_current_schema=True)`, which would
+reject a v9 DB after this phase's bump. The report and `usage` get one
+scoped path instead:
+
+- `db.connect_for_read(project_dir) -> (conn | None, note | None)`: calls
+  `read_only_connect(project_dir, require_current_schema=False)` in **both**
+  modes (the hub already reads other projects this way, `hub_api.py`).
+  `DatabaseMissing` → `(None, "no database")`; `WalWithoutIndex` or another
+  `ReadOnlyError` → `(None, <its detail>)`; nothing is created, migrated or
+  checkpointed. `db.connect` and its guard are unchanged for every other
+  command.
+- `cycle.read_status` / `read_rounds` gain keyword-only `conn=None`. When
+  given, `_read_status_from_db` / `_read_rounds_from_db` use it and do not
+  close it; the DB-first / file-fallback / `db_invalid` logic is otherwise
+  identical. When the report has no connection it calls them with a
+  sentinel that skips the DB step (files only), never with `conn=None`,
+  which would open `db.connect`. Default callers are untouched.
+- Older schemas: `get_usage` selects only the columns present
+  (`PRAGMA table_info(usage)`), returning `None` for absent ones; a missing
+  `usage` / `gates` / `rate_limits` table → that section reports
+  `not available in this database (schema vN)`. Rounds and status readers
+  need tables present since schema v1.
+- `usage_command` switches to `connect_for_read`. Behaviour change, stated:
+  an ordinary `tagteam usage` no longer creates or migrates a DB (it prints
+  the no-rows message plus the note).
 
 ### Usage roll-ups (`tagteam usage --by …`)
 `aggregate(rows, by=("role", "cycle"))` gains two keys:
@@ -162,11 +248,15 @@ Fable lead turn's `modelUsage` has two entries, `claude-fable-5-1` and
 `claude-haiku-4-5-20251001`; today the row records only the first model.
 
 ### Schema v10
-`SCHEMA_VERSION = 10`; migration adds `usage.model_usage_json TEXT` if the
-column is missing, sets `user_version = 10`. `_USAGE_COLS` and `add_usage`'s
-allowed fields include it. Read-only mode still never migrates (Phase 50):
-a v9 DB read under `TAGTEAM_READ_ONLY=1` returns rows without the column,
-and `get_usage` treats it as absent.
+`SCHEMA_VERSION = 10`; migration adds `model_usage_json TEXT`,
+`target_phase TEXT`, `target_type TEXT`, `target_round INTEGER` to `usage`
+when missing, sets `user_version = 10`. `_USAGE_COLS` and `add_usage`'s
+allowed fields include them. Writers: the headless turn engine passes
+`ident.target_phase/type/round` (already computed for verification); panel
+lenses pass their submission's phase/type/round (a panel turn is the
+reviewer turn of that round); the briefer and lead chat leave target null
+(not workflow turns). Read commands still never migrate: a v9 DB is read
+through `connect_for_read` with the new columns absent.
 
 ### Cockpit and hub
 - `cockpit.js`: the usage bucket table loses the `cost` column; the per-turn
@@ -178,15 +268,18 @@ and `get_usage` treats it as absent.
 ## Files
 - New: `tagteam/report.py`, `tests/test_report.py`.
 - Modified: `tagteam/usage.py`, `tagteam/headless.py` (`_usage_claude`,
-  `_record_usage`), `tagteam/panel.py`, `tagteam/briefer.py`,
-  `tagteam/lead_chat.py` (pass `model_usage_json` through), `tagteam/db.py`
-  (v10), `tagteam/cli.py` (dispatch, read-only allowlist, help),
+  `_record_usage` target identity), `tagteam/panel.py` (target identity),
+  `tagteam/briefer.py`, `tagteam/lead_chat.py` (pass `model_usage_json`
+  through), `tagteam/db.py` (v10, `connect_for_read`, column-tolerant
+  `get_usage`), `tagteam/cycle.py` (keyword-only `conn` on `read_status` /
+  `read_rounds` and their DB helpers), `tagteam/cli.py` (dispatch, read-only allowlist, help),
   `tagteam/data/web/cockpit.js`, `tagteam/data/web/hub.js`, `README.md`,
   `tagteam/data/workflows.md` + `docs/workflows.md`, `docs/roadmap.md`, this
   plan; tests: `tests/test_usage.py` (new; the roll-ups have no dedicated
   file today), `tests/test_headless.py` (`_usage_claude`), `tests/test_db.py`
-  (v10), `tests/test_cockpit_activity.py` (static-asset cost assertions).
-- Not modified: cycle state machine, gate, contract (`SKILL.md`), watcher,
+  (v10), `tests/test_cycle.py` (`conn=` reads), `tests/test_panel.py`,
+  `tests/test_cockpit_activity.py` (static-asset cost assertions).
+- Not modified: cycle state machine and write paths, `db.connect`, gate, contract (`SKILL.md`), watcher,
   templates.
 
 ## Success Criteria and Verification
@@ -194,10 +287,26 @@ and `get_usage` treats it as absent.
   submissions, one REQUEST_CHANGES, one GATE_BOUNCE, gate PASS entries,
   APPROVE), matching `gates` rows and usage rows → rounds, change requests,
   bounces, gate runs/minutes, per-role elapsed times and start→approve equal
-  hand-computed values; tokens grouped by role and model.
-- **Report, interactive phase:** same cycles, no usage rows →
-  `tokens: not recorded`; every other figure still present.
-- **Report, partial:** usage rows for 2 of 4 turns → `partial (2 of 4)`.
+  hand-computed values; stored tokens grouped by role and model.
+- **Coverage, owed-state rows (pre-v10 shape):** reviewer row `(P, impl, 2,
+  reviewer)` matches the round-2 verdict; lead row `(P, impl, 1, lead)`
+  matches the round-**2** submission and not round 1; round-1 lead
+  submission → `unknown`; a lead row stored under the plan cycle at the
+  impl start is counted as stored consumption of the plan cycle and does
+  not match any impl turn.
+- **Coverage, target rows (v10 shape):** a start-command row with target
+  `(P, impl, 1)` stored under `(P, plan, 2, lead)` matches impl round 1
+  only.
+- **Coverage, retries and panels:** three rows (two failed, one ok) for one
+  reviewer turn → one `matched` turn, `rows per matched turn` 3; three
+  `panel:*` rows for a panel verdict → one turn; a panel verdict with only
+  `kind` null rows → `unmatched`.
+- **Coverage, null tokens:** a row with all token fields null → `matched, no
+  token data`, excluded from token sums, counted in `without token data`.
+- **Coverage invariant:** for every fixture, matched + no-token + unmatched
+  + unknown == number of workflow turns, and matched ≤ turns.
+- **Report, no rows:** same cycles, no usage rows → `no usage rows` (no
+  "interactive"); every other figure still present.
 - **Report, degraded:** entries without `ts` → timing `unknown`, counts
   intact; no DB (`DatabaseMissing`) → files-only report, exit 0; plan only
   → plan block only; unknown phase → exit 1, one line.
@@ -205,10 +314,19 @@ and `get_usage` treats it as absent.
   once against the real Phase 53 cycles; the numbers are checked by hand
   against `cycle rounds` timestamps and pasted into the impl submission as
   evidence.
-- **Read-only:** `report` and `usage --by model` succeed with
-  `TAGTEAM_READ_ONLY=1`, create no `.tagteam/` and no DB; `report` appears
-  in the read-only summary; the Phase 50 dispatch-coverage test still
-  classifies every command.
+- **Creates nothing, ordinary mode:** `report` on a files-only project (no
+  `.tagteam/`) → report from files, and afterwards no `.tagteam/`, no DB, no
+  sidecars; `report` and `usage` on a v9 project → correct output, and the
+  DB's `user_version`, columns, file bytes and directory listing are
+  unchanged (the no-`-wal` fixture is checked byte-for-byte).
+- **Creates nothing, read-only mode:** the same two projects with
+  `TAGTEAM_READ_ONLY=1` → same results; `report` appears in the read-only
+  summary; the Phase 50 dispatch-coverage test still classifies every
+  command; `cycle rounds` under read-only on a v10 DB behaves as before.
+- **Readers unchanged by default:** `read_status` / `read_rounds` without
+  `conn` pass the existing cycle tests; with `conn`, the connection is still
+  open afterwards; with the files-only sentinel, no `db.connect` call
+  (patched to raise).
 - **No dollars:** default `usage` text and `report` text/JSON contain no
   `$` and no `cost`; `usage --json` still contains `cost_usd`; cockpit and
   hub JS no longer render cost (asserted by reading the shipped assets).
@@ -219,22 +337,23 @@ and `get_usage` treats it as absent.
 - **Capture:** `_usage_claude` on a fixture stream with two `modelUsage`
   entries → four token fields per model, no `costUSD`; oversized / wrong-type
   / too many entries → dropped, turn row still written.
-- **Schema:** v9 DB upgrades to v10 with the column added and existing rows
-  intact; v10 on a fresh DB; read-only open of a v9 DB does not migrate and
-  `get_usage` works.
+- **Schema:** v9 DB upgrades to v10 (on a writing command) with the four
+  columns added and existing rows intact; fresh DB is v10; `get_usage` on a
+  v9 and a v6 (no `kind`) connection returns rows with absent columns as
+  `None`; a headless lead turn fixture writes target identity from
+  `TurnIdentity`, a panel lens writes its round.
 
 Focused tests while working; the on_submit gate provides the recorded full
 suite for the impl submission. Plan revisions need document checks only.
 
 ## Risks and Review Focus
-- **Elapsed is not effort.** In interactive mode the lead span includes the
-  time before the arbiter relays the turn. The report labels it elapsed and
-  does not try to subtract waits it cannot see. Is the label enough, or
-  should per-role time be omitted when no usage row confirms the turn ran
-  headless?
-- **Model buckets double-count turns** by design (a turn that used two models
-  counts in both). Totals stay row-based. Reviewer: is "turns using this
-  model" clear enough?
+- **Elapsed is not effort** (accepted in round 1): the label stays.
+- **Model buckets count a turn once per model** (accepted in round 1).
+- **Target identity is new capture.** It makes coverage exact from v10 on
+  and is the identity the Phase 56 bench will replay. Historical start
+  turns stay `unknown`; the report shows how many.
+- **`usage` stops creating/migrating the DB** in ordinary mode. Nothing
+  depends on `usage` for creation (every write path opens `db.connect`).
 - **Rate-limit "last signal" is thin.** It is only the latest row per kind.
   A history table is deliberately out of scope; the report must never imply
   a window percentage it does not have.
@@ -245,4 +364,13 @@ suite for the impl submission. Plan revisions need document checks only.
   read by eye; `--json` keeps the field, so scripts are unaffected.
 
 ## Plan revision log
-(none yet)
+Round 2 (reviewer round 1): (1) token coverage rewritten around the stored
+owed-state identity — stored consumption separated from turn coverage;
+four-way turn status with a sum invariant; retries and panel rows count one
+turn; null-token rows never count as recorded; round-1 lead turns without
+target identity `unknown`; "interactive" wording removed; explicit scope
+addition of v10 `target_phase/type/round` capture, old rows not
+reinterpreted. (2) `db.connect_for_read` + keyword-only `conn` on the cycle
+readers so report and usage never create or migrate in either mode and read
+v9 (and older) schemas; ordinary-mode files-only and v9 checks added;
+Files list updated (`cycle.py`, `db.py`, `panel.py`).
