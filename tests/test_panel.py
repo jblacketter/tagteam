@@ -267,6 +267,9 @@ class TestRunPanel:
         kinds = sorted(u["kind"] for u in _usage(paneled) if u.get("kind"))
         assert kinds == ["panel:correctness", "panel:scope", "panel:verification"]
         assert all(u["role"] == "reviewer" and u["agent"] == "Codex" for u in _usage(paneled) if u.get("kind"))
+        # Phase 55: a lens row names the reviewer turn it is part of
+        assert all((u["target_phase"], u["target_type"], u["target_round"]) == ("feat-x", "impl", u["round"])
+                   for u in _usage(paneled) if u.get("kind"))
         # files
         d = Path(paneled) / ".tagteam" / "panels" / rows[0]["stem"]
         assert (d / "scope.prompt").exists() and (d / "scope.verdict.json").exists() and (d / "scope.log").exists()
@@ -844,7 +847,7 @@ class TestCliDocs:
         conn = db.connect(project_dir=str(project))
         try:
             assert conn.execute("SELECT COUNT(*) FROM panels").fetchone()[0] == 0
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION == 9
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION >= 9
         finally:
             conn.close()
         assert _entries(project) == []

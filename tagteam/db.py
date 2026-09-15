@@ -24,7 +24,7 @@ from pathlib import Path
 # 3.0-arc rule (docs/tagteam-3.0-proposal.md §2): migrations are ADDITIVE
 # ONLY — new tables / nullable columns, never renames or drops — so an
 # older release can still open a newer DB after a downgrade.
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 USAGE_STATUSES = {"ok", "timeout", "nonzero_exit", "no_round", "spawn_failed",
                   "cancelled"}
@@ -439,6 +439,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.executescript(_SCHEMA_V9)
         conn.execute("PRAGMA user_version = 9")
         current = 9
+    if current < 10:
+        # Phase 55: per-model token split (Claude `modelUsage`) and the cycle
+        # entry a turn was dispatched to produce. Additive, nullable.
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(usage)").fetchall()}
+        for name, decl in _USAGE_V10_COLUMNS:
+            if name not in cols:
+                conn.execute(f"ALTER TABLE usage ADD COLUMN {name} {decl}")
+        conn.execute("PRAGMA user_version = 10")
+        current = 10
     # Future migrations land here.
     # NOTE: `current > SCHEMA_VERSION` (a newer release wrote this DB) is
     # deliberately tolerated — additive-only migrations mean older code
@@ -472,6 +481,35 @@ def connect(project_dir: str | Path | None = None,
     conn.execute("PRAGMA foreign_keys=ON")
     _migrate(conn)
     return conn
+
+
+def connect_for_read(project_dir: str | Path | None = None,
+                     db_path: Path | None = None) -> tuple[sqlite3.Connection | None, str | None]:
+    """Phase 55: the read path for report-style commands, in BOTH modes.
+
+    `read_only_connect(require_current_schema=False)`: never creates,
+    migrates or checkpoints, and an older schema stays readable (callers
+    query only what exists). Returns `(conn, None)`, or `(None, note)` when
+    the DB is absent or cannot be read without writing. `connect` and its
+    Phase 50 guard are unchanged for every other caller.
+    """
+    from tagteam.dualwrite import DatabaseMissing, ReadOnlyError
+    try:
+        return read_only_connect(project_dir, db_path, require_current_schema=False), None
+    except DatabaseMissing:
+        return None, "no database"
+    except ReadOnlyError as e:
+        return None, getattr(e, "detail", None) or str(e)
+    except sqlite3.DatabaseError as e:
+        return None, f"database unreadable: {e}"
+
+
+def table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    """Column names of `table` (empty set when the table does not exist)."""
+    try:
+        return {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    except sqlite3.DatabaseError:
+        return set()
 
 
 def _sqlite_uri(db_path: Path, *params: str) -> str:
@@ -780,7 +818,11 @@ _USAGE_COLS = [
     "status", "exit_code", "duration_ms", "input_tokens", "output_tokens",
     "cache_read_tokens", "cache_write_tokens", "cost_usd", "num_turns",
     "session_id", "log_path", "kind",
+    # v10 (Phase 55)
+    "model_usage_json", "target_phase", "target_type", "target_round",
 ]
+_USAGE_V10_COLUMNS = (("model_usage_json", "TEXT"), ("target_phase", "TEXT"),
+                      ("target_type", "TEXT"), ("target_round", "INTEGER"))
 
 
 @_writes
@@ -810,14 +852,30 @@ def add_usage(conn: sqlite3.Connection, **fields) -> int:
 
 def get_usage(conn: sqlite3.Connection, phase: str | None = None,
               cycle_type: str | None = None,
-              limit: int | None = None) -> list[dict]:
-    """Return usage rows (oldest first), optionally filtered by phase/type."""
+              limit: int | None = None, *,
+              target_phase: str | None = None) -> list[dict]:
+    """Return usage rows (oldest first), optionally filtered by stored
+    phase/type or (Phase 55) by `target_phase`.
+
+    Column-tolerant: selects only the columns this DB has (an older schema
+    read through `connect_for_read`); absent columns come back as None, an
+    absent table or target column as no rows. `model_usage_json` is also
+    returned parsed as `model_usage` (None when absent or unparseable).
+    """
+    present = table_columns(conn, "usage")
+    if not present:
+        return []
+    if target_phase is not None and "target_phase" not in present:
+        return []
     where, params = [], []
     if phase is not None:
         where.append("phase = ?"); params.append(phase)
     if cycle_type is not None:
         where.append("type = ?"); params.append(cycle_type)
-    sql = "SELECT id, " + ", ".join(_USAGE_COLS) + " FROM usage"
+    if target_phase is not None:
+        where.append("target_phase = ?"); params.append(target_phase)
+    cols = [c for c in _USAGE_COLS if c in present]
+    sql = "SELECT id, " + ", ".join(cols) + " FROM usage"
     if where:
         sql += " WHERE " + " AND ".join(where)
     sql += " ORDER BY id"
@@ -825,7 +883,23 @@ def get_usage(conn: sqlite3.Connection, phase: str | None = None,
         sql += " LIMIT ?"; params.append(int(limit))
     cur = conn.execute(sql, params)
     names = [d[0] for d in cur.description]
-    return [dict(zip(names, row)) for row in cur.fetchall()]
+    out = []
+    for row in cur.fetchall():
+        d = {c: None for c in _USAGE_COLS}
+        d.update(zip(names, row))
+        d["model_usage"] = _parse_model_usage(d.get("model_usage_json"))
+        out.append(d)
+    return out
+
+
+def _parse_model_usage(raw) -> dict | None:
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        val = json.loads(raw)
+    except ValueError:
+        return None
+    return val if isinstance(val, dict) else None
 
 
 # ---------- Interjections (Phase 32) ----------

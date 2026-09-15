@@ -604,9 +604,12 @@ def run_lens(spec: PanelSpec, lens: Lens, index: int, sub: Submission, *, root: 
                                          role="reviewer", agent=spec.reviewer_name, provider=spec.provider,
                                          status=ustatus, exit_code=out.exit_code, duration_ms=out.duration_ms,
                                          log_path=str(log_path), kind=f"panel:{lens.name}",
+                                         # Phase 55: a panel lens is part of the reviewer turn of this round
+                                         target_phase=sub.phase, target_type=sub.type, target_round=sub.round,
                                          **{k: usage.get(k) for k in ("model", "input_tokens", "output_tokens",
                                                                       "cache_read_tokens", "cache_write_tokens",
-                                                                      "cost_usd", "num_turns", "session_id")})
+                                                                      "cost_usd", "num_turns", "session_id",
+                                                                      "model_usage_json")})
         finally:
             conn.close()
     except Exception as e:

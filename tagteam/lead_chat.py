@@ -454,7 +454,8 @@ def run_turn(handle: TurnHandle, *, run: Callable | None = None,
                               log_path=str(handle.log_path), kind="conversation")
                 fields.update({k: usage.get(k) for k in ("model", "input_tokens", "output_tokens",
                                                          "cache_read_tokens", "cache_write_tokens",
-                                                         "cost_usd", "num_turns", "session_id")})
+                                                         "cost_usd", "num_turns", "session_id",
+                                                         "model_usage_json")})
                 usage_row_id = db.add_usage(conn, **fields)
             except Exception:
                 usage_row_id = None

@@ -780,18 +780,27 @@ def _read_rounds_from_file(path: Path) -> list[dict]:
     return entries
 
 
+# Phase 55: pass as `conn=` to `read_status` / `read_rounds` to skip the DB
+# step entirely (files only) — a report with no readable database must never
+# fall through to `db.connect`, which creates and migrates.
+FILES_ONLY = object()
+
+
 def _read_status_from_db(phase: str, cycle_type: str,
-                        project_dir: str) -> dict | None:
+                        project_dir: str, conn=None) -> dict | None:
     """DB-side status reader. Returns the file-shape dict or None.
 
     Converts `db.get_cycle`'s schema to the historical file shape
     expected by callers. The conversion mirrors `db.export_to_files`
     so a status produced here matches what export would have written.
     """
-    from tagteam import db, dualwrite
-    conn = None
+    from tagteam import db
+    if conn is FILES_ONLY:
+        return None
+    owned = conn is None
     try:
-        conn = db.connect(project_dir=project_dir)
+        if owned:
+            conn = db.connect(project_dir=project_dir)
         cycle = db.get_cycle(conn, phase, cycle_type)
         if cycle is None:
             return None
@@ -813,18 +822,21 @@ def _read_status_from_db(phase: str, cycle_type: str,
     except Exception:
         return None
     finally:
-        if conn is not None:
+        if owned and conn is not None:
             try: conn.close()
             except Exception: pass
 
 
 def _read_rounds_from_db(phase: str, cycle_type: str,
-                        project_dir: str) -> list[dict]:
+                        project_dir: str, conn=None) -> list[dict]:
     """DB-side rounds reader. Returns the file-shape entries."""
     from tagteam import db
-    conn = None
+    if conn is FILES_ONLY:
+        return []
+    owned = conn is None
     try:
-        conn = db.connect(project_dir=project_dir)
+        if owned:
+            conn = db.connect(project_dir=project_dir)
         rounds = db.get_rounds(conn, phase, cycle_type)
         out: list[dict] = []
         for r in rounds:
@@ -844,12 +856,13 @@ def _read_rounds_from_db(phase: str, cycle_type: str,
     except Exception:
         return []
     finally:
-        if conn is not None:
+        if owned and conn is not None:
             try: conn.close()
             except Exception: pass
 
 
-def read_status(phase: str, cycle_type: str, project_dir: str = ".") -> dict | None:
+def read_status(phase: str, cycle_type: str, project_dir: str = ".", *,
+                conn=None) -> dict | None:
     """Read status for a cycle. Returns None if not found.
 
     Phase 28 Stage 2 contract: DB-first when the DB is valid; falls
@@ -858,6 +871,9 @@ def read_status(phase: str, cycle_type: str, project_dir: str = ".") -> dict | N
     is set, file source is canonical — if no legacy file exists,
     raises `CycleReadError` with an operator recovery hint rather than
     silently returning DB content that may be stale.
+
+    Phase 55: `conn` — an open connection to read the DB through (not
+    closed here), or `FILES_ONLY` to skip the DB. Default opens `db.connect`.
     """
     from tagteam import dualwrite
     project_dir = _resolve(project_dir)
@@ -878,7 +894,7 @@ def read_status(phase: str, cycle_type: str, project_dir: str = ".") -> dict | N
             "Run `tagteam state repair-db` to recover."
         )
 
-    db_status = _read_status_from_db(phase, cycle_type, project_dir)
+    db_status = _read_status_from_db(phase, cycle_type, project_dir, conn)
     if db_status is not None:
         return db_status
     legacy = _legacy_status_path(phase, cycle_type, project_dir)
@@ -887,10 +903,12 @@ def read_status(phase: str, cycle_type: str, project_dir: str = ".") -> dict | N
     return None
 
 
-def read_rounds(phase: str, cycle_type: str, project_dir: str = ".") -> list[dict]:
+def read_rounds(phase: str, cycle_type: str, project_dir: str = ".", *,
+                conn=None) -> list[dict]:
     """Read all round entries for a cycle. Returns [] if not found.
 
-    Same DB-first / file-fallback / db_invalid contract as `read_status`.
+    Same DB-first / file-fallback / db_invalid contract (and `conn`) as
+    `read_status`.
     """
     from tagteam import dualwrite
     project_dir = _resolve(project_dir)
@@ -906,12 +924,12 @@ def read_rounds(phase: str, cycle_type: str, project_dir: str = ".") -> list[dic
             "Run `tagteam state repair-db` to recover."
         )
 
-    db_rounds = _read_rounds_from_db(phase, cycle_type, project_dir)
+    db_rounds = _read_rounds_from_db(phase, cycle_type, project_dir, conn)
     if db_rounds:
         return db_rounds
     # DB returned empty — could be no cycle, or a cycle with no rounds.
     # Disambiguate by checking if status exists (in DB or legacy).
-    if _read_status_from_db(phase, cycle_type, project_dir) is not None:
+    if _read_status_from_db(phase, cycle_type, project_dir, conn) is not None:
         return []  # cycle exists in DB but has no rounds
     legacy = _legacy_rounds_path(phase, cycle_type, project_dir)
     if legacy is not None:

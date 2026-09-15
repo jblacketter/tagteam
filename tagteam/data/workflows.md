@@ -67,6 +67,15 @@ reviewer asks for it, asks a question only a human can answer, or after 10
 consecutive stale rounds. The arbiter reads `tagteam brief` and rules with
 `tagteam rule approve|request-changes|answer`.
 
+When a phase's implementation is approved, `tagteam report --phase P` prints
+what it took: rounds, change requests, gate bounces and minutes, elapsed turn
+time per role (including time waiting for someone to relay the turn),
+start-to-approve, the usage rows stored under the phase and how many turns
+they can be matched to. It is read-only and writes nothing; paste the block
+into the phase doc's closeout. Tokens appear only for turns tagteam ran and
+recorded (headless turns, panel lenses, briefs); nothing is reported in
+dollars.
+
 ## Verification: the one-run rule
 
 An impl submission costs **one** full-suite run — the one on the record. With

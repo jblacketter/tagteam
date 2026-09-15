@@ -430,6 +430,9 @@ class TestParsers:
         assert u["session_id"] and u["input_tokens"] == 6 and u["output_tokens"] == 219
         assert u["cache_read_tokens"] == 74274 and u["cache_write_tokens"] == 10966
         assert u["cost_usd"] == pytest.approx(0.304604) and u["num_turns"] == 3
+        # Phase 55: per-model split, token fields only
+        assert json.loads(u["model_usage_json"]) == {"claude-fable-5": {
+            "input_tokens": 6, "output_tokens": 219, "cache_read_tokens": 74274, "cache_write_tokens": 10966}}
 
     def test_codex_usage_from_fixture(self):
         lines = (FIXTURES / "codex_stream.jsonl").read_text().splitlines()
@@ -438,6 +441,27 @@ class TestParsers:
         assert u["input_tokens"] == 30583 and u["output_tokens"] == 125
         assert u["cache_read_tokens"] == 26112 and u["num_turns"] == 1
         assert u["model"] is None
+        assert "model_usage_json" not in u
+
+    def test_sanitize_model_usage(self):
+        two = {"claude-fable-5-1": {"inputTokens": 610, "outputTokens": 29464, "cacheReadInputTokens": 2102926,
+                                    "cacheCreationInputTokens": 118832, "costUSD": 4.28, "contextWindow": 1000000},
+               "claude-haiku-4-5-20251001": {"inputTokens": 18616, "outputTokens": 12, "costUSD": 0.01}}
+        clean = h.sanitize_model_usage(two)
+        assert clean == {"claude-fable-5-1": {"input_tokens": 610, "output_tokens": 29464,
+                                              "cache_read_tokens": 2102926, "cache_write_tokens": 118832},
+                         "claude-haiku-4-5-20251001": {"input_tokens": 18616, "output_tokens": 12}}
+        assert "cost" not in h.model_usage_json(two).lower()
+        # wrong types / oversized names / bools / negatives dropped; nothing left → None
+        assert h.sanitize_model_usage({"x" * 129: {"inputTokens": 1}, "ok": "nope",
+                                       "b": {"inputTokens": True, "outputTokens": -1, "cacheReadInputTokens": "9"}}) is None
+        assert h.sanitize_model_usage([1, 2]) is None and h.sanitize_model_usage({}) is None
+        too_many = {f"m{i}": {"inputTokens": 1} for i in range(h.MODEL_USAGE_MAX_MODELS + 1)}
+        assert h.sanitize_model_usage(too_many) is None and h.model_usage_json(too_many) is None
+        # a malformed modelUsage never costs the turn its usage row
+        lines = [json.dumps({"type": "result", "usage": {"input_tokens": 1}, "modelUsage": "garbage"})]
+        u = h.parse_usage("claude", lines)
+        assert u["input_tokens"] == 1 and u["model_usage_json"] is None
 
     def test_usage_missing_or_garbage(self):
         assert h.parse_usage("claude", []) is None
@@ -776,6 +800,10 @@ class TestEngineE2E:
         assert res.outcome == "ok", res.reason
         st2 = state_mod.read_state(str(project))
         assert st2["type"] == "impl" and st2["round"] == 1 and st2["turn"] == "reviewer"
+        # Phase 55: stored identity is the owed state (plan r1); the target is the impl entry it produced
+        row = _usage_rows(project)[-1]
+        assert (row["phase"], row["type"], row["round"], row["role"]) == ("phase-a", "plan", 1, "lead")
+        assert (row["target_phase"], row["target_type"], row["target_round"]) == ("phase-a", "impl", 1)
 
     def test_impl_start_unchanged_state_is_no_round(self, project, fake_path, monkeypatch):
         monkeypatch.setenv("FAKE_AGENT_MODE", "no_round")
