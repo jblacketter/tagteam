@@ -334,3 +334,24 @@ pass; the on_submit gate supplies the recorded full-suite run. Manual:
 `tagteam doctor` on this repo (0 findings, tree unchanged) and on the
 Northstar project (6 info findings on its `plan` / `implement` skills,
 matching its current Claude-lead config). Not verified on Windows or Linux.
+
+### Round 2 (impl review): the role config and evidence excerpts
+Two reviewer findings:
+
+- **`tagteam.yaml` bypassed the bounded reader (P1).** Doctor and the
+  setup/upgrade pointer called `config.read_config`, which follows links and
+  reads unbounded, so a symlinked config leaked an outside name into the report
+  and a FIFO blocked it. `read_role_config` now reads the file with
+  `read_bounded` (64 KB, not truncated) and parses those bytes with the same
+  YAML / fallback parser, never reopening the path. Link, FIFO, directory,
+  oversize or malformed → a `not read: …` note (first in `notes`, shown in
+  the Roles section) and the report continues without roles. Tests patch
+  `config.read_config` and `framework.read_config` to raise, so neither doctor
+  nor the framework section can reach the unbounded reader.
+  `setup.main`'s own config read (for validation warnings) predates this phase
+  and is unchanged; the pointer it calls uses the bounded reader.
+- **Evidence echoed the whole line (P1).** `excerpt` is now the recognised match
+  only (`/handoff-plan`, `ai_handoff`, `Codex is the lead`, `Claude (Lead)`),
+  and each retired-command match on a line is its own finding. Surrounding
+  arguments and values never reach text or JSON (sentinel tests for both rules,
+  both formats).

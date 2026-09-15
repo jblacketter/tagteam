@@ -382,6 +382,26 @@ class TestOutputBoundary:
         assert rep.tools["claude_settings"][1]["state"] == "unknown"
         assert "SENTINEL-L" not in _all_output(env.proj, capsys)
 
+    def test_evidence_is_the_match_not_the_line(self, env, capsys):
+        config(env.proj)                                  # claude lead, codex reviewer
+        write(env.proj, "AGENTS.md",
+              "Use /handoff-plan --api-key SENTINEL_ARG for planning.\n"
+              "Codex is the lead; export TOKEN=SENTINEL_ROLE before starting.\n"
+              "ai_handoff SENTINEL_PKG\n")
+        write(env.proj, ".claude/skills/plan/SKILL.md",
+              "Claude (Lead) with --secret SENTINEL_SKILL and /handoff-cycle SENTINEL_SKILL2\n")
+        rep = dg.build_report(env.proj)
+        got = sorted((f["path"], f["line"], f["rule"], f["excerpt"]) for f in rep.findings)
+        assert got == [
+            (".claude/skills/plan/SKILL.md", 0, "legacy-skill-shape", "skill name 'plan' with 2 content hit(s)"),
+            (".claude/skills/plan/SKILL.md", 1, "fixed-role", "Claude (Lead)"),
+            (".claude/skills/plan/SKILL.md", 1, "retired-command", "/handoff-cycle"),
+            ("AGENTS.md", 1, "retired-command", "/handoff-plan"),
+            ("AGENTS.md", 2, "fixed-role", "Codex is the lead"),
+            ("AGENTS.md", 3, "retired-command", "ai_handoff"),
+        ]
+        assert "SENTINEL" not in _all_output(env.proj, capsys)
+
     def test_hook_names_and_scope_note(self, env):
         config(env.proj, lead="codex", reviewer="claude")
         write(env.proj, ".claude/settings.json", json.dumps({"hooks": {
@@ -395,6 +415,64 @@ class TestOutputBoundary:
     def test_no_hook_note_without_hooks(self, env):
         config(env.proj)
         assert not any("hooks" in n for n in dg.build_report(env.proj).protections)
+
+
+class TestRoleConfigRead:
+    """tagteam.yaml goes through the bounded reader too (impl review r1)."""
+
+    def _no_unbounded_config_reads(self, monkeypatch):
+        from tagteam import config as config_mod
+        from tagteam import framework as fw
+
+        def refuse(*a, **k):
+            raise AssertionError("read_config must not be called by doctor")
+        monkeypatch.setattr(config_mod, "read_config", refuse)
+        monkeypatch.setattr(fw, "read_config", refuse)
+
+    def test_symlinked_config_not_followed(self, env, capsys, monkeypatch):
+        outside = write(env.tmp, "outside.yaml",
+                        "agents:\n  lead: {name: SENTINEL_OUTSIDE}\n  reviewer: {name: codex}\n")
+        (env.proj / "tagteam.yaml").symlink_to(outside)
+        write(env.proj, "AGENTS.md", "Use /handoff-plan.\n")
+        self._no_unbounded_config_reads(monkeypatch)
+        rep = dg.build_report(env.proj)
+        assert rep.roles == []
+        assert rep.notes[0] == {"path": "tagteam.yaml",
+                                "detail": "not read: unsupported filesystem shape (tagteam.yaml is a symlink)"}
+        assert "tagteam.yaml not read: unsupported filesystem shape" in dg.format_report(rep)
+        assert "SENTINEL_OUTSIDE" not in _all_output(env.proj, capsys)
+        assert [f["rule"] for f in dg.legacy_findings(env.proj)] == ["retired-command"]
+
+    @pytest.mark.parametrize("content, detail", [
+        ("agents:\n  lead: {name: claude}\n  reviewer: {name: codex}\n# " + "x" * dg.JSON_LIMIT + "\n",
+         "not read: over size limit (64 KB)"),
+        ("agents: [unclosed\n", "not read: malformed tagteam.yaml"),
+        ("- just\n- a list\n", "not read: malformed tagteam.yaml"),
+    ])
+    def test_oversized_and_malformed_config(self, env, monkeypatch, content, detail):
+        write(env.proj, "tagteam.yaml", content)
+        write(env.proj, "CLAUDE.md", "Codex is the lead.\n")
+        self._no_unbounded_config_reads(monkeypatch)
+        rep = dg.build_report(env.proj)
+        assert rep.roles == [] and rep.notes[0] == {"path": "tagteam.yaml", "detail": detail}
+        assert [(f["rule"], f["severity"]) for f in dg.legacy_findings(env.proj)] == [("fixed-role", "info")]
+
+    def test_fifo_config_does_not_block(self, env):
+        import subprocess
+        os.mkfifo(env.proj / "tagteam.yaml")
+        write(env.proj, "AGENTS.md", "Use /handoff-plan.\n")
+        run_env = {**os.environ, "TAGTEAM_CLAUDE_BIN": ""}
+        repo = Path(__file__).resolve().parents[1]
+        for code in (f"from tagteam import diagnostics as d; import sys; sys.exit(d.doctor_command([{str(env.proj)!r}]))",
+                     f"from tagteam import diagnostics as d; print(len(d.legacy_findings({str(env.proj)!r})))"):
+            r = subprocess.run([sys.executable, "-c", code], cwd=repo, env=run_env,
+                               capture_output=True, text=True, timeout=30)
+            assert r.returncode == 0, r.stderr
+        doctor = subprocess.run([sys.executable, "-m", "tagteam", "doctor", str(env.proj)], cwd=repo,
+                                env=run_env, capture_output=True, text=True, timeout=30)
+        assert doctor.returncode == 0
+        assert "tagteam.yaml not read: unsupported filesystem shape (tagteam.yaml is not a regular file)" \
+            in doctor.stdout
 
 
 # ---------------------------------------------------------------------------
