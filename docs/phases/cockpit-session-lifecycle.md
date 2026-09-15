@@ -64,10 +64,10 @@ In:
    (pidfile removed, lock released) and an in-flight headless turn is killed
    by `run_process`'s existing interrupt path.
 3. **`tagteam serve` stops the watchers it started** (`server.py`,
-   `launch.py`): a per-server owner records each watcher child at `Popen`
-   (both `/api/watch/start` and Start launches, independent of readiness);
-   shutdown refuses new starts, waits for starts in progress, then terminates,
-   reaps and reports each owned child.
+   `launch.py`): a per-server owner creates and records each watcher child
+   in one locked step (both `/api/watch/start` and Start launches,
+   independent of readiness); shutdown takes the same lock to stop new starts
+   and snapshot every child, then terminates, reaps and reports them.
 4. **Reviewer lane per cycle** (`cockpit.js`, `cockpit.html`, `cockpit.css`,
    `cockpit_api.py`): rows from other cycles are hidden, an empty state names
    the current cycle, a "Show last session" toggle reveals the earlier rows
@@ -135,57 +135,62 @@ never raises). Effects, all through existing code:
   record looks like, verified by test, not assumed.)
 
 ### 3. `serve` stops the watchers it started
-*(Revised in plan round 2: ownership is recorded at spawn, not on success,
-and shutdown is synchronized with starts that are still in progress.)*
+*(Revised in plan rounds 2 and 3. Round 2: ownership is recorded at spawn, not
+on success. Round 3: child creation and registration are one critical section
+shared with the shutdown snapshot. A daemon request thread is discarded at
+interpreter exit, so no callback that runs after `close` can be relied on.)*
 
 **Ownership object** (`launch.py`, `WatcherOwner`), one per `serve` process,
-guarded by one `threading.Lock` + `Condition`:
+with one `threading.Lock`:
 
 ```
-owner.begin_spawn()          -> True | False   # False once closing: the start is refused
-owner.spawned(proc, source)  # right after a successful Popen, before readiness is known
-owner.end_spawn()            # in a finally, always
-owner.close(wait_s)          -> list[report lines]
+owner.spawn(argv, **popen_kw) -> Popen | None   # None once closing: nothing is spawned
+owner.close()                 -> list[report lines]
 ```
 
-- `start_watcher(root, …, owner=None)`: when `owner` is given it calls
-  `begin_spawn()` before anything else (refusing with
-  `the cockpit is shutting down — not starting a watcher` when it returns
-  False), `spawned(proc, source)` immediately after `Popen` returns, and
-  `end_spawn()` in a `finally`. Readiness is no longer what registers a
-  watcher: a start that times out (`started_unverified`) or whose child exits
-  early is still recorded, and `close` handles each honestly.
+- `spawn` holds the lock for exactly three steps: check `closing`, `Popen`,
+  record `{proc, pid, ident, source}`. `watcher_status` scans and readiness
+  waits stay outside the lock.
+- `close` takes the same lock, sets `closing = True` and snapshots the records
+  in one step. A start can therefore be in only two states when shutdown
+  snapshots: it has not reached `Popen` (it will see `closing` and spawn
+  nothing), or its child is already recorded. No child exists that `close`
+  cannot see. `close` never gives up waiting on the lock: `Popen` is a bounded
+  fork/exec, and the lock is never held across a scan or a readiness wait.
+- `start_watcher(root, …, owner=None)`: with an owner, `Popen` is replaced by
+  `owner.spawn(...)`. A `None` result is a refusal:
+  `the cockpit is shutting down — not starting a watcher`. Without an owner
+  (CLI callers) behaviour is unchanged. Readiness is not what registers a
+  watcher, so a start that times out (`started_unverified`) or whose child
+  exits early is still owned.
 - Both entry points pass the server's owner: `/api/watch/start`
   (`source="watch-start"`) and a Start launch, via
   `launch.launch(…, watcher_owner=owner)` → `_attempt` → `start_watcher`
-  (`source="launch"`). A **reused** watcher (the launch row's recorded live
-  pid) and an **already running** one (`start_watcher` refused before
-  spawning) are never recorded, so they are never stopped.
-- The owner keeps the `Popen` handle. Because `serve` is the parent and has
-  not reaped the child, the pid cannot be reused while `proc.poll() is None`,
-  so signalling through the handle is safe; the recorded
-  `procs.identity(pid)` is kept for the report.
+  (`source="launch"`). A **reused** watcher (the launch row's live pid) and an
+  **already running** one (refused before spawning) are never recorded, so
+  they are never stopped.
+- The owner keeps the `Popen` handle. `serve` is the parent and has not
+  reaped the child, so the pid cannot be reused while `proc.poll() is None`.
+  Signalling through the handle is safe.
+- Test hook: when `TAGTEAM_TEST_WATCHER_SPAWN_PAUSE_S` is set, `spawn` sleeps
+  that long **inside the critical section, after `Popen` and before recording
+  the child**. It is used only by the tests below.
 
-**Shutdown protocol** (`serve_command`'s `finally`, before `lease.release()`;
-`daemon_threads=True` means request threads may still be mid-start):
-1. Under the lock: `closing = True`. From here `begin_spawn()` returns False.
-2. Wait on the condition until no start is between `begin_spawn` and
-   `end_spawn`, bounded by `WATCHER_READY_WAIT_S + 5 s`.
-3. Under the lock: take the snapshot and set `closed = True`. If a start
-   overran the bound and calls `spawned()` after this, that call terminates
-   and reaps the new child immediately and records a report line (the child
-   never escapes).
-4. For each recorded child, outside the lock:
+**Shutdown** (`serve_command`'s `finally`, before `lease.release()`, main
+thread):
+1. `reports = owner.close()` (blocks while a `spawn` is inside its critical
+   section).
+2. For each recorded child, outside the lock:
    - `proc.poll()` not None → `Watcher pid N (started by this cockpit) had already exited (code C).`
    - else `proc.terminate()` (SIGTERM; the watcher's §2 handler runs its
      `finally`), `proc.wait(10)` →
      `Stopped watcher pid N (started by this cockpit).`
    - timeout → `Watcher pid N did not exit within 10 s — stop it with: kill N`
      (no SIGKILL: an in-flight turn's cleanup may still be running).
-   - pidfile still naming a gone pid → `remove_pidfile(root, pid)`.
-5. If step 2 hit its bound: `A watcher start was still in progress at shutdown; see the lines above.`
-6. `watcher_status(root)` still reporting a live watcher that is not in the
-   snapshot → `Watcher pid N was not started by this cockpit — left running.`
+   - a pidfile still naming a gone pid → `remove_pidfile(root, pid)`.
+3. If `watcher_status(root)` still reports a live watcher that is not among
+   the recorded children: `Watcher pid N was not started by this cockpit — left running.`
+4. The report lines are printed, then `serve_command` returns.
 
 Only a clean shutdown (Ctrl+C / SIGTERM) runs this. `kill -9` of `serve`
 cannot; §1 then makes the leftover visible and refusable.
@@ -234,7 +239,7 @@ response, and the key format matches `CYCLE_ID`.)*
 
 ## Files
 - `tagteam/watcher.py`: lock, refusal, SIGTERM handler
-- `tagteam/launch.py`: `WatcherOwner`; `start_watcher(owner=)` and `launch(watcher_owner=)` → `_attempt`; refusal wording in `start_watcher`
+- `tagteam/launch.py`: `WatcherOwner` (`spawn` / `close`); `start_watcher(owner=)` and `launch(watcher_owner=)` → `_attempt`; refusal wording in `start_watcher`
 - `tagteam/server.py`: one `WatcherOwner` per server, passed to `/api/watch/start` and the launch path; `owner.close()` on shutdown with its report lines printed
 - `tagteam/cockpit_api.py`: target identity on activity items
 - `tagteam/data/web/cockpit.js`, `cockpit.html`, `cockpit.css`: per-cycle reviewer lane, toggle, verdict keying
@@ -254,21 +259,23 @@ response, and the key format matches `CYCLE_ID`.)*
    pidfile is gone, and the lock is free. With a fake in-flight headless turn,
    the turn's process is killed and recorded as the existing interrupt path
    records it.
-5. `serve` shutdown (`WatcherOwner` with real child processes):
-   - a watcher started through `/api/watch/start`, and one started through a
-     Start launch, are each terminated, reaped and reported stopped;
-   - a start whose readiness wait **times out** (`started_unverified`) is still
-     owned and stopped at shutdown, for both entry points;
-   - **shutdown during an in-flight start**, for both entry points: `close`
-     waits for the start, which then records its child, and that child is
-     stopped; a start that calls `begin_spawn` after `closing` is refused
-     without spawning; a `spawned()` arriving after `closed` terminates its
-     child immediately;
-   - a child that already exited is reported as exited, not signalled;
-   - a child that ignores SIGTERM is reported with the `kill N` line after the
-     bounded wait;
-   - a reused watcher (launch row's live pid) and an already-running external
-     watcher are never recorded, never signalled, and the external one is
+5. `serve` shutdown:
+   - **Process-exit tests (real processes).** A real `tagteam serve` on a temp
+     project, with `TAGTEAM_TEST_WATCHER_SPAWN_PAUSE_S` set. A start is
+     requested through `/api/watch/start` and, separately, through a Start
+     launch. SIGTERM is sent to `serve` while the start is paused between
+     child creation and registration. After the `serve` process exits, the
+     watcher child's pid is not alive and its pidfile is gone. This runs for
+     both entry points.
+   - `WatcherOwner` unit tests with real child processes:
+     - `spawn` after `close` returns None and creates no process;
+     - a child from a readiness timeout (`started_unverified`) is recorded and
+       stopped;
+     - a child that already exited is reported as exited, not signalled;
+     - a child that ignores SIGTERM gets the `kill N` line after the bounded
+       wait.
+   - A reused watcher (launch row's live pid) and an already-running external
+     watcher are never recorded and never signalled; the external one is
      reported as left running.
 6. `start_watcher` against a project whose watcher refuses reports
    "a watcher is already running" with the pid, not "rejected its
