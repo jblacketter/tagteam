@@ -2,11 +2,15 @@
 Setup script for Tagteam.
 
 Usage:
-    tagteam-setup [target_directory]
-    python -m tagteam.setup [target_directory]
+    tagteam-setup [target_directory] [--no-plugin] [--preview] [--accept PATH]... [--force]
+    python -m tagteam.setup [target_directory] [...]
+
+Since Phase 52 this is a thin caller of :mod:`tagteam.framework`: managed
+files are classified against the package and the project's manifest, only
+provably tagteam-written content is refreshed, everything else is kept and
+reported. See that module for the rules.
 """
 
-import shutil
 import sys
 from pathlib import Path
 
@@ -20,7 +24,9 @@ SKILL_RELDIR = Path(".claude") / "skills" / "handoff"
 
 
 def copy_md_file(src: Path, dst: Path, variables: dict[str, str] | None = None) -> None:
-    """Copy a markdown file, applying variable substitution if variables provided."""
+    """Copy a markdown file, applying variable substitution if variables provided.
+    Compatibility helper for older/custom callers; framework files no longer
+    go through it."""
     content = src.read_text(encoding="utf-8")
     if variables:
         content = render_template(content, variables)
@@ -82,46 +88,16 @@ def report_legacy_user_skills() -> bool:
     return False
 
 
-def _sync_handoff_skill(source: Path, target: Path, *, no_plugin: bool) -> None:
-    """Phase 48: vendor the handoff skill, or remove the vendored copy when
-    the plugin serves it. Removal is gated on content provenance — only a
-    directory holding exactly one known tagteam-vendored SKILL.md is deleted;
-    anything else is kept, reported, and not vendored over."""
-    skills_dst = target / ".claude" / "skills"
-    skill_dir = target / SKILL_RELDIR
-    status = PluginStatus(False, "--no-plugin") if no_plugin else plugin_status(target)
-    print(f"plugin: {status}")
-    if status.installed:
-        prov = vendored_skill_provenance(skill_dir)
-        if prov.removable:
-            shutil.rmtree(skill_dir)
-            print(f"  removed vendored handoff skill ({prov.reason}) — served by the plugin")
-        elif prov.reason == "absent":
-            print("  handoff skill served by the plugin — nothing to vendor")
-        else:
-            print(f"  kept {SKILL_RELDIR}/: {prov.reason}")
-        return
-    print("Copying skills...")
-    skills_src = source / ".claude" / "skills"
-    if not skills_src.exists():
-        print(f"  Warning: Skills not found at {skills_src}")
-        return
-    for f in skills_src.glob("*.md"):
-        shutil.copy2(f, skills_dst / f.name)
-        print(f"  - {f.name}")
-    for d in skills_src.iterdir():
-        if d.is_dir():
-            dst_dir = skills_dst / d.name
-            if dst_dir.exists():
-                shutil.rmtree(dst_dir)
-            shutil.copytree(d, dst_dir)
-            print(f"  - {d.name}/ (directory skill)")
+_POINTER = ("# Project workflow\n\nRead `tagteam.yaml` for current roles, "
+            "`docs/workflows.md` for onboarding, and run "
+            "`tagteam contract` for the authoritative workflow.\n")
 
 
 def main(target_dir: str = ".", *, no_plugin: bool = False,
-         report_user_skills: bool = True) -> None:
+         report_user_skills: bool = True, preview: bool = False,
+         accept: tuple[str, ...] | list[str] = (), force: bool = False) -> int:
     """
-    Copy framework files to the target project directory.
+    Bring the framework files in ``target_dir`` up to the installed package.
 
     Args:
         target_dir: Target directory (defaults to current directory)
@@ -130,11 +106,19 @@ def main(target_dir: str = ".", *, no_plugin: bool = False,
         report_user_skills: print the Phase 49 note about user-level
             `handoff*` skills that may conflict with the plugin. `upgrade`
             passes False per project and prints one aggregate note itself.
+        preview: classify and report, write nothing (Phase 52).
+        accept: managed paths whose custom content may be overwritten (or,
+            for a legacy flat skill, deleted) — one path per entry.
+        force: lift the git-recoverability refusal for accepted paths.
+
+    Returns 0, or 1 when any path was refused.
     """
+    from tagteam import framework
+
     source = get_data_dir()
     target = Path(target_dir).resolve()
 
-    print("Tagteam Setup")
+    print("Tagteam Setup" + (" — preview (nothing will be written)" if preview else ""))
     print("==========================")
     print(f"Source: {source}")
     print(f"Target: {target}")
@@ -144,21 +128,20 @@ def main(target_dir: str = ".", *, no_plugin: bool = False,
     if not source.exists():
         print(f"Error: Data directory not found at {source}")
         print("The package may not be installed correctly.")
-        return
+        return 1
 
-    # Create directory structure
-    dirs_to_create = [
-        ".claude/skills",
-        "docs/phases",
-        "docs/handoffs",
-        "docs/escalations",
-        "docs/checklists",
-        "templates",
-    ]
-
-    print("Creating directories...")
-    for d in dirs_to_create:
-        (target / d).mkdir(parents=True, exist_ok=True)
+    if not preview:
+        dirs_to_create = [
+            ".claude/skills",
+            "docs/phases",
+            "docs/handoffs",
+            "docs/escalations",
+            "docs/checklists",
+            "templates",
+        ]
+        print("Creating directories...")
+        for d in dirs_to_create:
+            (target / d).mkdir(parents=True, exist_ok=True)
 
     # Validate project configuration without baking roles into shipped templates
     config_path = target / "tagteam.yaml"
@@ -173,59 +156,20 @@ def main(target_dir: str = ".", *, no_plugin: bool = False,
                 print(f"  - {err}")
             print()
 
-    # Remove deprecated flat-file skills from previous versions
-    # Uses glob to catch any handoff-*.md files, not just known ones
-    skills_dst = target / ".claude" / "skills"
-    removed = []
-    for old_file in skills_dst.glob("handoff-*.md"):
-        old_file.unlink()
-        removed.append(old_file.name)
-    # Also remove bare handoff.md (not matched by handoff-*.md)
-    bare_handoff = skills_dst / "handoff.md"
-    if bare_handoff.exists():
-        bare_handoff.unlink()
-        removed.append("handoff.md")
-    if removed:
-        print(f"Removed {len(removed)} deprecated skill files:")
-        for name in removed:
-            print(f"  - {name}")
-        print()
-
-    # Handoff skill: vendor, or hand over to the plugin (Phase 48)
-    _sync_handoff_skill(source, target, no_plugin=no_plugin)
+    plan = framework.build_plan(target, data_dir=source, no_plugin=no_plugin,
+                                accept=accept, force=force)
+    print(f"plugin: {plan.plugin}")
+    if not preview:
+        framework.apply(plan)
+    print(framework.format_report(plan))
     if report_user_skills and not no_plugin:
         report_legacy_user_skills()
 
-    # Copy templates
-    print("Copying templates...")
-    templates_src = source / "templates"
-    templates_dst = target / "templates"
-    if templates_src.exists():
-        for f in templates_src.glob("*.md"):
-            copy_md_file(f, templates_dst / f.name)
-            print(f"  - {f.name}")
-    else:
-        print(f"  Warning: Templates not found at {templates_src}")
-
-    # Copy checklists
-    print("Copying checklists...")
-    checklists_src = source / "checklists"
-    checklists_dst = target / "docs" / "checklists"
-    if checklists_src.exists():
-        for f in checklists_src.glob("*.md"):
-            copy_md_file(f, checklists_dst / f.name)
-            print(f"  - {f.name}")
-    else:
-        print(f"  Warning: Checklists not found at {checklists_src}")
-
-    # Copy workflow docs
-    print("Copying workflow documentation...")
-    workflows_src = source / "workflows.md"
-    if workflows_src.exists():
-        copy_md_file(workflows_src, target / "docs" / "workflows.md")
-        print("  - workflows.md")
-    else:
-        print(f"  Warning: workflows.md not found at {workflows_src}")
+    if preview:
+        refused = plan.refused
+        if refused:
+            print(f"{len(refused)} path(s) would be refused.")
+        return 1 if refused else 0
 
     # Initialize files if they don't exist
     roadmap_dst = target / "docs" / "roadmap.md"
@@ -248,9 +192,7 @@ def main(target_dir: str = ".", *, no_plugin: bool = False,
         pointer = target / name
         try:
             with pointer.open("x", encoding="utf-8") as out:
-                out.write("# Project workflow\n\nRead `tagteam.yaml` for current roles, "
-                          "`docs/workflows.md` for onboarding, and run "
-                          "`tagteam contract` for the authoritative workflow.\n")
+                out.write(_POINTER)
         except FileExistsError:
             pass
 
@@ -258,8 +200,12 @@ def main(target_dir: str = ".", *, no_plugin: bool = False,
     from tagteam.registry import register_project
     register_project(str(target))
 
+    refused = plan.refused
     print()
-    print("Setup complete!")
+    if refused:
+        print(f"Setup complete with {len(refused)} refused path(s) — see the report above.")
+    else:
+        print("Setup complete!")
     print()
     print("Next steps:")
     print("  Quick start:  tagteam quickstart")
@@ -268,14 +214,54 @@ def main(target_dir: str = ".", *, no_plugin: bool = False,
     print("  Windows/manual fallback:")
     print("                tagteam session start --backend manual")
     print("                tagteam watch --mode notify")
+    return 1 if refused else 0
+
+
+def parse_setup_args(argv: list[str]) -> tuple[str, dict]:
+    """``[dir] [--no-plugin] [--preview] [--accept PATH]... [--force]`` →
+    (target, kwargs for :func:`main`). Shared by ``tagteam setup`` and the
+    module entry point."""
+    target = "."
+    opts: dict = {"no_plugin": False, "preview": False, "accept": [], "force": False}
+    positional: list[str] = []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--no-plugin":
+            opts["no_plugin"] = True
+        elif a in ("--preview", "--dry-run"):
+            opts["preview"] = True
+        elif a == "--force":
+            opts["force"] = True
+        elif a == "--accept":
+            if i + 1 >= len(argv):
+                raise ValueError("--accept needs a path")
+            opts["accept"].append(argv[i + 1])
+            i += 1
+        elif a.startswith("--accept="):
+            opts["accept"].append(a[len("--accept="):])
+        elif a.startswith("-"):
+            raise ValueError(f"unknown option {a}")
+        else:
+            positional.append(a)
+        i += 1
+    if len(positional) > 1:
+        raise ValueError("setup takes at most one directory")
+    if positional:
+        target = positional[0]
+    opts["accept"] = tuple(opts["accept"])
+    return target, opts
 
 
 def cli():
     """Command-line entry point."""
-    args = [a for a in sys.argv[1:] if a != "--no-plugin"]
-    target = args[0] if args else "."
-    main(target, no_plugin="--no-plugin" in sys.argv[1:])
+    try:
+        target, opts = parse_setup_args(sys.argv[1:])
+    except ValueError as e:
+        print(f"setup: {e}")
+        return 2
+    return main(target, **opts)
 
 
 if __name__ == "__main__":
-    cli()
+    sys.exit(cli())

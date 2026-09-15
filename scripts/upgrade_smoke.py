@@ -2,7 +2,7 @@
 """Isolated `tagteam upgrade` smoke (Phase 36 release gate). Stdlib only.
 
     python scripts/upgrade_smoke.py --project DIR [--sentinel DIR]
-        [--python EXE] [--expect-version V] [--json]
+        [--python EXE] [--expect-version V] [--preview] [--json]
 
 Bare `tagteam upgrade` reads ~/.tagteam/projects.json, prunes it and re-runs
 setup over EVERY registered project. This harness is the only permitted
@@ -27,6 +27,9 @@ way to exercise an upgrade in the Phase 36 recipes:
   outside --project, on any identity mismatch, or if the helper names any
   other path.
 
+--preview runs `tagteam upgrade --preview` instead (Phase 52): the helper
+classifies and reports but writes nothing, so a preview must exit 0.
+
 Exit 0: isolation held and --project is unchanged (a no-op upgrade).
 Exit 1: isolation held but --project changed (diff reported).
 Exit 2: identity / isolation failure — something outside the sandbox moved.
@@ -45,7 +48,8 @@ from pathlib import Path
 # What tagteam.setup.main can write inside a project (kept in sync with
 # tagteam/setup.py; the whole subtrees are snapshotted so new files show up).
 MANAGED_SUBTREES = (".claude/skills", "templates", "docs/checklists")
-MANAGED_FILES = ("docs/workflows.md", "docs/roadmap.md", "docs/decision_log.md")
+MANAGED_FILES = ("docs/workflows.md", "docs/roadmap.md", "docs/decision_log.md",
+                 "tagteam-manifest.json", "AGENTS.md", "CLAUDE.md")
 MANAGED_DIRS = (".claude/skills", "docs/phases", "docs/handoffs", "docs/escalations", "docs/checklists", "templates")
 
 HELPER = r'''
@@ -72,7 +76,11 @@ if rp is not None and pathlib.Path(rp()).resolve() != rf:
     sys.exit(4)
 from tagteam.cli import upgrade_command
 sys.stdout.write("REGISTRY: %s\n" % rf); sys.stdout.flush()
-sys.exit(upgrade_command())
+extra = ["--preview"] if len(sys.argv) > 4 and sys.argv[4] == "preview" else []
+try:
+    sys.exit(upgrade_command(extra))
+except TypeError:            # pre-3.13 package: no arguments
+    sys.exit(upgrade_command())
 '''
 
 
@@ -144,9 +152,11 @@ def _real_registry() -> tuple[Path | None, list[str]]:
     return path, entries
 
 
-def run(project: Path, sentinel: Path | None, python: str, expect_version: str | None) -> tuple[int, dict]:
+def run(project: Path, sentinel: Path | None, python: str, expect_version: str | None,
+        preview: bool = False) -> tuple[int, dict]:
     report: dict = {"project": str(project), "sentinel": str(sentinel) if sentinel else None,
-                    "python": python, "expect_version": expect_version, "problems": []}
+                    "python": python, "expect_version": expect_version, "preview": preview,
+                    "problems": []}
     project = project.resolve()
     if not project.is_dir():
         report["problems"].append(f"--project is not a directory: {project}")
@@ -177,7 +187,8 @@ def run(project: Path, sentinel: Path | None, python: str, expect_version: str |
     env = {k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "PYTHONSTARTUP")}
 
     proc = subprocess.Popen(
-        [python, "-I", "-c", HELPER, str(tmp), str(reg_dir), str(reg_file)],
+        [python, "-I", "-c", HELPER, str(tmp), str(reg_dir), str(reg_file),
+         "preview" if preview else "apply"],
         cwd=str(cwd), env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
         stderr=subprocess.PIPE, text=True, encoding="utf-8",
     )
@@ -263,6 +274,8 @@ def run(project: Path, sentinel: Path | None, python: str, expect_version: str |
         problems.append(f"helper exited {proc.returncode}")
     proj_diff = _diff(proj_before, snapshot_tree(project))
     report["project_diff"] = proj_diff
+    if preview and proj_diff:
+        problems.append(f"PREVIEW WROTE: {proj_diff[:5]}")
     report["problems"] = problems
     if problems:
         return 2, report
@@ -275,9 +288,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--sentinel", type=Path, default=None)
     ap.add_argument("--python", default=sys.executable, help="interpreter for the helper (default: this one)")
     ap.add_argument("--expect-version", default=None, help="require this imported tagteam version and a package under the interpreter prefix")
+    ap.add_argument("--preview", action="store_true", help="run `tagteam upgrade --preview` (must write nothing)")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args(argv)
-    code, report = run(args.project, args.sentinel, args.python, args.expect_version)
+    code, report = run(args.project, args.sentinel, args.python, args.expect_version, args.preview)
     if args.json:
         print(json.dumps(report, indent=1, sort_keys=True))
     else:
