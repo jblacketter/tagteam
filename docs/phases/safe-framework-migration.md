@@ -385,3 +385,37 @@ becoming a link between classification and apply, fresh-run report lines,
 manifest appear / edit / disappear between classification and apply
 (concurrent bytes preserved, refusal reported), manifest symlink and
 directory in preview and apply.
+
+### Round 4 (impl review): absent targets, preview-only registry reads, preview refusals
+Three reviewer findings:
+
+- **Absent target directory (P2).** Round 3 removed the unconditional
+  `mkdir(parents=True)` and with it the only thing that created a new
+  project directory: `tagteam setup new-dir` exited 1 with a
+  `FileNotFoundError` per path. The root is now a preimage of its own:
+  `observe_root` lstats every component from the filesystem anchor down at
+  classification (`Plan.root_shape`: `dir` / `absent` / `unsupported`), and
+  `apply` starts with `_ensure_root` — the same `_compare` re-check as every
+  path, then `_mkdir_chain` creates the missing components one by one (never
+  through a link). Preview reports `create <root> — new project directory`
+  and creates nothing. A root that appeared or moved between classification
+  and apply, or that is a file, refuses every write with that one reason
+  (`Plan.root_outcome`, first in `Plan.refused`, no traceback), and a refused
+  root is not registered. An existing directory is silent, as before.
+- **`upgrade --preview` pruned the registry (P2).** `get_registered_projects`
+  rewrites `~/.tagteam/projects.json` without missing directories; preview now
+  reads it with `read_registry_raw`, skips missing entries with a
+  `note: registered project not found, skipped:` line and leaves the file's
+  bytes alone. The apply path still prunes.
+- **Preview hid refused directories and seeds (P3).** `format_report` tested
+  the applied verb (`refused`) against the planned one (`refuse`); both
+  branches now go through `Item.refused` and one `_refusal` line —
+  `refuse` before apply, `refused` after, the reason either way — so a
+  preview names every refused directory and seed exactly as apply does.
+
+Tests: `tests/test_framework.py` round-4 section — a nonexistent target one
+and two levels deep (preview: reported, still absent, exit 0; apply: created,
+full tree, manifest, registered, second run a no-op), a file at the target,
+the target appearing between classification and apply, `upgrade --preview`
+with a missing registry entry (bytes identical; the apply run prunes),
+preview refusal lines for a symlinked `docs/` and a file at `templates/`.

@@ -767,3 +767,130 @@ def test_manifest_shape_refused_in_preview_and_apply(proj, tmp_path, capsys, sha
     assert target.read_text() == "{}\n"
     assert (p.is_symlink() if shape == "symlink" else p.is_dir())
     assert (proj / "templates" / "cycle.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# round 4 — the project directory is a preimage too; preview never touches
+# the registry; preview names refused directories and seeds
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def home(tmp_path, monkeypatch) -> Path:
+    """Registry redirect + no claude CLI, without pre-creating any project."""
+    h = tmp_path / "home"; h.mkdir()
+    monkeypatch.setattr(registry_mod, "REGISTRY_DIR", h)
+    monkeypatch.setattr(registry_mod, "REGISTRY_FILE", h / "projects.json")
+    no_cli(monkeypatch)
+    return h
+
+
+@pytest.mark.parametrize("depth", ["new", "deeper/still/new"])
+def test_fresh_setup_creates_an_absent_target(home, tmp_path, capsys, depth):
+    """The reviewer's reproduction: a target that does not exist yet
+    (ancestors included). Preview reports it and creates nothing; apply
+    creates it the checked way, then everything below, and registers it."""
+    target = tmp_path / depth
+    code, out = run(target, preview=True, capsys=capsys)
+    assert code == 0, out
+    assert f"create   {target} — new project directory" in out and "create   6 directories" in out
+    assert not target.exists() and not (tmp_path / Path(depth).parts[0]).exists()
+    assert not registry_mod.REGISTRY_FILE.exists()
+    code, out = run(target, capsys=capsys)
+    assert code == 0, out
+    assert f"created  {target} — new project directory" in out and "created  6 directories" in out
+    assert "FileNotFoundError" not in out and "Traceback" not in out
+    for rel in fw.SEED_DIRS:
+        assert (target / rel).is_dir()
+    assert (target / "templates" / "cycle.md").read_bytes() == (DATA / "templates" / "cycle.md").read_bytes()
+    assert (target / SKILL).read_bytes() == PACKAGED_SKILL and (target / "AGENTS.md").read_text() == fw.POINTER
+    assert manifest(target)["files"] and not su.needs_setup(str(target))
+    assert json.loads(registry_mod.REGISTRY_FILE.read_text()) == [str(target.resolve())]
+    before = snapshot(target)
+    code, out = run(target, capsys=capsys)
+    assert code == 0 and snapshot(target) == before and "new project directory" not in out
+
+
+def test_file_at_target_refuses_everything_without_traceback(home, tmp_path, capsys):
+    target = tmp_path / "proj"; target.write_text("a file\n")
+    for kw in ({"preview": True}, {}, {"no_plugin": True}):
+        code, out = run(target, capsys=capsys, **kw)
+        assert code == 1, out
+        assert "Traceback" not in out
+        verb = "refuse " if kw.get("preview") else "refused"
+        assert f"{verb}  {target} — unsupported filesystem shape ({target} is not a directory)" in out
+        assert f"{verb}  templates/cycle.md — unsupported filesystem shape ({target} is not a directory)" in out
+        assert target.read_text() == "a file\n"
+    assert not registry_mod.REGISTRY_FILE.exists()
+
+
+def test_target_appearing_between_classification_and_apply_is_refused(home, tmp_path):
+    target = tmp_path / "proj"
+    plan = fw.build_plan(target, data_dir=DATA)
+    assert plan.root_shape.kind == "absent" and all(i.action == "create" for i in plan.items if i.kind == "file")
+    target.mkdir()
+    (target / "templates").mkdir(); (target / "templates" / "cycle.md").write_text("theirs\n")
+    fw.apply(plan)
+    assert plan.root_outcome == "refused: changed since classification: now dir, was absent"
+    assert snapshot(target) == {"templates": "dir", "templates/cycle.md": b"theirs\n"}
+    assert plan.refused[0].startswith(f"{target.resolve()}: refused")
+    assert all(i.outcome.startswith("refused") for i in plan.items if i.kind == "file")
+    assert plan.manifest_outcome == "unchanged" and not (target / fw.MANIFEST_NAME).exists()   # nothing to record
+    assert "refused  " + str(target.resolve()) in fw.format_report(plan)
+    # the next run sees the tree as it is and converges
+    plan2 = fw.apply(fw.build_plan(target, data_dir=DATA))
+    assert plan2.root_outcome == "" and plan2.manifest_outcome == "written"
+    assert (target / "templates" / "cycle.md").read_text() == "theirs\n"
+
+
+def test_upgrade_preview_never_touches_the_registry(home, tmp_path, capsys):
+    """The reviewer's reproduction: a registered directory that is missing.
+    Preview skips it with a note and leaves the registry bytes alone; the
+    apply run prunes it as before."""
+    from tagteam.cli import upgrade_command
+    p = tmp_path / "p"; p.mkdir()
+    (p / "tagteam.yaml").write_text("agents:\n  lead: {name: A}\n  reviewer: {name: B}\n")
+    fresh(p)
+    gone = tmp_path / "gone"
+    registry_mod._write_registry([str(gone), str(p.resolve())])
+    raw = registry_mod.REGISTRY_FILE.read_bytes()
+    capsys.readouterr()
+    assert upgrade_command(["--preview"]) == 0
+    out = capsys.readouterr().out
+    assert registry_mod.REGISTRY_FILE.read_bytes() == raw
+    assert f"note: registered project not found, skipped: {gone}" in out
+    assert f"Project: {p.resolve()}" in out and "Previewed 1 project(s); nothing written." in out
+    # only missing entries: nothing to preview, still nothing written
+    registry_mod._write_registry([str(gone)])
+    raw = registry_mod.REGISTRY_FILE.read_bytes()
+    assert upgrade_command(["--preview"]) == 0
+    assert registry_mod.REGISTRY_FILE.read_bytes() == raw and "No registered projects found." in capsys.readouterr().out
+    # apply prunes
+    assert upgrade_command() == 0
+    assert json.loads(registry_mod.REGISTRY_FILE.read_text()) == []
+
+
+def test_preview_names_refused_directories_and_seeds(proj, tmp_path, capsys):
+    """Round-3 gap: the planned verb is `refuse`, the applied one `refused`;
+    preview used to test for the latter and print nothing for the seeds."""
+    outside = tmp_path / "outside"; outside.mkdir()
+    (proj / "docs").symlink_to(outside)
+    code, out = run(proj, preview=True, capsys=capsys)
+    assert code == 1
+    for rel in DOCS_PATHS:
+        assert f"refuse   {rel} — unsupported filesystem shape (docs is a symlink)" in out, rel
+    assert snapshot(outside) == {} and not (proj / "templates").exists()
+    n = len([l for l in out.splitlines() if l.strip().startswith("refuse ")])
+    assert f"{n} path(s) would be refused." in out
+    # a file where a directory is required: the subtree, in preview too
+    (proj / "templates").write_text("not a directory\n")
+    code, out = run(proj, preview=True, capsys=capsys)
+    assert code == 1
+    assert "refuse   templates/cycle.md — unsupported filesystem shape (templates is not a directory)" in out
+    assert "templates —" not in out
+    (proj / "templates").unlink()
+    # apply says the same, past tense
+    code, out = run(proj, capsys=capsys)
+    assert code == 1
+    for rel in DOCS_PATHS:
+        assert f"refused  {rel} — unsupported filesystem shape (docs is a symlink)" in out, rel
+    assert snapshot(outside) == {}

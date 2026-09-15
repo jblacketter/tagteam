@@ -19,11 +19,11 @@ last wrote:
 
 Recovery is git: an accepted overwrite or deletion needs the path tracked and
 clean so ``git checkout -- PATH`` restores it; ``--force`` lifts only that
-refusal. Every write and delete — including the framework directories, the
-once-only seed files and the manifest itself — re-checks the (existence,
-type, sha256) preimage captured at classification. A second run on a
-migrated tree writes nothing. Nothing here follows a symlink or deletes
-directory contents.
+refusal. Every write and delete — including the project directory itself
+when the target is new, the framework directories, the once-only seed files
+and the manifest — re-checks the (existence, type, sha256) preimage captured
+at classification. A second run on a migrated tree writes nothing. Nothing
+here follows a symlink or deletes directory contents.
 
 Naming: ``tagteam/migrate.py`` already holds the legacy tagteam.yaml
 migration, so the plan's ``migrate.py`` lives here as ``framework.py``.
@@ -153,6 +153,21 @@ def observe_parent(root: Path, rel: str) -> Shape:
     return Shape("dir") if parent == "." else observe_dir(root, parent)
 
 
+def observe_root(root: Path) -> Shape:
+    """Shape of the project directory itself: ``dir``, ``absent`` (it or an
+    ancestor is missing — a fresh target) or ``unsupported``. lstat from the
+    filesystem anchor down; ``root`` is resolved, so an existing component is
+    a real directory unless it changed underneath us."""
+    root = Path(root)
+    rel = root.relative_to(root.anchor)
+    if not rel.parts:
+        return Shape("dir")
+    s = _walk(Path(root.anchor), rel.as_posix(), "dir")
+    if s.kind == "unsupported":
+        return Shape("unsupported", root.anchor + s.detail)
+    return s
+
+
 # ---------------------------------------------------------------------------
 # Manifest
 # ---------------------------------------------------------------------------
@@ -247,11 +262,16 @@ class Plan:
     header: str = ""                # version line as observed at classification
     manifest_shape: Shape = field(default_factory=lambda: Shape("absent"))   # preimage
     manifest_outcome: str = ""      # after apply: written | unchanged | refused: <why>
+    root_shape: Shape = field(default_factory=lambda: Shape("dir"))          # preimage of root
+    root_outcome: str = ""          # "" (existed) | created | refused: <why>
     applied: bool = False
 
     @property
     def refused(self) -> list[str]:
-        out = [f"{i.rel}: {i.outcome or i.reason}" for i in self.items if i.refused]
+        out = []
+        if self.root_outcome.startswith("refused"):
+            out.append(f"{self.root}: {self.root_outcome}")
+        out += [f"{i.rel}: {i.outcome or i.reason}" for i in self.items if i.refused]
         out += [f"--accept {p}: not a custom managed path" for p in self.unknown_accepts]
         if self.manifest_outcome.startswith("refused"):
             out.append(f"{MANIFEST_NAME}: {self.manifest_outcome}")
@@ -455,6 +475,7 @@ def build_plan(target: str | Path, *, data_dir: Path, no_plugin: bool = False,
                plugin: PluginStatus | None = None) -> Plan:
     """Classify every managed path. Reads only."""
     root = Path(target).resolve()
+    rshape = observe_root(root)
     accept_set = {Path(a).as_posix().strip("/") for a in accept}
     status = PluginStatus(False, "--no-plugin") if no_plugin else (plugin or plugin_status(root))
     vendor = not status.installed
@@ -507,7 +528,16 @@ def build_plan(target: str | Path, *, data_dir: Path, no_plugin: bool = False,
     plan = Plan(root=root, package_version=package_version(), plugin=status, vendor_skill=vendor,
                 manifest=manifest, manifest_state=mstate, items=items,
                 accept=tuple(sorted(accept_set)), force=force, unknown_accepts=unknown,
-                header=_version_text(manifest, mstate, status), manifest_shape=mshape)
+                header=_version_text(manifest, mstate, status), manifest_shape=mshape,
+                root_shape=rshape)
+    # A target that is not (and cannot become) a plain directory refuses
+    # every write with the one reason, instead of a per-path OSError each.
+    if rshape.kind == "unsupported":
+        why = f"unsupported filesystem shape ({rshape.detail})"
+        plan.root_outcome = f"refused: {why}"
+        for it in items:
+            if it.action in ("create", "refresh", "accept", "remove", "refuse"):
+                it.cls, it.action, it.reason = UNSUPPORTED, "refuse", why
     # Preview verdict for the manifest: a write that would be needed but is
     # impossible at this shape is a refusal now, not a promise.
     if mshape.kind == "unsupported" and manifest_pending(plan):
@@ -536,10 +566,11 @@ def _recheck(root: Path, item: Item) -> str | None:
     return _compare(now, item.shape)
 
 
-def _mkdirs(root: Path, rel: str) -> None:
-    """Create absent parent components one by one — never through a link."""
-    cur = root
-    for part in Path(rel).parts[:-1]:
+def _mkdir_chain(base: Path, parts: tuple[str, ...], *, absolute: bool = False) -> None:
+    """Create absent components one by one below ``base`` — never through a
+    link or a non-directory."""
+    cur = base
+    for part in parts:
         cur = cur / part
         try:
             st = os.lstat(cur)
@@ -547,7 +578,34 @@ def _mkdirs(root: Path, rel: str) -> None:
             os.mkdir(cur)
             continue
         if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
-            raise OSError(f"{cur.relative_to(root).as_posix()} is not a plain directory")
+            shown = cur.as_posix() if absolute else cur.relative_to(base).as_posix()
+            raise OSError(f"{shown} is not a plain directory")
+
+
+def _mkdirs(root: Path, rel: str) -> None:
+    """Create absent parent components of ``rel`` one by one."""
+    _mkdir_chain(root, Path(rel).parts[:-1])
+
+
+def _ensure_root(plan: Plan) -> str | None:
+    """The project directory as a preimage: None once it is the plain
+    directory classification saw (creating it, ancestors included, when it
+    was absent then and still is), else why not."""
+    before = plan.root_shape
+    if before.kind == "unsupported":
+        return f"unsupported filesystem shape ({before.detail})"
+    why = _compare(observe_root(plan.root), before)
+    if why:
+        return why
+    if before.kind == "dir":
+        return None
+    try:
+        _mkdir_chain(Path(plan.root.anchor), plan.root.relative_to(plan.root.anchor).parts,
+                     absolute=True)
+    except OSError as e:
+        return f"{e.__class__.__name__}: {e}"
+    plan.root_outcome = "created"
+    return None
 
 
 def _write_exclusive(path: Path, data: bytes) -> None:
@@ -703,6 +761,20 @@ def apply(plan: Plan) -> Plan:
     """Act on the plan in report order; each path is re-checked right before
     it is touched and refused alone if it moved. The manifest is written
     last, once, only if the projection differs from disk."""
+    why = _ensure_root(plan)
+    if why:
+        # No directory to write into: every write is refused with that reason.
+        plan.root_outcome = f"refused: {why}"
+        for it in plan.items:
+            if it.action in ("create", "refresh", "accept", "remove"):
+                it.outcome = f"refused: {why}"
+            elif it.action == "refuse":
+                it.outcome = f"refused: {it.reason}"
+            else:
+                it.outcome = _DONE.get(it.action, "")
+        plan.applied = True
+        plan.manifest_outcome = f"refused: {why}" if manifest_pending(plan) else "unchanged"
+        return plan
     for it in plan.items:
         if it.kind == "skill-handover":
             if it.action == "remove":
@@ -743,17 +815,28 @@ def _accept_hint(plan: Plan, it: Item) -> str:
     return f"accept with: tagteam setup {plan.root} --accept {it.rel}"
 
 
+def _refusal(it: Item, applied: bool) -> str:
+    """One report line for a refused item — ``refuse`` before apply,
+    ``refused`` after, the reason either way."""
+    why = it.outcome[len("refused: "):] if it.outcome.startswith("refused: ") else it.reason
+    return f"  {'refused' if applied else 'refuse':<8} {it.rel} — {why}"
+
+
 def format_report(plan: Plan) -> str:
     lines = [f"Framework files: {plan.header}"]
     if plan.force:
         lines.append("  --force: recoverability refusals lifted for accepted paths")
+    if plan.root_outcome.startswith("refused"):
+        lines.append(f"  {'refused' if plan.applied else 'refuse':<8} {plan.root} — {plan.root_outcome[len('refused: '):]}")
+    elif plan.root_shape.kind == "absent":
+        lines.append(f"  {'created' if plan.applied else 'create':<8} {plan.root} — new project directory")
     current = 0
     made_dirs = 0
     for it in plan.items:
         if it.kind in ("dir", "seed"):
             verb = it.outcome if plan.applied else it.action
-            if verb.startswith("refused"):
-                lines.append(f"  refused  {it.rel} — {verb[len('refused: '):] if verb.startswith('refused: ') else it.reason}")
+            if it.refused:
+                lines.append(_refusal(it, plan.applied))
             elif it.kind == "dir" and verb in ("create", "created"):
                 made_dirs += 1
             elif it.kind == "seed" and verb in ("create", "created"):
@@ -781,8 +864,8 @@ def format_report(plan: Plan) -> str:
             current += 1
             continue
         verb = it.outcome if plan.applied else it.action
-        if verb.startswith("refused"):
-            text = f"  refused  {it.rel} — {verb[len('refused: '):] if verb.startswith('refused: ') else it.reason}"
+        if it.refused:
+            text = _refusal(it, plan.applied)
         else:
             verb = verb or it.action
             text = f"  {verb:<8} {it.rel} — {it.reason}"

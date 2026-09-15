@@ -301,8 +301,10 @@ def upgrade_command(args: list[str] | None = None) -> int:
     """Migrate every registered project to the installed package (Phase 52):
     framework-owned paths are refreshed, custom ones kept and reported with
     the `tagteam setup DIR --accept PATH` line to run. ``--preview`` writes
-    nothing. Exit 1 if any project raised or had a refused path."""
-    from tagteam.registry import get_registered_projects
+    nothing — not to the projects, not to the registry (a registered
+    directory that is missing is skipped with a note, not pruned). Exit 1 if
+    any project raised or had a refused path."""
+    from tagteam.registry import get_registered_projects, read_registry_raw
     from tagteam.setup import main as setup_main
 
     args = list(args or [])
@@ -313,7 +315,18 @@ def upgrade_command(args: list[str] | None = None) -> int:
         print("usage: tagteam upgrade [--preview]")
         return 2
 
-    projects = get_registered_projects()
+    missing: list[str] = []
+    if preview:
+        raw = read_registry_raw()
+        projects = [p for p in raw if Path(p).is_dir()]
+        missing = [p for p in raw if p not in projects]
+    else:
+        projects = get_registered_projects()
+
+    for p in missing:
+        print(f"note: registered project not found, skipped: {p}")
+    if missing:
+        print()
 
     if not projects:
         print("No registered projects found.")
