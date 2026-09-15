@@ -696,7 +696,10 @@ def state_command(args: list[str]) -> int:
         from tagteam.cycle import _dispatch_line
         print(f"Dispatch:   {_dispatch_line()}")
         from tagteam.onboarding import describe_roles
-        print(describe_roles(_resolve_project_root()))
+        root = _resolve_project_root()
+        print(describe_roles(root))
+        from tagteam.framework import version_line
+        print(f"Framework:  {version_line(root)}")
         return 0
 
     subcmd = args[0]

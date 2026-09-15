@@ -2,8 +2,8 @@
 
 ## Status
 - [x] Planning
-- [ ] Approved
-- [ ] Implementation
+- [x] Approved: plan round 2 (2026-09-14)
+- [x] Implementation: phase/safe-framework-migration
 - [ ] Implementation Review
 - [ ] Complete
 
@@ -253,8 +253,10 @@ Filesystem shapes (each refused with `unsupported filesystem shape`, under
 - delete target replaced between classification and apply → refused.
 
 ## Files
-- New: `tagteam/migrate.py` (classify, manifest, plan, apply, report),
-  `tests/test_migrate.py`.
+- New: `tagteam/framework.py` (classify, manifest, plan, apply, report),
+  `tests/test_framework.py`. The plan said `migrate.py`; that module already
+  exists (the legacy tagteam.yaml migration behind `tagteam migrate`), so the
+  engine took the name of what it manages.
 - Modified: `tagteam/setup.py` (thin caller; flags), `tagteam/cli.py`
   (`upgrade --preview`, help text, `state` version lines),
   `tagteam/plugin.py` only if a hash helper needs sharing,
@@ -296,10 +298,9 @@ Filesystem shapes (each refused with `unsupported filesystem shape`, under
 - Legacy flat skills are no longer removed automatically; projects that still
   carry one get a report line and an accept command instead. Flagged in
   release notes.
-- Bootstrap adoption trusts byte-equality with the current package, never a
-  manifest it did not write; an attacker-controlled manifest cannot make the
-  engine overwrite custom bytes, since `framework` via manifest still requires
-  the on-disk hash to match the entry.
+- The manifest is trusted local bookkeeping, not authenticated provenance: a
+  manifest entry whose hash matches a custom file makes that file `framework`.
+  Authentication is out of scope (reviewer, plan round 2).
 - The manifest is a new committed root file in every project; review the name
   and location before implementation, since renaming later is a migration.
 - Classifying old rendered templates as `custom` is correct but means the
@@ -311,3 +312,41 @@ Filesystem shapes (each refused with `unsupported filesystem shape`, under
   offline rather than fail the gate.
 
 No human clarification is required for plan review.
+
+
+## Implementation notes (2026-09-14)
+Branch `phase/safe-framework-migration`. Engine in `tagteam/framework.py`
+(see Files for why not `migrate.py`); `setup.main` is the thin caller and
+returns 1 when any path was refused; `upgrade` passes `--preview` through and
+returns 1 when a project raised or had refusals.
+
+Reviewer clarifications from the plan approval, as built:
+- The manifest is trusted local bookkeeping. The attacker-controlled-manifest
+  claim is gone from Risks; no authentication was added.
+- A `current` file with a matching entry keeps its per-entry version; only
+  created, refreshed and accepted entries take the running package version
+  (`test_bootstrap_at_A_then_package_B_refreshes_changed_paths_only`).
+- Plugin handover unlinks the revalidated sole `SKILL.md` and `rmdir`s the
+  then-empty directory; `shutil.rmtree` is gone from the setup path.
+- The manifest write goes through the same shape check, exclusive create or
+  temp-and-rename as every managed file, and is reported when refused.
+
+Report vocabulary: `create / refresh / keep / accept / remove / refuse /
+current` before apply, `created / refreshed / keep / accepted / removed /
+refused` after; `keep` stays `keep` in both because a kept file is a state,
+not something done. `tagteam state` gained a `Framework:` line (package ·
+manifest · plugin) — it calls `claude plugin list`, ~0.3 s here, like setup.
+
+Behaviour changes to call out in release notes: `setup` on an existing
+project no longer overwrites anything it cannot prove it wrote; legacy flat
+`.claude/skills/handoff-*.md` files are reported, not deleted; `setup` and
+`upgrade` exit 1 on refusals. Not offered by design: `--accept` on `upgrade`.
+Stated limitation: the preimage re-check narrows the check-to-act window to
+the syscall pair; it does not close it.
+
+Verification: focused files (`test_framework`, `test_upgrade_smoke` including
+the wheel-installed run, `test_setup`, `test_quickstart`, `test_onboarding`,
+`test_controls`, `test_state_sync`, `test_watcher`) pass; the on_submit gate
+supplies the recorded full-suite run. Manual: fresh `setup`, `--preview`,
+untracked/tracked `--accept`, second run on a scratch git project — outputs
+match the report format above.

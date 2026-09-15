@@ -3,7 +3,8 @@ CLI for Tagteam.
 
 Usage:
     python -m tagteam init        - Initialize agent configuration
-    python -m tagteam setup [dir] [--no-plugin] - Copy framework files to a project
+    python -m tagteam setup [dir] [--no-plugin] [--preview] [--accept PATH] [--force]
+                                  - Bring framework files up to the package
     python -m tagteam hook session-start  - SessionStart hook body (plugin)
     python -m tagteam contract [--path]   - Print the handoff contract (for agents without the plugin)
     python -m tagteam migrate     - Migrate legacy projects to use config
@@ -195,12 +196,12 @@ def init_command(show_explainer: bool = True) -> int:
     return 0
 
 
-def setup_command(target_dir: str = ".", *, no_plugin: bool = False) -> int:
-    """Copy framework files to target directory."""
+def setup_command(target_dir: str = ".", *, no_plugin: bool = False, **opts) -> int:
+    """Bring the framework files in ``target_dir`` up to the package
+    (Phase 52: ``--preview``, ``--accept PATH``, ``--force``)."""
     from tagteam.setup import main as setup_main
 
-    setup_main(target_dir, no_plugin=no_plugin)
-    return 0
+    return setup_main(target_dir, no_plugin=no_plugin, **opts)
 
 
 _BACKEND_SURFACE = {
@@ -296,10 +297,21 @@ def quickstart_command(args: list[str]) -> int:
     return 0
 
 
-def upgrade_command() -> int:
-    """Re-run setup on all registered projects."""
+def upgrade_command(args: list[str] | None = None) -> int:
+    """Migrate every registered project to the installed package (Phase 52):
+    framework-owned paths are refreshed, custom ones kept and reported with
+    the `tagteam setup DIR --accept PATH` line to run. ``--preview`` writes
+    nothing. Exit 1 if any project raised or had a refused path."""
     from tagteam.registry import get_registered_projects
     from tagteam.setup import main as setup_main
+
+    args = list(args or [])
+    preview = "--preview" in args or "--dry-run" in args
+    unknown = [a for a in args if a not in ("--preview", "--dry-run")]
+    if unknown:
+        print(f"upgrade: unknown option {unknown[0]}")
+        print("usage: tagteam upgrade [--preview]")
+        return 2
 
     projects = get_registered_projects()
 
@@ -310,16 +322,19 @@ def upgrade_command() -> int:
         print("Run 'tagteam setup <dir>' in each project directory first.")
         return 0
 
-    print(f"Upgrading {len(projects)} registered project(s)...")
+    verb = "Previewing" if preview else "Upgrading"
+    print(f"{verb} {len(projects)} registered project(s)...")
     print()
 
     failed = []
+    refused = []
     for project_dir in projects:
         print("=" * 60)
         print(f"Project: {project_dir}")
         print("=" * 60)
         try:
-            setup_main(project_dir, report_user_skills=False)
+            if setup_main(project_dir, report_user_skills=False, preview=preview) != 0:
+                refused.append(project_dir)
         except Exception as exc:
             print(f"  ERROR: {exc}")
             failed.append(project_dir)
@@ -330,13 +345,21 @@ def upgrade_command() -> int:
     if report_legacy_user_skills():
         print()
 
-    if failed:
-        print(f"Completed with {len(failed)} error(s):")
-        for project_dir in failed:
-            print(f"  - {project_dir}")
+    if failed or refused:
+        if failed:
+            print(f"Completed with {len(failed)} error(s):")
+            for project_dir in failed:
+                print(f"  - {project_dir}")
+        if refused:
+            print(f"{len(refused)} project(s) with refused paths (see their reports):")
+            for project_dir in refused:
+                print(f"  - {project_dir}")
         return 1
 
-    print(f"All {len(projects)} project(s) upgraded successfully.")
+    if preview:
+        print(f"Previewed {len(projects)} project(s); nothing written.")
+    else:
+        print(f"All {len(projects)} project(s) upgraded successfully.")
     return 0
 
 
@@ -354,7 +377,8 @@ Quick start (from project root):
 Commands:
   quickstart    Setup + init + session start in one command
   init          Create tagteam.yaml configuration interactively
-  setup [dir]   Copy framework files to a project directory
+  setup [dir]   Bring framework files up to the package: refreshes only what tagteam
+                wrote, keeps custom files (--preview, --accept PATH, --force, --no-plugin)
   session       Manage orchestration session (start/kill/attach)
   watch         Start the watcher daemon for automated orchestration
                 (--mode headless spawns each turn as a fresh agent process)
@@ -381,7 +405,7 @@ Commands:
   registry      list | unregister PATH — the projects `tagteam setup` registered
   tui           Launch the Handoff Saloon terminal UI
   migrate       Migrate legacy projects to use tagteam.yaml
-  upgrade       Re-run setup on all registered projects (after pip upgrade)
+  upgrade       Migrate every registered project to the installed package (--preview)
 
 Advanced setup (individual steps, from project root):
   tagteam setup
@@ -504,9 +528,14 @@ def _dispatch() -> int:
     if command == "init":
         return init_command()
     if command == "setup":
-        rest = [a for a in sys.argv[2:] if a != "--no-plugin"]
-        target = rest[0] if rest else "."
-        return setup_command(target, no_plugin="--no-plugin" in sys.argv[2:])
+        from tagteam.setup import parse_setup_args
+        try:
+            target, opts = parse_setup_args(sys.argv[2:])
+        except ValueError as e:
+            print(f"setup: {e}")
+            print("usage: tagteam setup [dir] [--no-plugin] [--preview] [--accept PATH]... [--force]")
+            return 2
+        return setup_command(target, **opts)
     if command == "hook":
         from tagteam.hook import hook_command
         return hook_command(sys.argv[2:])
@@ -606,7 +635,7 @@ def _dispatch() -> int:
             return 1
         return tui_command(sys.argv[2:])
     if command == "upgrade":
-        return upgrade_command()
+        return upgrade_command(sys.argv[2:])
     if command in ["-h", "--help", "help"]:
         print(HELP_TEXT)
         return 0

@@ -41,8 +41,8 @@ The CLI dispatches to subcommand modules from `tagteam/cli.py`. The interesting 
 - **`session.py` + `iterm.py`** — multi-terminal session management. Backends: `iterm2` (macOS, three tabs), `tmux` (three panes), `manual` (prints commands). `default_backend()` auto-detects.
 - **`server.py`** — Flask-free hand-rolled HTTP server for the web dashboard (the "Saloon"); static assets live in `tagteam/data/web/`.
 - **`tui/`** — optional Textual-based TUI (gated behind `pip install tagteam[tui]`).
-- **`setup.py` (the module, not packaging)** — `tagteam setup` copies framework files from `tagteam/data/` into a target project: `.claude/skills/handoff/SKILL.md`, `templates/`, `docs/checklists/`, sample `docs/roadmap.md`, etc. `needs_setup()` checks a fixed set of marker files to keep setup idempotent.
-- **`registry.py`** — tracks which projects ran `tagteam setup`, used by `tagteam upgrade` to re-copy framework files after a `pip install -U`.
+- **`setup.py` (the module, not packaging)** — `tagteam setup` brings the framework files from `tagteam/data/` (`.claude/skills/handoff/SKILL.md`, `templates/`, `docs/checklists/`, `docs/workflows.md`) up to the package and seeds `docs/roadmap.md` etc. when absent. `needs_setup()` checks a fixed set of marker files to keep setup idempotent. Since Phase 52 it is a thin caller of **`framework.py`**: every managed path is classified against the package and the project's committed `tagteam-manifest.json`; only provably tagteam-written content is refreshed, custom content is kept and reported (`--preview`, `--accept PATH`, `--force`). `migrate.py` is the *older* legacy-config migration, not this.
+- **`registry.py`** — tracks which projects ran `tagteam setup`, used by `tagteam upgrade` to run the same migration over every project after a `pip install -U`.
 
 The handoff workflow itself is defined in `tagteam/data/.claude/skills/handoff/SKILL.md` (also installed at `.claude/skills/handoff/SKILL.md` in this repo). That file is the **contract** agents follow: status banner format, action commands, NEXT-COMMAND box, AMEND semantics. Changes to cycle states or CLI flags need to be reflected there too.
 

@@ -90,17 +90,29 @@ def test_upgrade_smoke_isolated(tmp_path):
     assert visited and set(visited) == {str(project.resolve())}
 
 
-def test_upgrade_smoke_detects_project_change_without_breaking_isolation(tmp_path):
-    """A project that is NOT a no-op (a stale skill file) is reported as
-    exit 1 with the diff, while every isolation check still holds."""
+def test_upgrade_smoke_detects_project_change_without_breaking_isolation(tmp_path, monkeypatch):
+    """A project that is NOT a no-op is reported as exit 1 with the diff,
+    while every isolation check still holds. Since Phase 52 the customised
+    template itself is kept — what changes is the manifest, which drops the
+    entry for bytes that are no longer tagteam's."""
+    monkeypatch.setenv("TAGTEAM_CLAUDE_BIN", "")
     project = tmp_path / "stale"
     _setup_project_isolated(project, tmp_path)
-    skill = project / ".claude" / "skills" / "handoff" / "SKILL.md"
-    skill.write_text("old contract\n", encoding="utf-8")
+    template = project / "templates" / "phase_plan.md"
+    template.write_text("- Lead: Claude\n", encoding="utf-8")
+    # a preview of the project writes nothing at all
+    code, rep = _run(["--project", str(project), "--preview"])
+    assert code == 0, rep
+    assert rep["problems"] == [] and rep["project_diff"] == []
+    assert "keep     templates/phase_plan.md" in rep["helper_stdout"]
+    assert "would be written (preview" in rep["helper_stdout"]
+    # the apply keeps the template and rewrites only the manifest
     code, rep = _run(["--project", str(project)])
     assert code == 1, rep
     assert rep["problems"] == []
-    assert any(d.startswith("~ .claude/skills/handoff/SKILL.md") for d in rep["project_diff"])
+    assert rep["project_diff"] == ["~ tagteam-manifest.json"]
+    assert template.read_text(encoding="utf-8") == "- Lead: Claude\n"
+    assert "keep     templates/phase_plan.md" in rep["helper_stdout"]
 
 
 STUB_INIT = textwrap.dedent('''
@@ -191,3 +203,113 @@ def test_harness_default_interpreter_reports_checkout_package(tmp_path):
         assert code2 == 2 and any("not under the interpreter prefix" in p for p in rep2["problems"])
     else:   # a non-editable CI install: identity passes and the run is a no-op
         assert code2 == 0
+
+
+# ---------------------------------------------------------------------------
+# Phase 52: the built distribution, not the source tree
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def wheel_venv(tmp_path_factory) -> dict:
+    """The checkout built into a wheel and installed (with its dependencies)
+    into a fresh venv. Skips, with the reason, when the build, the venv or
+    the offline install is not possible here — never silently."""
+    root = tmp_path_factory.mktemp("wheelvenv")
+    wheels = root / "wheels"
+    r = subprocess.run([sys.executable, "-m", "pip", "wheel", "-q", "-w", str(wheels), str(REPO)],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        pytest.skip(f"environmental: wheel build failed: {r.stderr.strip()[-300:]}")
+    whl = sorted(wheels.glob("tagteam-*.whl"))
+    if not whl:
+        pytest.skip("environmental: pip wheel produced no tagteam wheel")
+    vdir = root / "venv"
+    try:
+        venv.EnvBuilder(with_pip=True, symlinks=(os.name != "nt")).create(str(vdir))
+    except Exception as e:      # ensurepip missing, etc.
+        pytest.skip(f"environmental: venv with pip unavailable: {e.__class__.__name__}: {e}")
+    py = vdir / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    r = subprocess.run([str(py), "-m", "pip", "install", "-q", "--no-index", "--find-links", str(wheels),
+                        str(whl[-1])], capture_output=True, text=True)
+    if r.returncode != 0:
+        pytest.skip(f"environmental: offline install into the venv failed: {r.stderr.strip()[-300:]}")
+    version = subprocess.run([str(py), "-I", "-c", "import tagteam; print(tagteam.__version__)"],
+                             capture_output=True, text=True, check=True).stdout.strip()
+    return {"python": str(py), "version": version, "wheel": str(whl[-1])}
+
+
+def _old_project(root: Path) -> dict[str, bytes]:
+    """Old Claude-lead scaffolding: rendered templates, a customised
+    checklist, a current workflows.md, real history. Returns the bytes that
+    must survive untouched."""
+    from tagteam import setup as tsetup
+    data = tsetup.get_data_dir()
+    root.mkdir(parents=True)
+    (root / "tagteam.yaml").write_text("agents:\n  lead:\n    name: claude\n  reviewer:\n    name: codex\n", encoding="utf-8")
+    (root / "templates").mkdir()
+    (root / "templates" / "phase_plan.md").write_text("# Phase\n\n## Roles\n- Lead: Claude\n- Reviewer: Codex\n", encoding="utf-8")
+    (root / "docs" / "checklists").mkdir(parents=True)
+    (root / "docs" / "checklists" / "code_review.md").write_bytes(
+        (data / "checklists" / "code_review.md").read_bytes() + b"\n- [ ] our extra check\n")
+    (root / "docs" / "workflows.md").write_bytes((data / "workflows.md").read_bytes())
+    (root / "docs" / "roadmap.md").write_text("# Roadmap\n\n### Phase 1: X\n- **Status:** done\n", encoding="utf-8")
+    (root / "docs" / "decision_log.md").write_text("# Decisions\n\n- kept\n", encoding="utf-8")
+    (root / "docs" / "handoffs").mkdir()
+    (root / "docs" / "handoffs" / "x_plan_rounds.jsonl").write_text('{"round": 1}\n', encoding="utf-8")
+    (root / "CLAUDE.md").write_text("# ours\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "init", "-q"], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "old"], check=True)
+    keep = ["templates/phase_plan.md", "docs/checklists/code_review.md", "docs/roadmap.md",
+            "docs/decision_log.md", "docs/handoffs/x_plan_rounds.jsonl", "CLAUDE.md"]
+    return {k: (root / k).read_bytes() for k in keep}
+
+
+@pytest.mark.parametrize("plugin", ["absent", "present"])
+def test_installed_wheel_migrates_old_project(wheel_venv, tmp_path, monkeypatch, plugin):
+    from tests._plugin_env import fake_plugin, no_cli
+    if plugin == "present":
+        fake_plugin(tmp_path, monkeypatch)          # TAGTEAM_CLAUDE_BIN → fake `claude`, inherited by the helper
+    else:
+        no_cli(monkeypatch)                          # no claude executable at all
+    project = tmp_path / "old"
+    keep = _old_project(project)
+    common = ["--project", str(project), "--python", wheel_venv["python"], "--expect-version", wheel_venv["version"]]
+
+    # preview: writes nothing, says what it would do
+    code, rep = _run([*common, "--preview"])
+    assert code == 0, rep
+    assert rep["problems"] == [] and rep["project_diff"] == []
+    out = rep["helper_stdout"]
+    # rep["problems"] == [] already proved the helper imported the wheel under
+    # the venv prefix at the expected version (the harness's identity check).
+    assert rep["helper"]["version"] == wheel_venv["version"]
+    assert "keep     templates/phase_plan.md — differs from the package" in out
+    assert "keep     docs/checklists/code_review.md — differs from the package" in out
+    assert "create   templates/cycle.md" in out
+    assert "would be written (preview" in out
+
+    # apply: only framework paths move; custom content and history survive
+    code, rep = _run(common)
+    assert code == 1, rep                            # 1 = isolation held, project changed
+    assert rep["problems"] == []
+    diff = rep["project_diff"]
+    assert "+ tagteam-manifest.json" in diff and "+ templates/cycle.md" in diff
+    assert not any(d.startswith("~ ") for d in diff), diff       # nothing existing was modified
+    assert ("+ .claude/skills/handoff/SKILL.md" in diff) == (plugin == "absent")
+    for rel, data in keep.items():
+        assert (project / rel).read_bytes() == data, rel
+    out = rep["helper_stdout"]
+    assert "keep     templates/phase_plan.md" in out and "keep     docs/checklists/code_review.md" in out
+    assert f"accept with: tagteam setup {project.resolve()} --accept templates/phase_plan.md" in out
+    manifest = json.loads((project / "tagteam-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["tagteam"] == wheel_venv["version"]
+    assert "templates/phase_plan.md" not in manifest["files"] and "docs/checklists/code_review.md" not in manifest["files"]
+    assert manifest["files"]["docs/workflows.md"]["tagteam"] == wheel_venv["version"]     # adopted current file
+    assert (".claude/skills/handoff/SKILL.md" in manifest["files"]) == (plugin == "absent")
+
+    # retry: byte-identical no-op
+    code, rep = _run(common)
+    assert code == 0, rep
+    assert rep["problems"] == [] and rep["project_diff"] == []
+    assert "All 1 project(s) upgraded successfully." in rep["helper_stdout"]

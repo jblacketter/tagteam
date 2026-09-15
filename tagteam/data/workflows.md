@@ -104,6 +104,29 @@ reviewer reads the diff and does not re-run the suite.
 | `docs/roadmap.md` | The phase list and each phase's status |
 | `docs/escalations/` | Decision briefs for escalated cycles |
 | `.tagteam/` | Watcher and headless runtime state (not for editing) |
+| `tagteam-manifest.json` | What `setup`/`upgrade` last wrote (path, sha256, version) — commit it |
+
+## Framework files and upgrades
+
+`templates/*.md`, `docs/checklists/*.md`, `docs/workflows.md` and, without the
+plugin, `.claude/skills/handoff/SKILL.md` are framework files. After
+`pip install -U tagteam`, run `tagteam upgrade --preview` (every registered
+project) or `tagteam setup --preview` (this one) to see what would change,
+then run it without `--preview`:
+
+- files whose bytes tagteam wrote (recorded in `tagteam-manifest.json`, or a
+  known vendored contract) are refreshed to the new package;
+- files that match the new package are left alone;
+- anything else is **kept** and reported with the exact
+  `tagteam setup DIR --accept PATH` line that overwrites it. Accepting needs
+  the path tracked and clean in git (so `git checkout -- PATH` undoes it);
+  `--force` lifts only that check.
+
+Pre-plugin flat skills (`.claude/skills/handoff-*.md`) are never deleted
+without `--accept PATH`. Symlinks or directories at a managed path are refused
+and left for you to fix by hand. A second run changes nothing. `tagteam state`
+shows the package version, the manifest version and the plugin status side by
+side — a package update does not move the other two.
 
 ## Choosing and changing roles
 
