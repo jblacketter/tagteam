@@ -9,8 +9,13 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 
 ## Phases
 
+### Phase 57: Model policy by activity kind
+- **Status:** Deferred (2026-09-15) — waits on a concrete need, not on Phase 56. Arbiter decision after reviewing the bench's cost: the 6×2 bench run (~13M input tokens, proxy estimate) was not run. Reopen when one of these is true: (1) the reviewer role moves to Claude, (2) panel lenses run on Claude, or (3) headless turns are used routinely enough that model choice costs real window (recent phases recorded no usage rows: turns ran interactively). At that point, run `tagteam bench` on rounds with exact snapshots first, and let its table decide the policy.
+- **Description:** A `models:` table in `tagteam.yaml` keyed by activity kind (`lead.plan`, `lead.impl`, `reviewer.review`, `panel.<lens>`, `briefer`), every entry optional, merged into the role's validated headless args at spawn; `tagteam state` prints the resolved policy. Source: `docs/research/2026-09-14-better-tagteam/02-agents-and-models.html` step 3.
+- **Depends on:** Phase 56
+
 ### Phase 56: Review bench
-- **Status:** ✅ Complete — plan approved round 2, impl approved round 2 (2026-09-14); gate: 1,976 passed, 5 skipped at `211a1b3`. Branch `phase/review-bench`; PR merge pending. See `docs/phases/review-bench.md`.
+- **Status:** ✅ Complete — plan approved round 2, impl approved round 2 (2026-09-14); gate: 1,976 passed, 5 skipped at `211a1b3`. PR #40 merged 2026-09-15. The first bench run is deferred with Phase 57; snapshots accumulate from every submission meanwhile. See `docs/phases/review-bench.md`.
 - **Description:** Replay recorded reviewer rounds at reviewer cells (provider × model × effort) in isolated replay repositories under a verdict-file contract that never writes the cycle; tabulate verdict agreement with the recorded reviewer, tokens and seconds. Adds exact round snapshots (a git tree pinned under `refs/tagteam/snapshots/` at every lead submission, no model). Dry-run by default, turn cap, resumable. Claude cells only in v1; no manual labelling (waits for `tagteam grade`); planted-defect control is a follow-up. Source: `docs/research/2026-09-14-better-tagteam/`.
 - **Depends on:** Phase 55
 
