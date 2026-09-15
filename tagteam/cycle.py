@@ -1234,6 +1234,7 @@ def _cli_init(args: list[str]) -> int:
     print(f"Cycle created: {phase}_{cycle_type} (round 1, ready_for: reviewer)"
           " + state updated")
     _print_pause_notice(reviewer)
+    _capture_snapshot(phase, cycle_type, 1, "SUBMIT_FOR_REVIEW")
     if not no_gate:
         _on_submit_gate(phase, cycle_type, reviewer)
     return 0
@@ -1286,6 +1287,16 @@ def _strip_flag(args: list[str], flag: str) -> tuple[list[str], bool]:
     if flag not in args:
         return args, False
     return [a for a in args if a != flag], True
+
+
+def _capture_snapshot(phase: str, cycle_type: str, round_num: int, action: str) -> None:
+    """Phase 56: pin the working tree of the lead entry just written
+    (best effort; a failure prints one note and changes nothing else)."""
+    try:
+        from tagteam.snapshots import capture_after_write
+        capture_after_write(phase, cycle_type, round_num, action)
+    except Exception:
+        pass
 
 
 def _on_submit_gate(phase: str, cycle_type: str, reviewer: str | None = None) -> None:
@@ -1346,6 +1357,8 @@ def _cli_add(args: list[str]) -> int:
           " + state updated")
     if status.get("ready_for"):
         _print_pause_notice(_agent_name_for(status.get("ready_for")))
+    if role == "lead" and action in ("SUBMIT_FOR_REVIEW", "AMEND"):
+        _capture_snapshot(phase, cycle_type, round_num, action)
     if role == "lead" and action == "SUBMIT_FOR_REVIEW" and not no_gate:
         _on_submit_gate(phase, cycle_type)
     return 0

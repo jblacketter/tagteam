@@ -55,5 +55,6 @@ tagteam = [
     "data/web/*.css",
     "data/web/*.js",
     "data/panels/*.md",
+    "data/bench/*.md",
     "tui/sounds/*.wav",
 ]

@@ -24,7 +24,7 @@ from pathlib import Path
 # 3.0-arc rule (docs/tagteam-3.0-proposal.md §2): migrations are ADDITIVE
 # ONLY — new tables / nullable columns, never renames or drops — so an
 # older release can still open a newer DB after a downgrade.
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 USAGE_STATUSES = {"ok", "timeout", "nonzero_exit", "no_round", "spawn_failed",
                   "cancelled"}
@@ -384,6 +384,52 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_panels_decided ON panels(event_key) WHERE s
 CREATE INDEX IF NOT EXISTS idx_panels_cycle ON panels(phase, type, id);
 """
 
+# Schema v11 (Phase 56): the exact working tree at every lead submission /
+# AMEND (a commit pinned under refs/tagteam/snapshots/), and review-bench
+# results. Both additive; nothing else reads them.
+_SCHEMA_V11 = """
+CREATE TABLE IF NOT EXISTS submission_snapshots (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    phase        TEXT NOT NULL,
+    type         TEXT NOT NULL,
+    round        INTEGER NOT NULL,
+    entry_ts     TEXT NOT NULL,
+    action       TEXT NOT NULL,
+    commit_sha   TEXT NOT NULL,
+    tree_sha     TEXT NOT NULL,
+    head_sha     TEXT,
+    base_sha     TEXT,
+    ref          TEXT NOT NULL,
+    captured_at  TEXT NOT NULL,
+    UNIQUE (phase, type, round, entry_ts)
+);
+CREATE TABLE IF NOT EXISTS bench_results (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id           TEXT NOT NULL,
+    phase            TEXT NOT NULL,
+    type             TEXT NOT NULL,
+    round            INTEGER NOT NULL,
+    version_ts       TEXT,
+    amended          INTEGER NOT NULL DEFAULT 0,
+    provenance       TEXT NOT NULL CHECK (provenance IN ('snapshot','asserted')),
+    cell             TEXT NOT NULL,
+    commit_sha       TEXT NOT NULL,
+    base_sha         TEXT,
+    recorded_verdict TEXT NOT NULL,
+    verdict          TEXT,
+    n_blocker        INTEGER,
+    n_major          INTEGER,
+    n_minor          INTEGER,
+    findings_json    TEXT,
+    outcome          TEXT NOT NULL CHECK (outcome IN ('ok','failed')),
+    reason           TEXT,
+    usage_row_id     INTEGER,
+    duration_ms      INTEGER,
+    ts               TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_bench_results_pair ON bench_results(phase, type, round, cell, id);
+"""
+
 
 def _migrate(conn: sqlite3.Connection) -> None:
     """Apply schema migrations forward to SCHEMA_VERSION.
@@ -448,6 +494,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
                 conn.execute(f"ALTER TABLE usage ADD COLUMN {name} {decl}")
         conn.execute("PRAGMA user_version = 10")
         current = 10
+    if current < 11:
+        conn.executescript(_SCHEMA_V11)
+        conn.execute("PRAGMA user_version = 11")
+        current = 11
     # Future migrations land here.
     # NOTE: `current > SCHEMA_VERSION` (a newer release wrote this DB) is
     # deliberately tolerated — additive-only migrations mean older code
@@ -1916,3 +1966,79 @@ def render_cycle(
     lines.append(f"STATE: {cycle.get('state')}")
 
     return "\n".join(lines)
+
+
+# ---------- Submission snapshots + review bench (Phase 56) ----------
+
+_SNAPSHOT_COLS = ("phase", "type", "round", "entry_ts", "action", "commit_sha", "tree_sha",
+                  "head_sha", "base_sha", "ref", "captured_at")
+_BENCH_COLS = ("run_id", "phase", "type", "round", "version_ts", "amended", "provenance", "cell",
+               "commit_sha", "base_sha", "recorded_verdict", "verdict", "n_blocker", "n_major",
+               "n_minor", "findings_json", "outcome", "reason", "usage_row_id", "duration_ms", "ts")
+
+
+@_writes
+def add_submission_snapshot(conn: sqlite3.Connection, **fields) -> int:
+    """Insert (or replace, same phase/type/round/entry_ts) one snapshot row. Commits."""
+    unknown = set(fields) - set(_SNAPSHOT_COLS)
+    if unknown:
+        raise ValueError(f"Unknown snapshot fields: {sorted(unknown)}")
+    cols = [c for c in _SNAPSHOT_COLS if c in fields]
+    cur = conn.execute(
+        f"INSERT OR REPLACE INTO submission_snapshots ({', '.join(cols)}) "
+        f"VALUES ({', '.join('?' for _ in cols)})", [fields[c] for c in cols])
+    conn.commit()
+    return cur.lastrowid
+
+
+def submission_snapshots(conn: sqlite3.Connection, phase: str | None = None,
+                         cycle_type: str | None = None) -> list[dict]:
+    """Snapshot rows (oldest first); [] when the table does not exist."""
+    if not table_columns(conn, "submission_snapshots"):
+        return []
+    where, params = [], []
+    if phase is not None:
+        where.append("phase = ?"); params.append(phase)
+    if cycle_type is not None:
+        where.append("type = ?"); params.append(cycle_type)
+    sql = "SELECT * FROM submission_snapshots"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    return _rows(conn.execute(sql + " ORDER BY id", params))
+
+
+def submission_snapshot_for(conn: sqlite3.Connection, phase: str, cycle_type: str,
+                            round_: int, entry_ts: str) -> dict | None:
+    if not table_columns(conn, "submission_snapshots"):
+        return None
+    rows = _rows(conn.execute(
+        "SELECT * FROM submission_snapshots WHERE phase=? AND type=? AND round=? AND entry_ts=?",
+        (phase, cycle_type, int(round_), entry_ts)))
+    return rows[0] if rows else None
+
+
+@_writes
+def add_bench_result(conn: sqlite3.Connection, **fields) -> int:
+    """Insert one bench result row. Commits."""
+    unknown = set(fields) - set(_BENCH_COLS)
+    if unknown:
+        raise ValueError(f"Unknown bench result fields: {sorted(unknown)}")
+    if fields.get("outcome") not in ("ok", "failed"):
+        raise ValueError(f"Invalid bench outcome: {fields.get('outcome')!r}")
+    if fields.get("provenance") not in ("snapshot", "asserted"):
+        raise ValueError(f"Invalid bench provenance: {fields.get('provenance')!r}")
+    cols = [c for c in _BENCH_COLS if c in fields]
+    cur = conn.execute(
+        f"INSERT INTO bench_results ({', '.join(cols)}) VALUES ({', '.join('?' for _ in cols)})",
+        [fields[c] for c in cols])
+    conn.commit()
+    return cur.lastrowid
+
+
+def bench_results(conn: sqlite3.Connection, run_id: str | None = None) -> list[dict]:
+    """Bench result rows (oldest first); [] when the table does not exist."""
+    if not table_columns(conn, "bench_results"):
+        return []
+    if run_id is None:
+        return _rows(conn.execute("SELECT * FROM bench_results ORDER BY id"))
+    return _rows(conn.execute("SELECT * FROM bench_results WHERE run_id=? ORDER BY id", (run_id,)))

@@ -984,7 +984,7 @@ class TestSchemaV10Usage:
                     "VALUES ('2026-09-14T00:00:00+00:00', 'ok', 'p', 'lead', 5, 'conversation')")
         raw.commit(); raw.close()
         c = db.connect(project_dir=str(tmp_path))
-        assert c.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION == 10
+        assert c.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION >= 10
         cols = db.table_columns(c, "usage")
         assert {"model_usage_json", "target_phase", "target_type", "target_round", "kind"} <= cols
         rows = db.get_usage(c)

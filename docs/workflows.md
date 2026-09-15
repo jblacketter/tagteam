@@ -76,6 +76,17 @@ into the phase doc's closeout. Tokens appear only for turns tagteam ran and
 recorded (headless turns, panel lenses, briefs); nothing is reported in
 dollars.
 
+`tagteam bench` replays recorded reviewer rounds against reviewer cells
+(`claude:<model>:<effort>`) to compare each cell's verdict with the recorded
+one: `bench select` lists rounds with a reviewer verdict, `bench run --round
+P:T:N --cell …` is a dry run (grid + proxy token estimate) until `--yes`, and
+`bench table` shows agreement, missed and extra change requests, tokens and
+seconds per cell. Every lead submission and AMEND pins its working tree under
+`refs/tagteam/snapshots/` (no model involved), so replays of new rounds are
+exact; older rounds need `@BASE..REV` and are reported separately as
+`asserted`. Each pair costs about one reviewer turn of window, and agreement is
+with the recorded reviewer, not with ground truth.
+
 ## Verification: the one-run rule
 
 An impl submission costs **one** full-suite run — the one on the record. With

@@ -205,6 +205,7 @@ tagteam interject --list                      # pending / delivered / retired no
 tagteam interject --retire 3                  # close a note without delivering it
 tagteam usage [--by role|cycle|model|kind] [--json]   # per-turn tokens and roll-ups (no dollars in text)
 tagteam report --phase P [--json]             # what a phase took: rounds, bounces, gate/turn time, usage coverage
+tagteam bench select | run --round P:T:N --cell claude:sonnet:high [--yes] | table   # replay reviews at other models/efforts
 ```
 
 How each of these behaves (pause markers, cancel-turn identity checks, interjection scoping, retries, notifications, `tagteam rollback`): [arbiter controls](docs/how-tagteam-works.md#controls).
@@ -318,6 +319,7 @@ tagteam pause --reason "..." / tagteam resume / tagteam cancel-turn
 tagteam interject "note" [--to lead|reviewer] / --list / --retire ID
 tagteam usage [--by role|cycle|model|kind]... [--json]
 tagteam report --phase P [--json]      # read-only phase measurement; paste into the phase doc's closeout
+tagteam bench select|run|table         # review bench: dry run unless --yes; ~1 reviewer turn per pair
 tagteam serve [--theme cockpit|saloon] [--host H] [--port N] [--max-sse N]   # the cockpit (default); saloon = legacy dashboard
 tagteam lead "message" [--new] [--conversation ID] / --list           # talk to the lead from the terminal
 tagteam hub [--list [--json]] [--all] [--port 8090]                   # all registered projects; cockpits at /p/<id>/
