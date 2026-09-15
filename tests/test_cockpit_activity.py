@@ -689,6 +689,7 @@ function loadLead() { return Promise.resolve(); }
 function leadStreamPath(cid) { return '/api/lead/' + cid + '/events'; }
 var LEAD = { lines: {}, cursor: {} };
 var NOW = null;
+var CYCLE_ID = null;
 """
 
 
@@ -798,7 +799,8 @@ class TestLanesBehaviour:
     def test_reviewer_lane_ascending_streams_and_gets_its_verdict(self):
         res = _run_activity_harness(r"""
 NOW = { agents: { lead: 'Claude', reviewer: 'Codex' } };
-function item(id, role, kind, status, started, round, extra) { var o = { id: id, kind: kind, role: role, agent: role === 'reviewer' ? 'Codex' : (role === 'lead' ? 'Claude' : null), status: status, started_at: started, ref: { log: id }, stem: id, age_s: 1, duration_ms: 1000, round: round }; Object.keys(extra || {}).forEach(function (k) { o[k] = extra[k]; }); return o; }
+function item(id, role, kind, status, started, round, extra) { var o = { id: id, kind: kind, role: role, agent: role === 'reviewer' ? 'Codex' : (role === 'lead' ? 'Claude' : null), status: status, started_at: started, ref: { log: id }, stem: id, age_s: 1, duration_ms: 1000, round: round, phase: 'feat', type: 'impl' }; Object.keys(extra || {}).forEach(function (k) { o[k] = extra[k]; }); return o; }
+CYCLE_ID = 'feat_impl'; setVerdictCycle(CYCLE_ID); setLaneCycle(CYCLE_ID);
 var rl = $('reviewer-timeline'), ll = $('lead-timeline');
 // two rounds arrive newest-first from the API; the lane must be ascending
 [item('turn:rev-r2', 'reviewer', 'cycle', 'running', '2026-01-01T00:20:00+00:00', 2),
@@ -813,8 +815,8 @@ var leadOrder = ll.children.map(function (r) { return r.dataset.id; });
 var running = RLANE.rows['turn:rev-r2']; var runningNode = running.row;
 appendActLine(running, '[codex] reading the diff');
 // the rounds arrive: round 1 was REQUEST_CHANGES, round 2 approves once it ends
-ROUNDS_BY_N = { 1: { reviewer: { action: 'REQUEST_CHANGES', text: 'Please fix the postal code case.' } }, 2: { reviewer: { action: 'APPROVE', text: 'Approved.' } } };
-refreshVerdicts();
+applyRounds('feat_impl', [{ round: 1, entries: [{ role: 'reviewer', action: 'REQUEST_CHANGES', content: 'Please fix the postal code case.' }] },
+                          { round: 2, entries: [{ role: 'reviewer', action: 'APPROVE', content: 'Approved.' }] }]);
 var v1 = RLANE.rows['turn:rev-r1'].verdictEl.textContent;
 var v2running = RLANE.rows['turn:rev-r2'].verdictEl.textContent;   // still running: no verdict yet
 var gateV = RLANE.rows['turn:gate-r2'].verdictEl.textContent;
@@ -900,3 +902,77 @@ class TestViewportFit:
         assert "fitLanes();" in js[js.index("function renderNow("):js.index("function renderOwedChip(")]
         assert "scard.classList.add('compact')" in js
         assert ".card.start.compact" in css and ".lanes .lane { min-height: 0; overflow: hidden; }" in css
+
+
+class TestReviewerLanePerCycle:
+    """Phase 58: the reviewer lane shows the current cycle; earlier cycles sit
+    behind "Show last session"; verdict chips belong to the cycle they came from."""
+
+    _ITEM = r"""
+function rev(id, phase, type, round, started) { return { id: id, kind: 'cycle', role: 'reviewer', agent: 'Codex', status: 'finished', started_at: started, ref: { log: id }, stem: id, age_s: 1, duration_ms: 1000, round: round, phase: phase, type: type }; }
+function vis(store) { return Object.keys(store.rows).filter(function (id) { return !store.rows[id].row.classList.contains('hidden'); }).sort(); }
+function useCycle(c) { CYCLE_ID = c; setVerdictCycle(c); setLaneCycle(c); }
+"""
+
+    def test_scope_empty_state_and_toggle(self):
+        res = _run_activity_harness(self._ITEM + r"""
+useCycle('alpha_impl');
+upsertRow(RLANE, rev('turn:a1', 'alpha', 'impl', 1, '2026-01-01T00:00:00+00:00'));
+upsertRow(RLANE, rev('turn:a2', 'alpha', 'impl', 2, '2026-01-01T00:10:00+00:00'));
+renderReviewerLaneScope();
+var onA = { vis: vis(RLANE), btnHidden: $('btn-reviewer-last').classList.contains('hidden'), emptyHidden: $('reviewer-empty').classList.contains('hidden') };
+useCycle('beta_plan');                                      // a new cycle: blank by default
+var onB = { vis: vis(RLANE), btnHidden: $('btn-reviewer-last').classList.contains('hidden'), btn: $('btn-reviewer-last').textContent,
+            empty: $('reviewer-empty').textContent, emptyHidden: $('reviewer-empty').classList.contains('hidden') };
+toggleLastSession();
+var shown = { vis: vis(RLANE), btn: $('btn-reviewer-last').textContent, label: RLANE.rows['turn:a1'].cycleEl.textContent,
+              dim: RLANE.rows['turn:a1'].row.classList.contains('other-cycle'), emptyHidden: $('reviewer-empty').classList.contains('hidden') };
+upsertRow(RLANE, rev('turn:b1', 'beta', 'plan', 1, '2026-01-01T01:00:00+00:00'));   // a patch keeps the scope classes
+upsertRow(RLANE, rev('turn:a1', 'alpha', 'impl', 1, '2026-01-01T00:00:00+00:00'));
+var afterPatch = vis(RLANE);
+useCycle('gamma_impl');                                     // switching again hides earlier rows again
+var onC = { vis: vis(RLANE), btn: $('btn-reviewer-last').textContent, empty: $('reviewer-empty').textContent };
+var RESULT = { onA: onA, onB: onB, shown: shown, afterPatch: afterPatch, onC: onC };
+""")
+        assert res["onA"] == {"vis": ["turn:a1", "turn:a2"], "btnHidden": True, "emptyHidden": True}
+        assert res["onB"]["vis"] == [] and res["onB"]["btnHidden"] is False and res["onB"]["btn"] == "Show last session"
+        assert res["onB"]["empty"] == "No reviews yet for beta · plan." and res["onB"]["emptyHidden"] is False
+        assert res["shown"]["vis"] == ["turn:a1", "turn:a2"] and res["shown"]["btn"] == "Hide last session"
+        assert res["shown"]["label"] == "alpha · impl" and res["shown"]["dim"] is True and res["shown"]["emptyHidden"] is True
+        assert res["afterPatch"] == ["turn:a1", "turn:a2", "turn:b1"]
+        assert res["onC"] == {"vis": [], "btn": "Show last session", "empty": "No reviews yet for gamma · impl."}
+
+    def test_verdict_cache_is_bound_to_its_cycle(self):
+        res = _run_activity_harness(self._ITEM + r"""
+var A = [{ round: 1, entries: [{ role: 'reviewer', action: 'REQUEST_CHANGES', content: 'A says fix' }] }];
+var B = [{ round: 1, entries: [{ role: 'reviewer', action: 'APPROVE', content: 'B approves' }] }];
+function chip(id) { return RLANE.rows[id].verdictEl.textContent; }
+useCycle('alpha_impl');
+upsertRow(RLANE, rev('turn:a1', 'alpha', 'impl', 1, '2026-01-01T00:00:00+00:00'));
+var appliedA = applyRounds('alpha_impl', A);
+var aChip = chip('turn:a1');
+useCycle('beta_impl');
+upsertRow(RLANE, rev('turn:b1', 'beta', 'impl', 1, '2026-01-01T01:00:00+00:00'));
+var beforeB = chip('turn:b1');                               // B has not loaded: no chip (never A's round 1)
+var aAfterSwitch = chip('turn:a1');                          // A's row lost its chip with its cache
+var lateA = applyRounds('alpha_impl', A);                    // a slow A response lands after the switch
+var afterLateA = chip('turn:b1');
+var appliedB = applyRounds('beta_impl', B);
+var bChip = chip('turn:b1'), aChipOnB = chip('turn:a1');
+var staleAgain = applyRounds('alpha_impl', A);               // out of order: B, then a stale A
+var RESULT = { appliedA: appliedA, aChip: aChip, beforeB: beforeB, aAfterSwitch: aAfterSwitch, lateA: lateA,
+               afterLateA: afterLateA, appliedB: appliedB, bChip: bChip, aChipOnB: aChipOnB, staleAgain: staleAgain,
+               bStill: chip('turn:b1'), cache: ROUNDS.cycle };
+""")
+        assert res["appliedA"] is True and res["aChip"] == "changes requested"
+        assert res["beforeB"] == "" and res["aAfterSwitch"] == ""
+        assert res["lateA"] is False and res["afterLateA"] == ""
+        assert res["appliedB"] is True and res["bChip"] == "approved" and res["aChipOnB"] == ""
+        assert res["staleAgain"] is False and res["bStill"] == "approved" and res["cache"] == "beta_impl"
+
+    def test_button_and_markup_present(self):
+        html = (WEB / "cockpit.html").read_text(encoding="utf-8")
+        js = (WEB / "cockpit.js").read_text(encoding="utf-8")
+        assert 'id="btn-reviewer-last"' in html and "Show last session" in html
+        assert "ROUNDS_BY_N" not in js
+        assert "$('btn-reviewer-last').addEventListener('click'" in js

@@ -36,6 +36,14 @@ def _isolated_port_leases(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_watcher_locks(tmp_path, monkeypatch):
+    """Phase 58: the one-watcher lock lives under ~/.tagteam/watchers/ — tests
+    must never touch the real one. Outside tmp_path so project snapshots stay clean."""
+    monkeypatch.setenv("TAGTEAM_WATCHER_LOCK_DIR", str(tmp_path.parent / (tmp_path.name + "_watcher_locks")))
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _no_real_claude_cli(monkeypatch):
     """Phase 48: plugin detection shells out to `claude plugin list --json`.
     The suite must never ask the developer's real CLI — an empty override

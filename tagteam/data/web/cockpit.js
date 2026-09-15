@@ -151,6 +151,7 @@
     var st = n.state || {};
     var phase = st.phase, type = st.type;
     CYCLE_ID = (phase && type) ? phase + '_' + type : null;
+    setVerdictCycle(CYCLE_ID); setLaneCycle(CYCLE_ID);   // Phase 58: a new cycle clears chips and the reviewer lane
     var projName = (n.project_dir || '').split('/').filter(Boolean).slice(-1)[0] || 'project';
     $('now-project').textContent = projName; $('now-project').title = n.project_dir || '';
     document.title = projName + ' — Tagteam';
@@ -513,21 +514,12 @@
   function loadFeed() {
     if (!CYCLE_ID) { $('feed-list').innerHTML = ''; $('feed-empty').classList.remove('hidden'); $('feed-empty').textContent = 'No phase in progress.'; return Promise.resolve(); }
     var st = NOW.state;
+    var requested = CYCLE_ID;
     return Promise.all([getJSON('/api/rounds/' + encodeURIComponent(CYCLE_ID)), getJSON('/api/briefs?phase=' + encodeURIComponent(st.phase) + '&type=' + encodeURIComponent(st.type))]).then(function (rs) {
       var rounds = (rs[0].body && rs[0].body.rounds) || [];
       var briefs = (rs[1].body && rs[1].body.briefs) || [];
-      // Phase 45: the verdict of each round for the reviewer lane's cards
-      var byN = {};
-      rounds.forEach(function (r) {
-        var rec = byN[r.round] = {};
-        (r.entries || []).forEach(function (e) {
-          if (e.role === 'reviewer' && e.action && e.action !== 'AMEND') rec.reviewer = { action: e.action, text: e.content || '' };
-          if (e.role === 'gatekeeper' || e.action === 'GATE_PASS' || e.action === 'GATE_BOUNCE') rec.gate = { action: e.action, text: e.content || '' };
-        });
-        if (!rec.reviewer && r.action && r.reviewer_text) rec.reviewer = { action: r.action, text: r.reviewer_text };
-      });
-      ROUNDS_BY_N = byN;
-      refreshVerdicts();
+      // Phase 45/58: the verdict of each round for the reviewer lane's cards — only for the cycle this response was for
+      applyRounds(requested, rounds);
       var items = [];
       rounds.forEach(function (r) {
         (r.entries || []).forEach(function (e, i) {
@@ -934,7 +926,59 @@
   var RLANE = makeStore('rlane', 'reviewer-timeline', true);
   var LLANE = makeStore('llane', 'lead-timeline', true);
   var VERDICT_WORD = { APPROVE: 'approved', REQUEST_CHANGES: 'changes requested', ESCALATE: 'escalated', NEED_HUMAN: 'question for you', GATE_PASS: 'passed', GATE_BOUNCE: 'bounced' };
-  var ROUNDS_BY_N = {};   // round -> {reviewer: {action, text}, gate: {action, text}} from /api/rounds (loadFeed)
+  // Phase 58: the verdict cache belongs to one cycle: {cycle, byN: round -> {reviewer, gate}} from /api/rounds.
+  var ROUNDS = { cycle: null, byN: {} };
+  var LANE_CYCLE = null;          // the cycle the reviewer lane is scoped to
+  var SHOW_LAST_SESSION = false;  // reveal rows from other cycles ("Show last session")
+  function cycleKey(it) { return (it && it.phase && it.type) ? it.phase + '_' + it.type : null; }
+  function cycleLabel(it) { return (it && it.phase) ? it.phase + ' · ' + (it.type || '') : 'another cycle'; }
+  function setVerdictCycle(cycle) {
+    if (cycle === ROUNDS.cycle) return;
+    ROUNDS = { cycle: cycle, byN: {} };
+    refreshVerdicts();
+  }
+  function applyRounds(requested, rounds) {
+    // a response for a cycle that is no longer current (or not yet adopted) is dropped
+    if (!requested || requested !== CYCLE_ID || requested !== ROUNDS.cycle) return false;
+    var byN = {};
+    (rounds || []).forEach(function (r) {
+      var rec = byN[r.round] = {};
+      (r.entries || []).forEach(function (e) {
+        if (e.role === 'reviewer' && e.action && e.action !== 'AMEND') rec.reviewer = { action: e.action, text: e.content || '' };
+        if (e.role === 'gatekeeper' || e.action === 'GATE_PASS' || e.action === 'GATE_BOUNCE') rec.gate = { action: e.action, text: e.content || '' };
+      });
+      if (!rec.reviewer && r.action && r.reviewer_text) rec.reviewer = { action: r.action, text: r.reviewer_text };
+    });
+    ROUNDS = { cycle: requested, byN: byN };
+    refreshVerdicts();
+    return true;
+  }
+  function setLaneCycle(cycle) {
+    if (cycle === LANE_CYCLE) return;
+    LANE_CYCLE = cycle; SHOW_LAST_SESSION = false;
+    renderReviewerLaneScope();
+  }
+  function applyLaneScope(rec) {
+    var other = cycleKey(rec.item) !== LANE_CYCLE;
+    rec.row.classList.toggle('other-cycle', other);
+    rec.row.classList.toggle('hidden', other && !SHOW_LAST_SESSION);
+    if (rec.cycleEl) { rec.cycleEl.textContent = other ? cycleLabel(rec.item) : ''; rec.cycleEl.classList.toggle('hidden', !other); }
+    return other;
+  }
+  function renderReviewerLaneScope() {
+    var other = 0, current = 0;
+    Object.keys(RLANE.rows).forEach(function (id) { if (applyLaneScope(RLANE.rows[id])) other++; else current++; });
+    var btn = $('btn-reviewer-last');
+    btn.classList.toggle('hidden', !other);
+    btn.textContent = SHOW_LAST_SESSION ? 'Hide last session' : 'Show last session';
+    btn.setAttribute && btn.setAttribute('aria-pressed', SHOW_LAST_SESSION ? 'true' : 'false');
+    var empty = $('reviewer-empty');
+    var parts = LANE_CYCLE ? LANE_CYCLE.match(/^(.*)_(plan|impl)$/) : null;
+    empty.textContent = parts ? 'No reviews yet for ' + parts[1] + ' · ' + parts[2] + '.' : 'No reviews yet.';
+    empty.classList.toggle('hidden', current > 0 || (SHOW_LAST_SESSION && other > 0));
+    return { current: current, other: other };
+  }
+  function toggleLastSession() { SHOW_LAST_SESSION = !SHOW_LAST_SESSION; return renderReviewerLaneScope(); }
   function inReviewerLane(it) { return (it.role === 'reviewer' || it.role === 'gatekeeper') && (it.kind === 'cycle' || it.kind === 'gate' || it.kind === 'panel' || it.kind === 'panel_lens'); }
   function inLeadLane(it) { return it.role === 'lead' && it.kind === 'cycle'; }
   function actSortKey(it) { return (isRunning(it) ? '1' : '0') + '|' + String(it.started_at || '') + '|' + String(it.id || ''); }
@@ -967,7 +1011,7 @@
       $('activity-empty').classList.toggle('hidden', !!list.firstChild);
       $('activity-more').classList.toggle('hidden', !b.truncated);
       $('activity-meta').textContent = items.length ? (items.length + ' turn' + (items.length === 1 ? '' : 's') + (b.truncated ? ' (newest ' + b.limit + ')' : '')) : '';
-      $('reviewer-empty').classList.toggle('hidden', !!$('reviewer-timeline').firstChild);
+      renderReviewerLaneScope();
       renderLeadEmpty();
     }).catch(function (e) { console.error('[cockpit] activity failed', e); });
   }
@@ -1029,6 +1073,7 @@
     rec.kindEl = el('span', 'kind'); head.appendChild(rec.kindEl);
     rec.statusEl = el('span', 'status'); head.appendChild(rec.statusEl);
     rec.verdictEl = el('span', 'verdict hidden'); head.appendChild(rec.verdictEl);
+    rec.cycleEl = el('span', 'cycle-tag hidden'); head.appendChild(rec.cycleEl);
     head.appendChild(el('span', 'spacer'));
     rec.textBtn = el('button', 'link-btn hidden', 'what it said'); rec.textBtn.type = 'button';
     rec.textBtn.addEventListener('click', function () { toggleActText(rec); });
@@ -1059,7 +1104,8 @@
     if (isRunning(it) || it.round == null) return null;
     if (it.kind === 'gate') return it.raw_status === 'pass' ? { word: VERDICT_WORD.GATE_PASS, cls: 'ok' } : it.raw_status === 'bounce' ? { word: VERDICT_WORD.GATE_BOUNCE, cls: 'warn' } : null;
     if (it.kind === 'cycle' && it.role === 'reviewer') {
-      var r = ROUNDS_BY_N[it.round]; var a = r && r.reviewer && r.reviewer.action;
+      if (cycleKey(it) !== CYCLE_ID || ROUNDS.cycle !== CYCLE_ID) return null;   // Phase 58: only this cycle's verdicts
+      var r = ROUNDS.byN[it.round]; var a = r && r.reviewer && r.reviewer.action;
       if (!a || !VERDICT_WORD[a]) return null;
       return { word: VERDICT_WORD[a], cls: a === 'APPROVE' ? 'ok' : (a === 'REQUEST_CHANGES' ? 'changes' : 'warn'), text: r.reviewer.text };
     }
@@ -1086,6 +1132,7 @@
     rec.openBtn.textContent = rec.box.classList.contains('hidden') ? (isConv ? 'open chat' : 'log') : 'hide';
     rec.openBtn.classList.toggle('hidden', !(it.ref || rec.lines.length));
     if (!isRunning(it) && rec.lines.length && !rec.box.classList.contains('hidden')) rec.openBtn.textContent = 'hide';
+    if (rec.store === RLANE) applyLaneScope(rec);   // className was just reset
   }
   function refreshVerdicts() { Object.keys(RLANE.rows).forEach(function (id) { patchActRow(RLANE.rows[id]); }); Object.keys(ACT.rows).forEach(function (id) { patchActRow(ACT.rows[id]); }); }
   function toggleActText(rec) {
@@ -1371,6 +1418,7 @@
     LEAD.current = this.value; try { localStorage.setItem('tagteam.cockpit.lead', LEAD.current); } catch (e) { /* ignore */ }
     loadConversation(LEAD.current, true);
   });
+  $('btn-reviewer-last').addEventListener('click', function () { toggleLastSession(); });
   $('btn-lead-new').addEventListener('click', function () {
     postJSON('/api/lead/new', {}).then(function (r) {
       if (!r.ok) { toast('err', (r.body && r.body.message) || 'Could not start a chat'); return; }

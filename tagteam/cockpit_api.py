@@ -724,8 +724,17 @@ def _activity_from_db(conn, limit: int) -> list[dict]:
     items: list[dict] = []
     # usage rows: cycle turns (kind NULL/'cycle'), panel lenses ('panel:<lens>'),
     # briefer (role 'briefer'). Conversation rows come from conversation_turns.
+    from tagteam import db as _db
+    # Phase 58: a turn belongs to the cycle entry it was dispatched to produce
+    # (v10 target identity) when recorded; older rows / schemas use the stored cycle.
+    has_target = {"target_phase", "target_type", "target_round"} <= _db.table_columns(conn, "usage")
+    target_cols = ", target_phase, target_type, target_round" if has_target else ""
     for r in _rows(conn, "SELECT id, ts, phase, type, round, role, agent, status, duration_ms,"
-                         " log_path, kind FROM usage ORDER BY id DESC LIMIT ?", (limit,)):
+                         " log_path, kind" + target_cols + " FROM usage ORDER BY id DESC LIMIT ?", (limit,)):
+        if r.get("target_phase") and r.get("target_type"):
+            r["phase"], r["type"] = r["target_phase"], r["target_type"]
+            if r.get("target_round") is not None:
+                r["round"] = r["target_round"]
         kind = r.get("kind") or ""
         if kind == "conversation":
             continue

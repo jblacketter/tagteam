@@ -28,8 +28,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -207,11 +209,104 @@ def _tagteam_argv() -> list[str]:
     return [sys.executable, "-m", "tagteam"]
 
 
+SPAWN_PAUSE_ENV = "TAGTEAM_TEST_WATCHER_SPAWN_PAUSE_S"
+WATCHER_STOP_WAIT_S = 10.0
+
+
+class WatcherOwner:
+    """Phase 58: the watchers one `tagteam serve` process started.
+
+    `spawn` holds the lock for exactly: closing check → `Popen` → record.
+    `close` takes the same lock to set `closing` and snapshot, so at the
+    snapshot every start has either not reached `Popen` (it will see
+    `closing` and spawn nothing) or its child is recorded. Shutdown waits for
+    an in-progress spawn to finish registering; the lock is never held across
+    a status scan or a readiness wait. Signalling goes through the `Popen`
+    handle: the child is unreaped, so its pid cannot be reused while
+    `poll()` is None."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._closing = False
+        self._children: list[dict] = []
+
+    @property
+    def closing(self) -> bool:
+        return self._closing
+
+    def spawn(self, argv: list[str], *, source: str, **popen_kw) -> subprocess.Popen | None:
+        with self._lock:
+            if self._closing:
+                return None
+            proc = subprocess.Popen(argv, **popen_kw)
+            pause = os.environ.get(SPAWN_PAUSE_ENV)
+            if pause:   # tests only: shutdown arriving between child creation and registration
+                try:
+                    time.sleep(float(pause))
+                except ValueError:
+                    pass
+            self._children.append({"proc": proc, "pid": proc.pid, "ident": procs.identity(proc.pid),
+                                   "source": source})
+            return proc
+
+    def children(self) -> list[dict]:
+        with self._lock:
+            return list(self._children)
+
+    def close(self) -> list[dict]:
+        """Refuse further spawns and return every recorded child (one step)."""
+        with self._lock:
+            self._closing = True
+            return list(self._children)
+
+
+def stop_owned_watchers(project_dir: str | Path, owner: WatcherOwner, *,
+                        wait_s: float = WATCHER_STOP_WAIT_S) -> list[str]:
+    """Shutdown: close the owner, then terminate, reap and report each child
+    it started. Watchers it did not start are reported, never signalled."""
+    from tagteam.cockpit_api import watcher_status
+    from tagteam.watcher import read_pidfile, remove_pidfile
+    root = Path(project_dir)
+    lines: list[str] = []
+    children = owner.close()
+    owned_pids = {c["pid"] for c in children}
+    for c in children:
+        proc, pid = c["proc"], c["pid"]
+        code = proc.poll()
+        if code is not None:
+            lines.append(f"Watcher pid {pid} (started by this cockpit) had already exited (code {code}).")
+        else:
+            try:
+                proc.terminate()
+            except OSError as e:
+                lines.append(f"Watcher pid {pid}: could not signal it ({e}) — stop it with: kill {pid}")
+                continue
+            try:
+                proc.wait(wait_s)
+                lines.append(f"Stopped watcher pid {pid} (started by this cockpit).")
+            except subprocess.TimeoutExpired:
+                lines.append(f"Watcher pid {pid} did not exit within {wait_s:.0f} s — stop it with: kill {pid}")
+                continue
+        rec = read_pidfile(root)
+        if rec and rec.get("pid") == pid:
+            remove_pidfile(root, pid)
+    try:
+        ws = watcher_status(root)
+    except Exception:
+        ws = {}
+    if ws.get("running") and ws.get("pid") not in owned_pids:
+        lines.append(f"Watcher pid {ws.get('pid')} was not started by this cockpit — left running.")
+    return lines
+
+
 def start_watcher(project_dir: str | Path, *, mode: str = "headless",
-                  wait_s: float = WATCHER_READY_WAIT_S) -> dict:
+                  wait_s: float = WATCHER_READY_WAIT_S, owner: WatcherOwner | None = None,
+                  source: str = "watch-start") -> dict:
     """Spawn `tagteam watch --mode <mode> --pidfile` detached; wait ≤ wait_s
     for an identity-bound pidfile OR an early exit. Returns {ok, pid,
-    message, log}. Refuses when a watcher already runs."""
+    message, log}. Refuses when a watcher already runs. With `owner` (the
+    server), the child is created and recorded by `owner.spawn` so shutdown
+    can stop it, whether or not it ever becomes ready."""
     from tagteam.cockpit_api import watcher_status
     from tagteam.watcher import read_pidfile
     root = Path(project_dir)
@@ -231,11 +326,17 @@ def start_watcher(project_dir: str | Path, *, mode: str = "headless",
     env = dict(os.environ)
     for k in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"):
         env.pop(k, None)
+    argv = _tagteam_argv() + ["watch", "--mode", mode, "--pidfile"]
     with log.open("ab") as lf:
         try:
-            proc = subprocess.Popen(_tagteam_argv() + ["watch", "--mode", mode, "--pidfile"],
-                                    cwd=str(root), stdin=subprocess.DEVNULL, stdout=lf, stderr=lf,
-                                    env=env, **kw)
+            if owner is not None:
+                proc = owner.spawn(argv, source=source, cwd=str(root), stdin=subprocess.DEVNULL,
+                                   stdout=lf, stderr=lf, env=env, **kw)
+                if proc is None:
+                    return {"ok": False, "message": "the cockpit is shutting down — not starting a watcher"}
+            else:
+                proc = subprocess.Popen(argv, cwd=str(root), stdin=subprocess.DEVNULL, stdout=lf, stderr=lf,
+                                        env=env, **kw)
         except OSError as e:
             return {"ok": False, "message": f"could not start the watcher: {e}", "log": str(log)}
     deadline = time.monotonic() + wait_s
@@ -247,6 +348,11 @@ def start_watcher(project_dir: str | Path, *, mode: str = "headless",
                 tail = log.read_text(encoding="utf-8", errors="replace")[-600:]
             except OSError:
                 pass
+            refused = re.search(r"refused: another watcher is already running for this project \(pid (\d+)", tail)
+            if refused:
+                return {"ok": False, "exited": rc, "already": True, "pid": int(refused.group(1)),
+                        "message": f"a watcher is already running (pid {refused.group(1)})", "log": str(log),
+                        "log_tail": tail}
             return {"ok": False, "exited": rc, "message": f"the watcher exited immediately (code {rc}) — "
                     f"it rejected its configuration; see {log}", "log": str(log), "log_tail": tail}
         rec = read_pidfile(root)
@@ -359,7 +465,7 @@ def _partial_state(root: Path, row: dict) -> dict:
 def launch(project_dir: str | Path, *, intent: dict, config: dict | None, by: str,
            ensure_watcher: bool = True, retry: bool = False, watcher_mode: str = "headless",
            send=None, watcher_wait_s: float = WATCHER_READY_WAIT_S,
-           background: bool = False) -> tuple[int, dict]:
+           background: bool = False, watcher_owner: WatcherOwner | None = None) -> tuple[int, dict]:
     """The composite Start. Returns (http_status, payload).
 
     `background=True` (the server): the lead's turn is STARTED synchronously
@@ -438,7 +544,7 @@ def launch(project_dir: str | Path, *, intent: dict, config: dict | None, by: st
     handle_box: dict = {}
     try:
         return _attempt(root, key, row, live, config, by, ensure_watcher, watcher_mode, watcher_wait_s,
-                        send, background, _persist, _fail, handle_box)
+                        send, background, _persist, _fail, handle_box, watcher_owner=watcher_owner)
     except Exception as e:
         hd = handle_box.get("handle")
         if hd is not None:
@@ -451,7 +557,7 @@ def launch(project_dir: str | Path, *, intent: dict, config: dict | None, by: st
 
 def _attempt(root: Path, key: str, row: dict, live: dict, config, by: str, ensure_watcher: bool,
              watcher_mode: str, watcher_wait_s: float, send, background: bool, _persist, _fail,
-             handle_box: dict) -> tuple[int, dict]:
+             handle_box: dict, watcher_owner: WatcherOwner | None = None) -> tuple[int, dict]:
     from tagteam import db, lead_chat
     watcher_info = None
     if ensure_watcher:
@@ -460,7 +566,8 @@ def _attempt(root: Path, key: str, row: dict, live: dict, config, by: str, ensur
         if isinstance(wp, int) and wp > 0 and not _owner_gone(wp, row.get("watcher_ident")):
             watcher_info = {"ok": True, "pid": wp, "reused": True, "message": f"watcher pid {wp} still running"}
         else:
-            watcher_info = start_watcher(root, mode=watcher_mode, wait_s=watcher_wait_s)
+            owner_kw = {"owner": watcher_owner, "source": "launch"} if watcher_owner is not None else {}
+            watcher_info = start_watcher(root, mode=watcher_mode, wait_s=watcher_wait_s, **owner_kw)
             if watcher_info.get("already"):
                 watcher_info["ok"] = True
             if watcher_info.get("pid"):

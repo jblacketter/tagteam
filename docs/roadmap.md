@@ -499,6 +499,9 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 ### New session starts with a fresh reviewer view (for later, unscheduled)
 - **Status:** Scheduled as Phase 58 (`docs/phases/cockpit-session-lifecycle.md`). Arbiter request 2026-09-15. When a new session starts, the reviewer screen still shows the previous session's status, so it reads as if that work is current. Wanted: the reviewer view starts fresh by default, or offers a clear button. History stays on disk (cycle records, turn logs); this is about what the screen shows at session start.
 
+### Lead lane: cycle-turn cards from earlier cycles (for later, unscheduled)
+- **Status:** Found during Phase 58 (2026-09-15); not started. The lead lane's cycle-turn cards (`LLANE` in `cockpit.js`) come from the same project-wide `/api/activity` list the reviewer lane used and are not scoped to the current cycle, so earlier cycles' lead turns stay visible as if current. Phase 58 scoped only the reviewer lane (arbiter request). The same `cycleKey` / "Show last session" pattern would apply.
+
 ### Reviewer agents in the plugin (deferred from Phase 48)
 - **Status:** Deferred 2026-09-03 by arbiter ruling; depends on Phase 50 (read-only mode). Ship `codex-brief` (the submission drafter) in the plugin only after Phase 50 gives the CLI an enforced read-only mode, and extend Phase 49's user-level conflict report to agents. `doc-drift` is generic, not tagteam-specific — leave it out of the plugin. Before scheduling: check whether the user-level `codex-brief` briefs are actually what gets submitted or get rewritten; if rewritten, the agent is not earning its keep.
 

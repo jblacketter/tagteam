@@ -3,7 +3,7 @@
 ## Status
 - [x] Planning
 - [x] Approved: plan round 3 (2026-09-15)
-- [ ] Implementation: phase/cockpit-session-lifecycle
+- [x] Implementation: phase/cockpit-session-lifecycle
 - [ ] Implementation Review
 - [ ] Complete
 
@@ -90,6 +90,13 @@ as a backlog item); multi-host locking; the iTerm2 `cd` issue.
 ## Technical Approach
 
 ### 1. Watcher lock and refusal
+*(Implementation deviation, recorded for review: the lock file is
+`~/.tagteam/watchers/<sha256(resolved project path)[:20]>.lock`
+(`TAGTEAM_WATCHER_LOCK_DIR` overrides it, like `TAGTEAM_PORT_LEASE_DIR`), not
+`.tagteam/watcher.lock`. The existing 3.0-arc test
+`test_flag_off_watch_creates_no_new_files` requires a bare `tagteam watch` to
+write no new file in the project. Everything else below is unchanged.)*
+
 New in `watcher.py`:
 
 ```

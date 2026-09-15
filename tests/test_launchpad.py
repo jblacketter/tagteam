@@ -338,14 +338,15 @@ class TestServerEndpoints:
     def test_watch_session_and_launch_endpoints(self, tmp_path, fake_path, monkeypatch):
         p = _proj(tmp_path)
         started = []
-        monkeypatch.setattr(L, "start_watcher", lambda root, mode="headless", wait_s=5.0: (started.append(mode), {"ok": True, "pid": 4242, "mode": mode, "message": "fake"})[1])
+        # Phase 58: the server passes its WatcherOwner so shutdown can stop what it started
+        monkeypatch.setattr(L, "start_watcher", lambda root, mode="headless", wait_s=5.0, owner=None, source="watch-start": (started.append((mode, isinstance(owner, L.WatcherOwner), source)), {"ok": True, "pid": 4242, "mode": mode, "message": "fake"})[1])
         monkeypatch.setattr(L, "start_session", lambda root, backend=None: {"ok": True, "backend": "manual", "result": "manual", "message": "cmds"})
         with _cockpit(p) as s:
             c = s.client
             r = c.post("/api/watch/start", {"mode": "headless", "dry_run": True}, headers=s.auth())
             assert r["json"]["cli"] == "tagteam watch --mode headless --pidfile"
             r = c.post("/api/watch/start", {"mode": "headless"}, headers=s.auth())
-            assert r["status"] == 200 and started == ["headless"]
+            assert r["status"] == 200 and started == [("headless", True, "watch-start")]
             r = c.post("/api/session/start", {}, headers=s.auth())
             assert r["status"] == 200 and r["json"]["result"] == "manual"
             it = c.get("/api/start")["json"]["intent"]
@@ -369,7 +370,7 @@ class TestServerEndpoints:
             # a concurrent repeat while pending → the same reference, no second watcher/message
             r2 = c.post("/api/start/launch", {"intent": it}, headers=s.auth())
             assert r2["status"] == 202 and r2["json"]["launched"] is False and r2["json"]["conversation_id"] == cid
-            assert started == ["headless", "headless"]        # one from /api/watch/start above, one from the launch
+            assert started == [("headless", True, "watch-start"), ("headless", True, "launch")]   # one from /api/watch/start above, one from the launch — both owned
             # completion finalizes the turn and the launch
             deadline = time.monotonic() + 15
             while time.monotonic() < deadline and not any(f.get("event") == "end" for f in rd.frames):
@@ -388,7 +389,7 @@ class TestServerEndpoints:
                     break
                 time.sleep(0.1)
             assert r3["status"] == 200 and r3["json"]["launched"] is False and r3["json"]["existing"]["conversation_id"] == cid
-            assert len(c.get("/api/lead/" + cid)["json"]["turns"]) == 1 and started == ["headless", "headless"]
+            assert len(c.get("/api/lead/" + cid)["json"]["turns"]) == 1 and started == [("headless", True, "watch-start"), ("headless", True, "launch")]
             # the legacy Saloon /api/launch is untouched (different route)
             assert c.post("/api/launch", {"lead": "A", "reviewer": "B", "first_prompt": ""}, headers=s.auth())["status"] == 400
 

@@ -1486,6 +1486,155 @@ def remove_pidfile(project_root: str | Path, pid: int | None = None) -> bool:
         return False
 
 
+# ---------------------------------------------------------------------------
+# Phase 58: one watcher per project
+
+WATCHER_LOCK_DIR_ENV = "TAGTEAM_WATCHER_LOCK_DIR"
+
+
+class WatcherLock:
+    """An exclusive, non-blocking OS lock held for the watcher's lifetime, on a
+    per-user file keyed by the resolved project path
+    (`~/.tagteam/watchers/<hash>.lock`, like the port leases). It lives outside
+    the project because a bare `tagteam watch` must write no new file there
+    (3.0-arc constraint). The OS releases it when the process dies; the fd is
+    non-inheritable, so an agent turn the watcher spawns never keeps it. The
+    file's JSON content only names the holder for refusal messages."""
+
+    def __init__(self, fd: int, path: Path):
+        self.fd = fd
+        self.path = path
+
+    def release(self) -> None:
+        import os
+        if self.fd is None:
+            return
+        try:
+            if sys.platform == "win32":  # pragma: no cover - Windows CI
+                import msvcrt
+                os.lseek(self.fd, 1 << 30, os.SEEK_SET)
+                msvcrt.locking(self.fd, msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self.fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        try:
+            os.close(self.fd)
+        except OSError:
+            pass
+        self.fd = None
+
+
+def watcher_lock_path(project_root: str | Path) -> Path:
+    import hashlib
+    import os
+    override = os.environ.get(WATCHER_LOCK_DIR_ENV)
+    base = Path(override) if override else Path.home() / ".tagteam" / "watchers"
+    key = hashlib.sha256(str(Path(project_root).resolve()).encode("utf-8")).hexdigest()[:20]
+    return base / f"{key}.lock"
+
+
+def acquire_watcher_lock(project_root: str | Path, mode: str) -> WatcherLock | None:
+    """The lock, or None when another process holds it."""
+    import json
+    import os
+    from tagteam import procs
+    p = watcher_lock_path(project_root)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(p), os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        if sys.platform == "win32":  # pragma: no cover - Windows CI
+            import msvcrt
+            os.lseek(fd, 1 << 30, os.SEEK_SET)   # same far offset as dualwrite: content stays writable
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        return None
+    try:
+        payload = json.dumps({"pid": os.getpid(), "ident": procs.identity(os.getpid()), "mode": mode,
+                              "started_at": datetime.now(timezone.utc).isoformat()}).encode("utf-8")
+        os.lseek(fd, 0, os.SEEK_SET)
+        os.ftruncate(fd, 0)
+        os.write(fd, payload)
+    except OSError:
+        pass
+    return WatcherLock(fd, p)
+
+
+def read_watcher_lock(project_root: str | Path) -> dict | None:
+    import json
+    try:
+        data = json.loads(watcher_lock_path(project_root).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _ancestor_pids(limit: int = 16) -> set[int]:
+    import os
+    from tagteam import procs
+    out, pid = set(), os.getpid()
+    for _ in range(limit):
+        ppid = procs.parent_pid(pid)
+        if not ppid or ppid in out or ppid <= 1:
+            break
+        out.add(ppid)
+        pid = ppid
+    return out
+
+
+def other_live_watcher(project_root: str | Path) -> dict | None:
+    """Another live watcher for this project found by the identity-checked
+    pidfile or the process scan (covers releases without the lock), or None.
+    This process and its ancestors (a launcher shim) never count."""
+    import os
+    from tagteam import procs
+    from tagteam.cockpit_api import WATCH_ARGV_RE, watcher_status
+    snapshot = procs.list_processes(WATCH_ARGV_RE.pattern)
+    if any(pid != os.getpid() and WATCH_ARGV_RE.search(argv) for pid, argv in snapshot):
+        ancestors = _ancestor_pids()
+        snapshot = [(pid, argv) for pid, argv in snapshot if pid not in ancestors]
+    ws = watcher_status(project_root, procs_snapshot=snapshot)
+    if ws.get("running") and ws.get("source") in ("pidfile", "process-scan") and ws.get("pid") != os.getpid():
+        return ws
+    return None
+
+
+def _refusal(holder: dict | None) -> str:
+    if holder and holder.get("pid"):
+        started = ""
+        if holder.get("started_at"):
+            try:
+                started = ", started " + datetime.fromisoformat(holder["started_at"]).astimezone().strftime("%H:%M")
+            except ValueError:
+                started = ""
+        pid = holder["pid"]
+        return (f"[tagteam] refused: another watcher is already running for this project "
+                f"(pid {pid}, {holder.get('mode') or '?'}{started}).\n"
+                f"  Stop it first: kill {pid}   (or the cockpit's watcher Stop)")
+    return ("[tagteam] refused: another watcher holds this project's watcher lock.\n"
+            "  Stop the other watcher first.")
+
+
+def _install_sigterm_as_interrupt() -> None:
+    """SIGTERM (`kill <pid>`, the cockpit's Stop, `serve` shutdown) runs the
+    same cleanup as Ctrl-C: pidfile removed, lock released, an in-flight
+    headless turn killed by `run_process`. Main thread only; never raises."""
+    import signal as _signal
+
+    def _raise(*_a):
+        raise KeyboardInterrupt
+
+    try:
+        _signal.signal(_signal.SIGTERM, _raise)
+    except (ValueError, OSError, AttributeError):
+        pass
+
+
 def _pidfile_root(project_dir: str) -> str:
     if project_dir == ".":
         try:
@@ -1524,7 +1673,32 @@ def watch(
     Delegates per-tick work to _StateProcessor. Trigger source is either
     polling (default fallback when ``watchdog`` isn't installed, or when
     ``force_poll=True``) or watchdog filesystem events (when available).
+
+    Phase 58: refuses (returns False, before anything is built) when another
+    watcher runs for this project; holds `.tagteam/watcher.lock` until exit.
     """
+    lock_root = _pidfile_root(project_dir)
+    other = other_live_watcher(lock_root)
+    if other is not None:
+        print(_refusal(other), file=sys.stderr, flush=True)
+        return False
+    watcher_lock = acquire_watcher_lock(lock_root, mode)
+    if watcher_lock is None:
+        print(_refusal(read_watcher_lock(lock_root)), file=sys.stderr, flush=True)
+        return False
+    try:
+        return _watch_locked(interval=interval, mode=mode, lead_pane=lead_pane, reviewer_pane=reviewer_pane,
+                             confirm=confirm, timeout_minutes=timeout_minutes, project_dir=project_dir,
+                             max_retries=max_retries, retry_delay=retry_delay, pre_send_delay=pre_send_delay,
+                             force_poll=force_poll, turn_timeout_minutes=turn_timeout_minutes,
+                             tail_rounds=tail_rounds, turn_retries=turn_retries, pidfile=pidfile)
+    finally:
+        watcher_lock.release()
+
+
+def _watch_locked(*, interval, mode, lead_pane, reviewer_pane, confirm, timeout_minutes, project_dir,
+                  max_retries, retry_delay, pre_send_delay, force_poll, turn_timeout_minutes,
+                  tail_rounds, turn_retries, pidfile) -> bool:
     processor = _build_processor(
         mode=mode,
         lead_pane=lead_pane,
@@ -1772,6 +1946,7 @@ def watch_command(args: list[str]) -> int:
         mode, reason = _auto_detect_mode(".")
         _log(f"[mode] auto-detected: {mode} ({reason})")
 
+    _install_sigterm_as_interrupt()
     started = watch(
         interval=interval,
         mode=mode,
