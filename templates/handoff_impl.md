@@ -1,8 +1,8 @@
 # Handoff: [Phase Name] - Implementation Review
 
 **Date:** [YYYY-MM-DD]
-**From:** Claude (Lead)
-**To:** Codex (Reviewer)
+**From:** Lead (read current tagteam.yaml)
+**To:** Reviewer (read current tagteam.yaml)
 **Type:** Implementation Review
 
 ## Summary
