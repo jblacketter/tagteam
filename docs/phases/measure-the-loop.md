@@ -412,10 +412,16 @@ failed-row fixtures.
 
 ## Implementation notes
 - `tagteam/report.py`: `phase_report` + `render_text` + `report_command`.
-  Durations print as `Ns` / `Mm SSs` / `Hh MMm`. Interjection counts from the
-  plan's derived-figures list are not included: interjections live in their
-  own table, not in the round entries, and nothing else in the block needs
-  them.
+  Durations print as `Ns` / `Mm SSs` / `Hh MMm`.
+- Impl round 3 (reviewer round 2): arbiter rulings (`[ARBITER RULING by …]`
+  entries in the reviewer seat) are excluded from agent turns, change
+  requests and reviewer time, and counted as `rulings`; a REQUEST_CHANGES
+  ruling can still start a lead span. Two agent turns with the same
+  (type, round, role) — reviewer re-entry after NEED_HUMAN → `rule answer` —
+  are `unknown` with `ambiguous_row_ids` when rows exist (never matched
+  twice), `unmatched` when none do. Interjections restored: counted per cycle
+  and per phase through the same read connection (`db.get_interjections`),
+  `None` / "interjections unavailable" when there is no DB or table.
 - `usage` refuses (exit 2, one line) when rows exist but the DB cannot be
   read without writing (a WAL without its index), instead of printing an
   empty table; no DB at all is still "No usage rows yet", exit 0. The Phase 50

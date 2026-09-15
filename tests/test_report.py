@@ -389,3 +389,93 @@ class TestNoDollarsInViews:
         for name in ("cockpit.js", "hub.js"):
             js = (web / name).read_text(encoding="utf-8")
             assert "fmtCost" not in js and "cost_usd" not in js and "<th>cost</th>" not in js, name
+
+
+# ---------------------------------------------------------------------------
+# impl round 2: arbiter rulings, same-round re-entry, interjections
+# ---------------------------------------------------------------------------
+
+class TestRulingsAndReentry:
+    def test_ruling_is_not_an_agent_turn(self, root):
+        from tagteam import cycle as cycle_mod
+        (root / "docs" / "handoffs").mkdir(parents=True, exist_ok=True)
+        cycle_mod.init_cycle(P, "plan", "claude", "codex", "plan", str(root), updated_by="claude")
+        cycle_mod.add_round(P, "plan", "reviewer", "ESCALATE", 1, "stuck", str(root), updated_by="codex")
+        cycle_mod.add_ruling(P, "plan", "REQUEST_CHANGES", "split the phase", "Jack", str(root))
+        entries = cycle_mod.read_rounds(P, "plan", str(root))
+        assert entries[-1]["content"].startswith(cycle_mod.RULING_PREFIX)     # the real ruling shape
+        usage_rows(root, dict(phase=P, type="plan", round=1, role="reviewer", provider="codex", **TOK))
+        rep = report.phase_report(root, P)
+        cov = rep["coverage"]
+        check_invariant(cov)
+        assert cov["turns"] == 2 and cov["matched"] == 1 and cov["unknown"] == 1      # lead r1 start turn
+        reviewer = [t for t in cov["per_turn"] if t["role"] == "reviewer"]
+        assert len(reviewer) == 1 and reviewer[0]["row_ids"] == [1]
+        plan = rep["cycles"]["plan"]
+        assert plan["change_requests"] == 0 and plan["escalations"] == 1 and plan["rulings"] == 1
+        assert plan["time"]["reviewer"]["spans"] == 1                              # ESCALATE only, not the ruling
+        rc, out = run(root)
+        assert "1 arbiter ruling" in out and "0 change requests" in out
+
+    def test_same_round_reviewer_reentry_is_unknown(self, root):
+        from tagteam import cycle as cycle_mod
+        (root / "docs" / "handoffs").mkdir(parents=True, exist_ok=True)
+        cycle_mod.init_cycle(P, "impl", "claude", "codex", "impl", str(root), updated_by="claude")
+        cycle_mod.add_round(P, "impl", "reviewer", "NEED_HUMAN", 1, "which API?", str(root), updated_by="codex")
+        cycle_mod.rearm(P, "impl", "reviewer", "Jack", str(root))
+        cycle_mod.add_round(P, "impl", "reviewer", "REQUEST_CHANGES", 1, "use v2", str(root), updated_by="codex")
+        usage_rows(root, dict(phase=P, type="impl", round=1, role="reviewer", provider="codex", **TOK),
+                   dict(phase=P, type="impl", round=1, role="reviewer", provider="codex", **TOK))
+        rep = report.phase_report(root, P)
+        cov = rep["coverage"]
+        check_invariant(cov)
+        reviewer = [t for t in cov["per_turn"] if t["role"] == "reviewer"]
+        assert len(reviewer) == 2
+        assert all(t["status"] == "unknown" and t["row_ids"] == [] and t["ambiguous_row_ids"] == [1, 2]
+                   for t in reviewer)
+        assert cov["matched"] == 0 and cov["unknown"] == 3
+
+    def test_same_round_reentry_without_rows_is_unmatched(self, root):
+        write_cycle(root, P, "impl", [E(1, "lead", "SUBMIT_FOR_REVIEW", 0), E(1, "reviewer", "NEED_HUMAN", 5),
+                                      E(1, "reviewer", "APPROVE", 9)])
+        usage_rows(root, dict(phase="elsewhere", role="lead", **TOK))
+        cov = report.phase_report(root, P)["coverage"]
+        check_invariant(cov)
+        assert cov["unmatched"] == 2 and cov["unknown"] == 1
+
+
+class TestInterjections:
+    def _note(self, root, phase, ctype):
+        c = _conn(root)
+        try:
+            db.add_interjection(c, ts=_ts(3), note="n", by="Jack", phase=phase, cycle_type=ctype)
+        finally:
+            c.close()
+
+    def test_counts_per_cycle_and_phase(self, root):
+        write_cycle(root, P, "plan", PLAN)
+        write_cycle(root, P, "impl", IMPL)
+        self._note(root, P, "impl"); self._note(root, P, "impl"); self._note(root, P, "plan")
+        self._note(root, "other-phase", "impl")
+        rep = report.phase_report(root, P)
+        assert rep["cycles"]["impl"]["interjections"] == 2 and rep["cycles"]["plan"]["interjections"] == 1
+        assert rep["interjections"] == 3
+        rc, out = run(root)
+        assert "2 interjections" in out and "1 interjection" in out
+
+    def test_zero_when_table_exists(self, root):
+        write_cycle(root, P, "plan", PLAN)
+        _conn(root).close()
+        rep = report.phase_report(root, P)
+        assert rep["cycles"]["plan"]["interjections"] == 0 and rep["interjections"] == 0
+
+    def test_unavailable_without_db_or_table(self, root):
+        write_cycle(root, P, "plan", PLAN)
+        rep = report.phase_report(root, P)                        # no DB at all
+        assert rep["cycles"]["plan"]["interjections"] is None and rep["interjections"] is None
+        assert "interjections unavailable" in run(root)[1]
+        from tests.test_db import _raw_db_at
+        _, raw = _raw_db_at(root, 3); raw.close()                 # usage table, no interjections table
+        rep = report.phase_report(root, P)
+        assert rep["database"] == "ok" and rep["interjections"] is None
+        assert rep["cycles"]["plan"]["interjections"] is None

@@ -53,6 +53,21 @@ def _is_panel(row: dict) -> bool:
     return str(row.get("kind") or "").startswith("panel:")
 
 
+def _is_ruling(entry: dict) -> bool:
+    """An arbiter ruling (`cycle.add_ruling`): stored in the reviewer's seat
+    with the `[ARBITER RULING by …]` prefix. It moves the cycle but is not an
+    agent turn, a reviewer request or reviewer time."""
+    from tagteam.cycle import RULING_PREFIX
+    return entry.get("role") == "reviewer" and str(entry.get("content") or "").startswith(RULING_PREFIX)
+
+
+def _is_agent_turn(entry: dict) -> bool:
+    role, action = entry.get("role"), entry.get("action")
+    if role == "lead":
+        return action == "SUBMIT_FOR_REVIEW"
+    return role == "reviewer" and action in REVIEWER_VERDICTS and not _is_ruling(entry)
+
+
 def _int(v) -> int | None:
     try:
         return int(v)
@@ -64,9 +79,12 @@ def _int(v) -> int | None:
 # Per-cycle figures
 # ---------------------------------------------------------------------------
 
-def _cycle_counts(entries: list[dict], status: dict | None, gates: list[dict] | None) -> dict:
+def _cycle_counts(entries: list[dict], status: dict | None, gates: list[dict] | None,
+                  interjections: list[dict] | None) -> dict:
+    agent = [e for e in entries if not _is_ruling(e)]
+
     def count(role: str | None, action: str) -> int:
-        return sum(1 for e in entries
+        return sum(1 for e in agent
                    if e.get("action") == action and (role is None or e.get("role") == role))
 
     rounds = _int((status or {}).get("round"))
@@ -80,6 +98,9 @@ def _cycle_counts(entries: list[dict], status: dict | None, gates: list[dict] | 
         "amendments": count("lead", "AMEND"),
         "escalations": count(None, "ESCALATE"),
         "need_human": count(None, "NEED_HUMAN"),
+        "rulings": sum(1 for e in entries if _is_ruling(e)),
+        # None = not available (no DB / no interjections table), never 0
+        "interjections": len(interjections) if interjections is not None else None,
         "gate_runs": None,
         "gate_seconds": None,
     }
@@ -99,7 +120,9 @@ def _turn_times(entries: list[dict]) -> dict:
     gate: SUBMIT_FOR_REVIEW → GATE_PASS / GATE_BOUNCE
     reviewer: GATE_PASS, or SUBMIT_FOR_REVIEW when no gate ran → verdict
     A span whose start is not one of those (round 1 authoring, a ruling, a
-    missing timestamp) is counted as unknown, never guessed.
+    missing timestamp) is counted as unknown, never guessed. An arbiter
+    ruling is never reviewer time; a REQUEST_CHANGES ruling still hands the
+    turn back to the lead, so it can start a lead span.
     """
     times = {r: {"seconds": 0.0, "spans": 0, "unknown": 0} for r in ("lead", "reviewer", "gate")}
     flow = [e for e in entries if e.get("action") != "AMEND"]
@@ -110,7 +133,7 @@ def _turn_times(entries: list[dict]) -> dict:
             key, starts = "lead", ("REQUEST_CHANGES", "GATE_BOUNCE")
         elif role == "gatekeeper" and action in ("GATE_PASS", "GATE_BOUNCE"):
             key, starts = "gate", ("SUBMIT_FOR_REVIEW",)
-        elif role == "reviewer" and action in REVIEWER_VERDICTS:
+        elif role == "reviewer" and action in REVIEWER_VERDICTS and not _is_ruling(e):
             key, starts = "reviewer", ("GATE_PASS", "SUBMIT_FOR_REVIEW")
         else:
             continue
@@ -173,15 +196,20 @@ def _attribution(row: dict, phase: str) -> tuple[str, int, str] | None:
 
 
 def _coverage(cycles: dict[str, list[dict]], rows: list[dict], phase: str) -> dict:
+    """Agent turns (never arbiter rulings) matched to usage rows. Two agent
+    turns with the same (type, round, role) — a reviewer answering again in
+    the same round after NEED_HUMAN → `rule answer` — cannot be told apart by
+    stored identity: when rows exist for that key every such turn is
+    `unknown` (rows listed as `ambiguous_row_ids`), never matched twice."""
     turns = []
     for ctype in CYCLE_TYPES:
         for e in cycles.get(ctype) or []:
-            role, action = e.get("role"), e.get("action")
-            if (role == "lead" and action == "SUBMIT_FOR_REVIEW") or \
-                    (role == "reviewer" and action in REVIEWER_VERDICTS):
-                turns.append({"type": ctype, "round": _int(e.get("round")), "role": role,
+            if _is_agent_turn(e):
+                turns.append({"type": ctype, "round": _int(e.get("round")), "role": e.get("role"),
                               "panel": str(e.get("updated_by") or "").endswith(" panel")})
     keys = {(t["type"], t["round"], t["role"]) for t in turns}
+    repeats = {k for k in keys
+               if sum(1 for t in turns if (t["type"], t["round"], t["role"]) == k) > 1}
     by_key: dict[tuple, list[dict]] = {}
     unattributed = 0
     for r in rows:
@@ -203,7 +231,10 @@ def _coverage(cycles: dict[str, list[dict]], rows: list[dict], phase: str) -> di
             candidates = [r for r in candidates if _is_panel(r) == t["panel"]]
         else:
             candidates = [r for r in candidates if not _is_panel(r) and not r.get("kind")]
-        if candidates:
+        ambiguous: list = []
+        if candidates and key in repeats:
+            status, ambiguous, candidates = "unknown", [r.get("id") for r in candidates], []
+        elif candidates:
             status = "matched" if any(_has_tokens(r) for r in candidates) else "no_token_data"
         elif t["role"] == "lead" and t["round"] == 1:
             status = "unknown"      # start-command turn; no target row to prove it
@@ -215,7 +246,7 @@ def _coverage(cycles: dict[str, list[dict]], rows: list[dict], phase: str) -> di
             with_non_ok += 1
         out_turns.append({"type": t["type"], "round": t["round"], "role": t["role"],
                           "status": status, "row_ids": [r.get("id") for r in candidates],
-                          "non_ok_rows": non_ok})
+                          "ambiguous_row_ids": ambiguous, "non_ok_rows": non_ok})
     return {"turns": len(turns), **counts, "turns_with_non_ok_rows": with_non_ok,
             "unattributed_rows": unattributed, "per_turn": out_turns}
 
@@ -223,6 +254,14 @@ def _coverage(cycles: dict[str, list[dict]], rows: list[dict], phase: str) -> di
 # ---------------------------------------------------------------------------
 # The report
 # ---------------------------------------------------------------------------
+
+def _interjections(conn, phase: str) -> list[dict] | None:
+    from tagteam import db
+    try:
+        return db.get_interjections(conn, phase=phase)
+    except Exception:
+        return None             # an older table shape: unavailable, not zero
+
 
 def phase_report(project_root: str | Path, phase: str) -> dict | None:
     """Pure read of one phase. None when the phase has no cycle and no usage."""
@@ -234,6 +273,9 @@ def phase_report(project_root: str | Path, phase: str) -> dict | None:
         entries: dict[str, list[dict]] = {}
         cycles: dict[str, dict] = {}
         has_gates = conn is not None and bool(db.table_columns(conn, "gates"))
+        notes_cols = db.table_columns(conn, "interjections") if conn is not None else set()
+        has_notes = {"phase", "type"} <= notes_cols
+        all_notes = _interjections(conn, phase) if has_notes else None
         for ctype in CYCLE_TYPES:
             status = cycle.read_status(phase, ctype, root, conn=reader)
             rounds = cycle.read_rounds(phase, ctype, root, conn=reader)
@@ -241,7 +283,9 @@ def phase_report(project_root: str | Path, phase: str) -> dict | None:
                 continue
             entries[ctype] = rounds
             gates = db.gates_for_cycle(conn, phase, ctype) if has_gates else None
-            cycles[ctype] = {**_cycle_counts(rounds, status, gates), "time": _turn_times(rounds)}
+            notes = ([n for n in all_notes if n.get("type") == ctype]
+                     if all_notes is not None else None)
+            cycles[ctype] = {**_cycle_counts(rounds, status, gates, notes), "time": _turn_times(rounds)}
         stored: list[dict] = []
         candidates: list[dict] = []
         limits: list[dict] | None = None
@@ -283,6 +327,8 @@ def phase_report(project_root: str | Path, phase: str) -> dict | None:
                 if plan_approve and impl_first else None,
         },
         "database": "ok" if conn is not None else db_note,
+        # every note written while this phase was owed, any cycle type; None = unavailable
+        "interjections": len(all_notes) if all_notes is not None else None,
         "usage": None,
         "coverage": None,
         "rate_limits": None,
@@ -337,6 +383,12 @@ def render_text(rep: dict) -> str:
             parts.append(_plural(c["amendments"], "amendment"))
         if c["escalations"] or c["need_human"]:
             parts.append(f"{c['escalations']} escalated, {c['need_human']} need-human")
+        if c["rulings"]:
+            parts.append(_plural(c["rulings"], "arbiter ruling"))
+        if c["interjections"] is None:
+            parts.append("interjections unavailable")
+        elif c["interjections"]:
+            parts.append(_plural(c["interjections"], "interjection"))
         lines.append(f"  {t:<6} " + " · ".join(parts))
     wc = rep["wall_clock"]
     label = "start→approve" if wc["approved"] else "start→last entry"
