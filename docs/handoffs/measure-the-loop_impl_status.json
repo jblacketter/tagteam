@@ -1,0 +1,25 @@
+{
+  "state": "in-progress",
+  "ready_for": "lead",
+  "round": 1,
+  "phase": "measure-the-loop",
+  "type": "impl",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-15",
+  "baseline": {
+    "sha": "ecf0fec4abc2731624a483fcda7a146730a77d09",
+    "dirty_paths": [],
+    "captured_at": "2026-09-15T04:22:07.160654+00:00",
+    "source": "copied-from-plan"
+  },
+  "impl_boundary": {
+    "sha": "37060b8953f7663914be7f66a9a443e99cc5aece",
+    "dirty": {
+      "docs/handoffs/measure-the-loop_plan_rounds.jsonl": "613d2377e5d63dfb56f2d15be661ff6894bd8a3750351cdf22a229675c24a81f",
+      "docs/handoffs/measure-the-loop_plan_status.json": "b2082efaaf24350b6d18a1be5d24cc915f7870e58d807dd7c755603ffe3eb016"
+    },
+    "captured_at": "2026-09-15T04:28:50.286307+00:00",
+    "source": "copied-from-plan"
+  }
+}

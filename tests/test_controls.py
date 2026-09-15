@@ -584,7 +584,9 @@ class TestUsage:
         assert agg["by_role"]["lead"]["turns"] == 2 and agg["by_role"]["reviewer"]["failed"] == 1
         assert set(agg["by_cycle"]) == {"p/plan", "q/impl"}
         text = usage_mod.render_text(agg)
-        assert "By role:" in text and "Totals:" in text and "2/3 priced" in text
+        assert "By role:" in text and "Totals:" in text
+        # Phase 55: no dollar figures in the text view (JSON keeps cost_usd, asserted above)
+        assert "priced" not in text and "cost" not in text and "$" not in text
         assert "No usage rows" in usage_mod.render_text(usage_mod.aggregate([]))
 
     def test_cli(self, project, capsys):
