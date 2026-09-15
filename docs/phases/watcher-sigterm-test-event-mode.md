@@ -3,8 +3,8 @@
 ## Status
 - [x] Planning (fix already implemented; impl cycle only)
 - [x] Implementation: phase/cockpit-session-lifecycle (PR #42)
-- [ ] Implementation Review
-- [ ] Complete
+- [x] Implementation Review: approved round 1 (2026-09-15)
+- [x] Complete: PR #42 CI green
 
 ## Summary
 PR #42's CI (`pytest (ubuntu-latest)`, run 34984321449) failed one test:
@@ -29,3 +29,8 @@ Phase 58); installing `watchdog` in the project venv.
 ## Success Criteria
 1. `tests/test_watcher_lock.py` passes with and without `watchdog` installed.
 2. Full suite passes (gate). PR #42's CI passes after push.
+
+## Closeout
+Implementation approved round 1; gate 1,995 passed, 5 skipped at `c75d52f`.
+PR #42 CI with `watchdog` (run 34986531118, ubuntu-latest): 2,007 passed,
+4 skipped.

@@ -1,0 +1,16 @@
+{
+  "state": "approved",
+  "ready_for": null,
+  "round": 1,
+  "phase": "watcher-sigterm-test-event-mode",
+  "type": "impl",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-15",
+  "baseline": {
+    "sha": "c75d52feb60cd9e045e58b83d7bcfb00f3d34cb2",
+    "dirty_paths": [],
+    "captured_at": "2026-09-15T15:03:03.847485+00:00",
+    "source": "impl-init-fallback"
+  }
+}
