@@ -19,7 +19,7 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 - **Description:** Provider-independent readiness, shared onboarding, neutral instructions and participant guards at cycle writes/watcher dispatch. First upstream stage; downstream migration waits for Phase 52.
 
 ### Phase 52: Safe framework migration
-- **Status:** 🔄 In progress — plan approved round 2 (2026-09-14); implementation under review. See `docs/phases/safe-framework-migration.md`.
+- **Status:** ✅ Complete — plan approved round 2 (2026-09-14), impl approved round 5 (2026-09-15); gate: 1,841 passed, 5 skipped at `15b15bd`. Branch `phase/safe-framework-migration`; PR merge pending. See `docs/phases/safe-framework-migration.md`.
 - **Description:** Manifest/provenance-aware setup and upgrade through one migration engine: per-project `--preview`, refresh only content provably written by tagteam, keep and report everything else (`--accept PATH` per path), preimage checks, git-based recovery with dirty/non-git refusal unless `--force`, idempotent retry, wheel-installed smoke coverage. No historical hash-mining, no backup subsystem.
 - **Depends on:** Phase 51
 
