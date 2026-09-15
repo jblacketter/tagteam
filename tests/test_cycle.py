@@ -823,3 +823,34 @@ class TestAddRoundMeta:
         cycle.add_round("p", "impl", "reviewer", "ESCALATE", 1, "stuck", str(root), updated_by="Codex")
         cycle.add_ruling("p", "impl", "REQUEST_CHANGES", "no", "Jack", str(root))
         assert "updated_by" not in cycle.read_rounds_file("p", "impl", str(root))[-1]
+
+
+# ---------------------------------------------------------------------------
+# Phase 55: readers through a caller's connection, or files only
+# ---------------------------------------------------------------------------
+
+class TestReadersWithConnection:
+    def test_conn_is_used_and_left_open(self, project):
+        from tagteam import cycle as cycle_mod, db
+        init_cycle("feat-x", "plan", "Claude", "Codex", "initial", str(project), updated_by="Claude")
+        conn, note = db.connect_for_read(project_dir=str(project))
+        assert note is None
+        try:
+            assert cycle_mod.read_status("feat-x", "plan", str(project), conn=conn)["state"] == "in-progress"
+            rounds = cycle_mod.read_rounds("feat-x", "plan", str(project), conn=conn)
+            assert [r["action"] for r in rounds] == ["SUBMIT_FOR_REVIEW"]
+            conn.execute("SELECT 1")          # still open
+        finally:
+            conn.close()
+
+    def test_files_only_never_opens_the_db(self, project, monkeypatch):
+        from tagteam import cycle as cycle_mod, db
+        init_cycle("feat-x", "plan", "Claude", "Codex", "initial", str(project), updated_by="Claude")
+
+        def boom(*a, **k):
+            raise AssertionError("db.connect must not be called")
+        monkeypatch.setattr(db, "connect", boom)
+        st = cycle_mod.read_status("feat-x", "plan", str(project), conn=cycle_mod.FILES_ONLY)
+        rounds = cycle_mod.read_rounds("feat-x", "plan", str(project), conn=cycle_mod.FILES_ONLY)
+        assert st["state"] == "in-progress" and len(rounds) == 1
+        assert cycle_mod.read_status("nope", "plan", str(project), conn=cycle_mod.FILES_ONLY) is None

@@ -890,7 +890,7 @@ class TestSchemaV9Panels:
             raw.executescript(ddl)
         raw.execute("PRAGMA user_version = 8"); raw.commit(); raw.close()
         c = db.connect(project_dir=str(tmp_path))
-        assert c.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION == 9
+        assert c.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION >= 9
         assert c.execute("SELECT name FROM sqlite_master WHERE name='panels'").fetchone()
         assert "panels" in db.NON_FILE_BACKED_TABLES
         c.close()
@@ -955,3 +955,72 @@ class TestSchemaV9Panels:
         assert db.restore_non_file_backed(c, snap)["panels"] == 1
         assert db.get_panel(c, a[0])["decision"] == "APPROVE"
         c.close()
+
+
+# ---------------------------------------------------------------------------
+# Schema v10 (Phase 55): per-model tokens + target identity; the read path
+# ---------------------------------------------------------------------------
+
+def _raw_db_at(tmp_path, version: int):
+    """A DB built from the schema scripts up to `version` (no migration run)."""
+    import sqlite3
+    p = tmp_path / ".tagteam" / "tagteam.db"; p.parent.mkdir(parents=True, exist_ok=True)
+    raw = sqlite3.connect(p)
+    scripts = {1: db._SCHEMA_V1, 3: db._SCHEMA_V3, 4: db._SCHEMA_V4, 5: db._SCHEMA_V5, 6: db._SCHEMA_V6,
+               7: db._SCHEMA_V7, 8: db._SCHEMA_V8, 9: db._SCHEMA_V9}
+    for v, ddl in sorted(scripts.items()):
+        if v <= version:
+            raw.executescript(ddl)
+    if version >= 7:
+        raw.execute("ALTER TABLE usage ADD COLUMN kind TEXT")
+    raw.execute(f"PRAGMA user_version = {version}"); raw.commit()
+    return p, raw
+
+
+class TestSchemaV10Usage:
+    def test_v9_to_v10_adds_columns_keeps_rows(self, tmp_path):
+        p, raw = _raw_db_at(tmp_path, 9)
+        raw.execute("INSERT INTO usage (ts, status, phase, role, input_tokens, kind) "
+                    "VALUES ('2026-09-14T00:00:00+00:00', 'ok', 'p', 'lead', 5, 'conversation')")
+        raw.commit(); raw.close()
+        c = db.connect(project_dir=str(tmp_path))
+        assert c.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION == 10
+        cols = db.table_columns(c, "usage")
+        assert {"model_usage_json", "target_phase", "target_type", "target_round", "kind"} <= cols
+        rows = db.get_usage(c)
+        assert len(rows) == 1 and rows[0]["input_tokens"] == 5 and rows[0]["kind"] == "conversation"
+        assert rows[0]["target_phase"] is None and rows[0]["model_usage"] is None
+        c.close()
+
+    def test_add_usage_v10_fields_and_target_filter(self, tmp_path):
+        c = db.connect(project_dir=str(tmp_path))
+        db.add_usage(c, ts="t1", status="ok", phase="a", type="impl", round=3, role="lead",
+                     target_phase="b", target_type="plan", target_round=1,
+                     model_usage_json='{"m1": {"input_tokens": 1}}')
+        db.add_usage(c, ts="t2", status="ok", phase="b", type="plan", round=1, role="reviewer")
+        assert [r["ts"] for r in db.get_usage(c, target_phase="b")] == ["t1"]
+        assert [r["ts"] for r in db.get_usage(c, phase="b")] == ["t2"]
+        assert db.get_usage(c, phase="a")[0]["model_usage"] == {"m1": {"input_tokens": 1}}
+        c.close()
+
+    def test_get_usage_on_older_schemas(self, tmp_path):
+        p, raw = _raw_db_at(tmp_path, 6)       # no `kind`, no v10 columns
+        raw.execute("INSERT INTO usage (ts, status, phase) VALUES ('t', 'ok', 'p')"); raw.commit(); raw.close()
+        c, note = db.connect_for_read(project_dir=str(tmp_path))
+        assert note is None
+        rows = db.get_usage(c, phase="p")
+        assert len(rows) == 1 and rows[0]["kind"] is None and rows[0]["target_round"] is None
+        assert db.get_usage(c, target_phase="p") == []
+        assert c.execute("PRAGMA user_version").fetchone()[0] == 6     # never migrated
+        c.close()
+
+    def test_get_usage_without_usage_table(self, tmp_path):
+        p, raw = _raw_db_at(tmp_path, 1); raw.close()
+        c, _ = db.connect_for_read(project_dir=str(tmp_path))
+        assert db.get_usage(c) == [] and db.table_columns(c, "usage") == set()
+        c.close()
+
+    def test_connect_for_read_missing_db_creates_nothing(self, tmp_path):
+        conn, note = db.connect_for_read(project_dir=str(tmp_path))
+        assert conn is None and note == "no database"
+        assert not (tmp_path / ".tagteam").exists()

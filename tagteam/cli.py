@@ -400,7 +400,8 @@ Commands:
   resume        Clear the pause; the watcher re-dispatches the owed turn once
   cancel-turn   Kill the in-flight headless turn (recorded as 'cancelled', then paused)
   interject     Leave an arbiter note for the next turn (--to lead|reviewer, --list, --retire)
-  usage         Per-turn token usage for this project (by role / cycle / totals, --json)
+  usage         Per-turn token usage for this project (--by role|cycle|model|kind, --json)
+  report        What a phase took: rounds, bounces, gate and turn time, usage coverage (--phase P, --json)
   rollback      Print (or with --yes run) the revert recipe for a given version
   brief         Show the escalation decision brief for the current event (--list, --generate)
   gate          Gatekeeper pre-checks: check (lead pre-flight) | run | status | list
@@ -480,6 +481,7 @@ READ_ONLY_COMMANDS: dict[str, "callable"] = {
     "tail": lambda rest: True,
     "hook": lambda rest: True,
     "doctor": lambda rest: True,
+    "report": lambda rest: True,
 }
 # Never a helper's business: parents, humans and installers only. Refused with
 # any arguments — `--help` included (see `read_only_refusal`).
@@ -509,7 +511,7 @@ def _read_only_summary() -> list[tuple[str, tuple[str, ...] | None]]:
             ("panel", ("status", "lenses", "list")), ("roadmap", ("queue", "phases", "check", "graph", "ready")),
             ("interject --list", None), ("brief", None), ("hub list", None),
             ("registry list", None), ("usage", None), ("contract", None), ("tail", None), ("hook", None),
-            ("doctor", None)]
+            ("doctor", None), ("report", None)]
 
 
 def main() -> int:
@@ -591,6 +593,10 @@ def _dispatch() -> int:
         from tagteam.usage import usage_command
 
         return usage_command(sys.argv[2:])
+    if command == "report":
+        from tagteam.report import report_command
+
+        return report_command(sys.argv[2:])
     if command == "rollback":
         from tagteam.controls import rollback_command
 

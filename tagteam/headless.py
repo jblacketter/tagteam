@@ -587,7 +587,9 @@ def _usage_claude(events: list[dict]) -> dict | None:
     if result is None:
         return None
     usage = result.get("usage") or {}
-    mu = result.get("modelUsage") or {}
+    mu = result.get("modelUsage")
+    if not isinstance(mu, dict):
+        mu = {}
     if not model and mu:
         model = next(iter(mu.keys()), None)
     return {
@@ -599,7 +601,46 @@ def _usage_claude(events: list[dict]) -> dict | None:
         "cache_write_tokens": usage.get("cache_creation_input_tokens"),
         "cost_usd": result.get("total_cost_usd"),
         "num_turns": result.get("num_turns"),
+        "model_usage_json": model_usage_json(mu),
     }
+
+
+# Phase 55: `modelUsage` → per-model token split. Only the four token counts
+# survive (no cost, no other keys); bounded so a malformed stream cannot
+# bloat the usage row.
+_MODEL_USAGE_FIELDS = (("inputTokens", "input_tokens"), ("outputTokens", "output_tokens"),
+                       ("cacheReadInputTokens", "cache_read_tokens"),
+                       ("cacheCreationInputTokens", "cache_write_tokens"))
+MODEL_USAGE_MAX_MODELS = 16
+MODEL_USAGE_MAX_NAME = 128
+
+
+def sanitize_model_usage(mu) -> dict | None:
+    """`{model: {input_tokens, output_tokens, cache_read_tokens,
+    cache_write_tokens}}` from a Claude result's `modelUsage`, or None.
+    Entries with a non-string/oversized name, a non-dict value or no integer
+    token field are dropped; more than MODEL_USAGE_MAX_MODELS entries → None."""
+    if not isinstance(mu, dict) or not mu or len(mu) > MODEL_USAGE_MAX_MODELS:
+        return None
+    out: dict[str, dict] = {}
+    for name, entry in mu.items():
+        if not isinstance(name, str) or not name or len(name) > MODEL_USAGE_MAX_NAME:
+            continue
+        if not isinstance(entry, dict):
+            continue
+        tokens = {}
+        for src, dst in _MODEL_USAGE_FIELDS:
+            v = entry.get(src)
+            if isinstance(v, int) and not isinstance(v, bool) and v >= 0:
+                tokens[dst] = v
+        if tokens:
+            out[name] = tokens
+    return out or None
+
+
+def model_usage_json(mu) -> str | None:
+    clean = sanitize_model_usage(mu)
+    return json.dumps(clean, sort_keys=True) if clean else None
 
 
 def parse_rate_limits(provider: str, event_lines: list[str]) -> list[dict]:
@@ -1903,7 +1944,13 @@ class HeadlessEngine:
             if usage:
                 fields.update({k: usage.get(k) for k in (
                     "model", "input_tokens", "output_tokens", "cache_read_tokens",
-                    "cache_write_tokens", "cost_usd", "num_turns", "session_id")})
+                    "cache_write_tokens", "cost_usd", "num_turns", "session_id",
+                    "model_usage_json")})
+            # Phase 55: the cycle entry this turn was dispatched to produce
+            # (the stored phase/type/round above is the owed state).
+            if ident.target_phase:
+                fields.update(target_phase=ident.target_phase, target_type=ident.target_type,
+                              target_round=ident.target_round)
             row_id = db.add_usage(conn, **fields)
             if usage is None:
                 db.add_diagnostic(conn, "headless_usage_unparsed", {

@@ -666,7 +666,7 @@ def run_briefer(project_root: str | Path, *, kind: str, spec: BriefSpec,
                                             **{k: usage.get(k) for k in ("model", "input_tokens",
                                                "output_tokens", "cache_read_tokens",
                                                "cache_write_tokens", "cost_usd", "num_turns",
-                                               "session_id")})
+                                               "session_id", "model_usage_json")})
             except Exception as e:
                 log(f"   briefer: usage row failed: {e}")
             if status in ("ok", "partial") and out_path.exists():

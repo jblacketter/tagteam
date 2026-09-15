@@ -86,7 +86,7 @@
     $('chip-live').textContent = t.live + ' live';
     $('chip-live').className = 'chip' + (t.live ? ' ok' : '');
     var u24 = p.usage && p.usage['24h'], u7 = p.usage && p.usage['7d'];
-    $('chip-burn').textContent = u24 ? ('24h: ' + fmtInt(u24.input_tokens + u24.output_tokens) + ' tok' + (u24.priced_turns ? ' · $' + u24.cost_usd.toFixed(2) : '') + ' · 7d: ' + fmtInt(u7.input_tokens + u7.output_tokens) + ' tok') : 'burn: —';
+    $('chip-burn').textContent = u24 ? ('24h: ' + fmtInt(u24.input_tokens + u24.output_tokens) + ' tok · 7d: ' + fmtInt(u7.input_tokens + u7.output_tokens) + ' tok') : 'burn: —';
     var rl = p.rate_limits || [];
     $('chip-window').textContent = rl.length ? rl.map(function (r) { var when = r.resets_at ? new Date(r.resets_at) : null; return r.provider + ' ' + String(r.kind).replace('_', ' ') + ': ' + (r.status || '?') + (when && !isNaN(when.getTime()) ? ' → ' + when.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : ''); }).join(' · ') : 'window: n/a';
     $('chip-window').className = 'chip' + (rl.some(function (r) { return r.status && r.status !== 'allowed'; }) ? ' warn' : '');

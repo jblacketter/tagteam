@@ -58,7 +58,6 @@
     return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   }
   function fmtInt(v) { return (typeof v === 'number') ? v.toLocaleString() : '-'; }
-  function fmtCost(v) { return (typeof v === 'number') ? '$' + v.toFixed(3) : '-'; }
   function firstLine(s, n) {
     s = String(s || '').trim();
     var line = s.split('\n')[0];
@@ -636,10 +635,10 @@
   function bucketTable(buckets) {
     var keys = Object.keys(buckets || {});
     if (!keys.length) return '<div class="hint" style="padding:8px 10px">no rows</div>';
-    var h = '<table class="u"><tr><th>bucket</th><th>turns</th><th>ok</th><th>failed</th><th>in</th><th>out</th><th>cache r</th><th>cache w</th><th>cost</th><th>mean</th></tr>';
+    var h = '<table class="u"><tr><th>bucket</th><th>turns</th><th>ok</th><th>failed</th><th>in</th><th>out</th><th>cache r</th><th>cache w</th><th>mean</th></tr>';
     keys.forEach(function (k) {
       var b = buckets[k];
-      h += '<tr><td>' + esc(k) + '</td><td>' + b.turns + '</td><td>' + b.ok + '</td><td>' + b.failed + '</td><td>' + fmtInt(b.input_tokens) + '</td><td>' + fmtInt(b.output_tokens) + '</td><td>' + fmtInt(b.cache_read_tokens) + '</td><td>' + fmtInt(b.cache_write_tokens) + '</td><td>' + (b.cost_known_turns ? fmtCost(b.cost_usd) : '-') + '</td><td>' + (b.mean_duration_ms != null ? Math.round(b.mean_duration_ms / 1000) + 's' : '-') + '</td></tr>';
+      h += '<tr><td>' + esc(k) + '</td><td>' + b.turns + '</td><td>' + b.ok + '</td><td>' + b.failed + '</td><td>' + fmtInt(b.input_tokens) + '</td><td>' + fmtInt(b.output_tokens) + '</td><td>' + fmtInt(b.cache_read_tokens) + '</td><td>' + fmtInt(b.cache_write_tokens) + '</td><td>' + (b.mean_duration_ms != null ? Math.round(b.mean_duration_ms / 1000) + 's' : '-') + '</td></tr>';
     });
     return h + '</table>';
   }
@@ -671,7 +670,7 @@
       var arr = byRole[role].sort(function (a, b) { return a.x - b.x || 0; });
       var d = ''; arr.forEach(function (p, i) { d += (i ? 'L' : 'M') + X(p.x).toFixed(1) + ',' + Y(p.y).toFixed(1) + ' '; });
       var path = document.createElementNS(ns, 'path'); path.setAttribute('d', d); path.setAttribute('fill', 'none'); path.setAttribute('stroke', colors[role] || '#9aa4b1'); path.setAttribute('stroke-width', '2'); svg.appendChild(path);
-      arr.forEach(function (p) { var c = document.createElementNS(ns, 'circle'); c.setAttribute('cx', X(p.x)); c.setAttribute('cy', Y(p.y)); c.setAttribute('r', p.s.status === 'ok' ? 3 : 4); c.setAttribute('fill', p.s.status === 'ok' ? (colors[role] || '#9aa4b1') : '#f85149'); var t = document.createElementNS(ns, 'title'); t.textContent = role + ' r' + p.x + ': ' + fmtInt(p.y) + ' tokens (' + p.s.status + (p.s.cost != null ? ', ' + fmtCost(p.s.cost) : '') + ')'; c.appendChild(t); svg.appendChild(c); });
+      arr.forEach(function (p) { var c = document.createElementNS(ns, 'circle'); c.setAttribute('cx', X(p.x)); c.setAttribute('cy', Y(p.y)); c.setAttribute('r', p.s.status === 'ok' ? 3 : 4); c.setAttribute('fill', p.s.status === 'ok' ? (colors[role] || '#9aa4b1') : '#f85149'); var t = document.createElementNS(ns, 'title'); t.textContent = role + ' r' + p.x + ': ' + fmtInt(p.y) + ' tokens (' + p.s.status + ')'; c.appendChild(t); svg.appendChild(c); });
     });
     if (!pts.length) text(W / 2, H / 2, 'no turns yet', 'middle');
   }

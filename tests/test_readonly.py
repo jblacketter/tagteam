@@ -128,6 +128,7 @@ READ_COMMANDS = [
     ("interject", "--list"),
     ("contract",),
     ("roadmap", "queue"),
+    ("report", "--phase", PHASE),
     ("roadmap", "ready"),
     ("roadmap", "check"),
     ("usage", "--json"),
@@ -517,9 +518,15 @@ class TestSnapshotMatrix:
                 assert rc != 2 and "tagteam: refused" not in err, (argv, rc, out, err)
                 continue
             db_only = tuple(argv) in DB_ONLY_READERS
-            if state in ("old-schema", "wal-only") and db_only:
+            if argv[0] == "usage" and state == "wal-only":
+                # Phase 55: usage reads through `connect_for_read`; unreadable → its own refusal
+                assert rc == 2 and "cannot read the database without changing it" in out, (state, rc, out, err)
+                continue
+            if state in ("old-schema", "wal-only") and db_only and argv[0] != "usage":
                 assert rc == 2 and "tagteam: refused" in err, (state, argv, rc, out, err)
                 continue
+            if argv[0] == "report" and state == "wal-only":
+                assert rc == 0 and "figures from cycle files only" in out, (out, err)
             ok = {0, 1} if argv[0] == "brief" else {0}
             assert rc in ok and "tagteam: refused" not in err, (state, argv, rc, out, err)
             if state == "wal+shm" and argv[0] == "usage":

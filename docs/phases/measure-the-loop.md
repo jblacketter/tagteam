@@ -2,8 +2,8 @@
 
 ## Status
 - [x] Planning
-- [ ] Approved
-- [ ] Implementation
+- [x] Approved: plan round 3 (2026-09-14)
+- [x] Implementation: phase/measure-the-loop
 - [ ] Implementation Review
 - [ ] Complete
 
@@ -409,3 +409,25 @@ fall back to owed-state matching; cross-phase start fixture. (2) status
 partition is token coverage only (`matched` no longer requires `ok`);
 execution outcome is a separate `non_ok_rows` flag outside the invariant;
 failed-row fixtures.
+
+## Implementation notes
+- `tagteam/report.py`: `phase_report` + `render_text` + `report_command`.
+  Durations print as `Ns` / `Mm SSs` / `Hh MMm`. Interjection counts from the
+  plan's derived-figures list are not included: interjections live in their
+  own table, not in the round entries, and nothing else in the block needs
+  them.
+- `usage` refuses (exit 2, one line) when rows exist but the DB cannot be
+  read without writing (a WAL without its index), instead of printing an
+  empty table; no DB at all is still "No usage rows yet", exit 0. The Phase 50
+  snapshot matrix now includes `report` and expects this for `usage`.
+- `_usage_claude` now ignores a non-dict `modelUsage` rather than losing the
+  whole usage record (found by the malformed-stream test).
+- `db.get_usage` returns every `_USAGE_COLS` key (None when absent) plus a
+  parsed `model_usage`.
+- Check against the real Phase 53 cycles (`tagteam report --phase
+  legacy-diagnostics`, hand-computed from `docs/handoffs/legacy-diagnostics_*`
+  and the `gates` rows): start→approve 30m 01s (03:10:21→03:40:22),
+  implementation before first submit 10m 31s, lead 4m 00s (95 s + 145 s, two
+  round-1 spans unknown), reviewer 4m 54s (72 + 40 + 120 + 63 s), gate 10m 35s
+  (316.9 + 318.0 s), turns 8: unknown 2, unmatched 6 (no usage rows). This
+  repo's DB stayed at `user_version` 9 after `report` and `usage`.
