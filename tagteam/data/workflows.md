@@ -107,6 +107,12 @@ reviewer reads the diff and does not re-run the suite.
 | Reviewer panel (`panel:` block) | 2–3 narrow lens reviews merged into one reviewer entry |
 | Full roadmap (`/tagteam:handoff start --roadmap`) | All incomplete phases, in dependency order, with review gates between them |
 
+One watcher runs per project. A second `tagteam watch` for the same project is
+refused and names the running one's pid (`kill <pid>` stops it; a watcher shuts
+down cleanly on SIGTERM, including any in-flight headless turn). Stopping
+`tagteam serve` with Ctrl+C stops the watchers that cockpit started and leaves
+any other watcher running, saying so.
+
 ## Steering
 
 - `tagteam interject "note" [--to lead|reviewer]` — a note the next turn must honor.

@@ -180,6 +180,8 @@ class TagteamHTTPServer(ThreadingHTTPServer):
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
         self.stop_event = threading.Event()
+        from tagteam.launch import WatcherOwner
+        self.watcher_owner = WatcherOwner()   # Phase 58: watchers this server started
 
     def stop(self) -> None:
         """Signal SSE loops, stop serve_forever, close the socket."""
@@ -941,7 +943,8 @@ class CockpitRouter:
                                                  ensure_watcher=bool(data.get("ensure_watcher", True)),
                                                  retry=bool(data.get("retry")),
                                                  watcher_mode=str(data.get("mode") or "headless"),
-                                                 background=True)
+                                                 background=True,
+                                                 watcher_owner=getattr(h.server, "watcher_owner", None))
                 h._send_json(payload, status)
                 return True
             if path == "/api/watch/start":
@@ -949,7 +952,8 @@ class CockpitRouter:
                 if data.get("dry_run"):
                     h._send_json({"ok": True, "dry_run": True, "cli": f"tagteam watch --mode {mode} --pidfile", "message": ""})
                     return True
-                res = _launch.start_watcher(self.project_dir, mode=mode)
+                res = _launch.start_watcher(self.project_dir, mode=mode,
+                                            owner=getattr(h.server, "watcher_owner", None))
                 h._send_json(res, 200 if res.get("ok") else 409)
                 return True
             if path == "/api/watch/stop":
@@ -1648,9 +1652,28 @@ def serve_command(args: list[str]) -> int:
     finally:
         server.stop_event.set()
         server.server_close()
+        _stop_owned_watchers(server, project_dir)
         lease.release()
 
     return 0
+
+
+def _stop_owned_watchers(server, project_dir) -> None:
+    """Phase 58: stop the watchers this server started (never others). A
+    second Ctrl-C during the wait is not swallowed silently: it abandons the
+    wait and says which watchers may still run."""
+    owner = getattr(server, "watcher_owner", None)
+    if owner is None:
+        return
+    from tagteam.launch import stop_owned_watchers
+    try:
+        for line in stop_owned_watchers(project_dir, owner):
+            print(line)
+    except KeyboardInterrupt:
+        pids = ", ".join(str(c["pid"]) for c in owner.children()) or "none"
+        print(f"Interrupted while stopping watchers started by this cockpit (pids: {pids}) — check with: tagteam state")
+    except Exception as e:
+        print(f"Could not stop the watchers started by this cockpit: {type(e).__name__}: {e}")
 
 
 def _install_sigterm_as_interrupt() -> None:
