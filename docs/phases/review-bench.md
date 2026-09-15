@@ -196,15 +196,27 @@ Per pair:
    walk up into the live project):
    ```
    git init
-   base tree  ← git archive <base_sha>   → scrub (step 2) → commit "base"      (skipped when no base)
-   submitted  ← git archive <commit_sha> → scrub (step 2) → commit "submitted" (parent: base)
+   ls-tree -r <base_sha>   + cat-file --batch → fast-import commit "base"      (skipped when no base)
+   ls-tree -r <commit_sha> + cat-file --batch → fast-import commit "submitted" (parent: base)
+   .git/info/attributes: * -text -filter -ident -working-tree-encoding; reset --hard
    ```
+   *(Impl review round 1: `git archive` was replaced by raw tree objects —
+   archive applies `export-ignore` / `export-subst`, so it is not a faithful
+   tree export. Replay tree objects equal the submitted tree's outside the
+   scrub paths; submodule gitlinks are not materialised and the prompt lists
+   them.)*
    The replay repo's only history is base → submitted, so `git diff HEAD~1`
    (or `git diff base`) shows exactly the submitted change set, tracked and
    formerly-untracked files alike, and nothing after the submission is
    reachable. Ignored files (virtualenvs, the DB) are not present; the
-   contract says so. Removed afterwards unless `--keep`; `run` removes stale
-   `tagteam-bench-*` directories it created (marker file) before starting.
+   contract says so. Removed afterwards unless `--keep`. Each directory
+   carries an owner file (project, run, attempt, `keep`, bench pid + process
+   identity); `run` reclaims only this project's directories whose owner
+   process is gone and that were not kept — live and kept ones are never
+   touched. Each pair attempt gets its own artifact directory (version,
+   provenance, cell, commit, base and a random attempt id) and run ids carry a
+   random suffix, so no attempt can read another's verdict file; identical
+   requested pairs are run and budgeted once.
 2. **Scrub the held-out outcome, in both trees, before committing** (so it is
    in neither the files nor the history):
    - `docs/handoffs/P_T_rounds.jsonl` and `.tagteam/legacy/P_T_rounds.jsonl`:
@@ -255,8 +267,9 @@ Running it during a live cycle only costs window.
 tagteam bench table [--run RUN_ID] [--json]
 ```
 One block per provenance (`snapshot`, then `asserted`; never merged), one
-line per cell, over the latest `ok` row per (round, version) within that
-provenance:
+line per cell, over the latest `ok` row per (phase, type, round, version)
+within that provenance and cell — several asserted tree choices for one
+version count once (resume identity stays the full pair identity):
 
 ```
 provenance snapshot

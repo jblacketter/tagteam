@@ -28,6 +28,10 @@ if cap:
 print(json.dumps({"type": "system", "subtype": "init", "model": "fake-sonnet", "session_id": "s1"}))
 m = re.search(r"exactly this path and stop:\s*\n\s*(\S+)", prompt)
 verdict = os.environ.get("FAKE_BENCH_VERDICT", "APPROVE")
+seq = os.environ.get("FAKE_BENCH_VERDICT_SEQ")
+if seq and cap:
+    calls = len(open(cap, encoding="utf-8").read().splitlines())
+    verdict = seq.split(",")[min(calls, len(seq.split(","))) - 1]
 if m and verdict != "none":
     body = {"verdict": verdict, "summary": "fake"}
     if verdict == "REQUEST_CHANGES":
@@ -393,3 +397,134 @@ def test_read_only_mode_refuses_bench(project):
                        cwd=project, env={**os.environ, "TAGTEAM_READ_ONLY": "1",
                                          "PYTHONPATH": str(Path(b.__file__).parents[1])})
     assert r.returncode == 2
+
+
+class TestReviewRound1Fixes:
+    def test_two_revisions_same_round_cell_do_not_share_artifacts(self, project, fake_claude, monkeypatch):
+        _amended_cycle(project)
+        base = _git(project, "rev-list", "--max-parents=0", "HEAD")
+        (project / "other.py").write_text("x = 2\n")
+        _git(project, "add", "-A"); _git(project, "commit", "-q", "-m", "rev a")
+        rev_a = _git(project, "rev-parse", "HEAD")
+        (project / "other.py").write_text("x = 3\n")
+        _git(project, "add", "-A"); _git(project, "commit", "-q", "-m", "rev b")
+        rev_b = _git(project, "rev-parse", "HEAD")
+        monkeypatch.setenv("FAKE_BENCH_VERDICT_SEQ", "APPROVE,none")
+        spec_a = f"feat-x:impl:2@{base}..{rev_a}"
+        rc, out = _out(b.run_command, ["--round", spec_a, "--round", spec_a,          # duplicate request
+                                       "--round", f"feat-x:impl:2@{base}..{rev_b}",
+                                       "--cell", "claude:sonnet:high", "--yes"], project)
+        assert "2 pair(s), 0 already done, 2 to run" in out
+        assert rc == 1
+        conn = db.connect(project_dir=str(project))
+        try:
+            res = db.bench_results(conn)
+        finally:
+            conn.close()
+        assert [(r["commit_sha"], r["outcome"], r["verdict"]) for r in res] == [
+            (rev_a, "ok", "APPROVE"), (rev_b, "failed", None)]
+        run_dirs = list((project / ".tagteam" / "bench").iterdir())
+        assert len(run_dirs) == 1 and len(list(run_dirs[0].iterdir())) == 2
+        # a second invocation gets a distinct run id
+        monkeypatch.delenv("FAKE_BENCH_VERDICT_SEQ")
+        _out(b.run_command, ["--round", f"feat-x:impl:2@{base}..{rev_b}", "--cell", "claude:sonnet:high",
+                             "--yes"], project)
+        conn = db.connect(project_dir=str(project))
+        try:
+            res = db.bench_results(conn)
+        finally:
+            conn.close()
+        assert res[-1]["outcome"] == "ok" and res[-1]["run_id"] != res[0]["run_id"]
+
+    def test_prune_only_abandoned(self, tmp_path):
+        import tempfile as _tf
+        root = str(tmp_path / "proj")
+        dead = subprocess.Popen([sys.executable, "-c", "pass"]); dead.wait()
+        made = {}
+        for name, owner in {
+            "active": {"project": root, "keep": False, "pid": os.getpid(), "ident": None},
+            "kept": {"project": root, "keep": True, "pid": dead.pid, "ident": None},
+            "abandoned": {"project": root, "keep": False, "pid": dead.pid, "ident": None},
+            "other": {"project": root + "-elsewhere", "keep": False, "pid": dead.pid, "ident": None},
+        }.items():
+            d = Path(_tf.mkdtemp(prefix=b.TEMP_PREFIX))
+            (d / b.OWNER_FILE).write_text(json.dumps(owner))
+            made[name] = d
+        try:
+            assert {k: b.replay_dir_state(d, root) for k, d in made.items()} == {
+                "active": "active", "kept": "kept", "abandoned": "abandoned", "other": "other"}
+            assert b.prune_stale_replays(root) == 1
+            assert {k: d.exists() for k, d in made.items()} == {
+                "active": True, "kept": True, "abandoned": False, "other": True}
+        finally:
+            for d in made.values():
+                b.shutil.rmtree(d, ignore_errors=True)
+
+    def test_keep_survives_next_run(self, project, fake_claude):
+        _amended_cycle(project)
+        root = str(project.resolve())
+        rc, out = _out(b.run_command, ["--round", "feat-x:impl:1", "--cell", "claude:sonnet:high",
+                                       "--keep", "--yes"], project)
+        assert rc == 0
+        kept = [d for d in Path(b.tempfile.gettempdir()).glob(b.TEMP_PREFIX + "*")
+                if b.replay_dir_state(d, root) == "kept"]
+        try:
+            assert len(kept) == 1 and (kept[0] / "repo" / "app.py").exists()
+            _out(b.run_command, ["--round", "feat-x:impl:2", "--cell", "claude:sonnet:high", "--yes"], project)
+            assert kept[0].exists()
+        finally:
+            for d in kept:
+                b.shutil.rmtree(d, ignore_errors=True)
+
+    def test_replay_is_faithful_to_tree_objects(self, project, fake_claude):
+        (project / ".gitattributes").write_text(
+            "app.py export-ignore\nversion.txt export-subst\ncrlf.txt text eol=crlf\n")
+        (project / "version.txt").write_text("$Format:%H$\n")
+        (project / "crlf.txt").write_bytes(b"line1\nline2\n")
+        (project / "run.sh").write_text("#!/bin/sh\necho hi\n"); (project / "run.sh").chmod(0o755)
+        if sys.platform != "win32":
+            os.symlink("app.py", project / "link.py")
+        _git(project, "add", "-A"); _git(project, "commit", "-q", "-m", "attributes")
+        _amended_cycle(project)
+        conn = db.connect(project_dir=str(project))
+        try:
+            pair = b.plan_pairs(str(project), conn, ["feat-x:impl:2"], [b.parse_cell("claude:sonnet:high")])[0]
+        finally:
+            conn.close()
+        repo = project.parent / "replay"
+        b.build_replay_repo(str(project), repo, pair)
+
+        def tree(cwd, rev):
+            out = _git(cwd, "ls-tree", "-r", "--full-tree", rev)
+            return {line.split("\t", 1)[1]: line.split("\t", 1)[0] for line in out.splitlines()}
+        skip = set(b.outcome_paths("feat-x", "impl"))
+        src = {k: v for k, v in tree(project, pair.commit_sha).items() if k not in skip}
+        dst = tree(repo, "HEAD")
+        canonical = "docs/handoffs/feat-x_impl_rounds.jsonl"
+        assert canonical in dst
+        dst.pop(canonical)
+        assert dst == src
+        base_src = {k: v for k, v in tree(project, pair.base_sha).items() if k not in skip}
+        assert tree(repo, "HEAD~1") == base_src
+        assert (repo / "app.py").read_text() == "print('v2')\n"
+        assert (repo / "version.txt").read_text() == "$Format:%H$\n"
+        assert (repo / "crlf.txt").read_bytes() == b"line1\nline2\n"
+        assert os.access(repo / "run.sh", os.X_OK)
+        if sys.platform != "win32":
+            assert os.readlink(repo / "link.py") == "app.py"
+        assert _git(repo, "status", "--porcelain") == ""
+
+
+def test_table_counts_one_row_per_round_version(tmp_path):
+    row = TestTable()._row
+    conn = db.connect(project_dir=str(tmp_path))
+    try:
+        db.add_bench_result(conn, **row(provenance="asserted", commit_sha="c1", verdict="APPROVE",
+                                        recorded_verdict="APPROVE", duration_ms=1000))
+        db.add_bench_result(conn, **row(provenance="asserted", commit_sha="c2", verdict="REQUEST_CHANGES",
+                                        recorded_verdict="APPROVE", n_blocker=1, duration_ms=5000))
+        data = b.table_data(conn)
+    finally:
+        conn.close()
+    c = data["blocks"][0]["cells"][0]
+    assert c["rounds"] == 1 and c["agree"] == 0 and c["extra_rc"] == 1 and c["seconds"] == 5.0

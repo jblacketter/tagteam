@@ -26,9 +26,9 @@ import re
 import shutil
 import subprocess
 import sys
-import tarfile
 import tempfile
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -262,6 +262,12 @@ class Pair:
                 self.commit_sha, self.base_sha)
 
 
+def _aggregation_key(row: dict) -> tuple:
+    """One table row per reviewed round version per provenance per cell: several
+    asserted tree choices for the same version count once (the latest ok)."""
+    return (row["phase"], row["type"], int(row["round"]), row.get("version_ts"), row["provenance"], row["cell"])
+
+
 def _result_identity(row: dict) -> tuple:
     return (row["phase"], row["type"], int(row["round"]), row.get("version_ts"),
             row["provenance"], row["cell"], row["commit_sha"], row.get("base_sha"))
@@ -307,6 +313,7 @@ def _rev_parse(root: str, rev: str) -> str:
 def plan_pairs(root: str, conn, round_specs: list[str], cells: list[Cell]) -> list[Pair]:
     """Validate everything before any spawn. Raises BenchError listing every problem."""
     problems, pairs = [], []
+    seen: set[tuple] = set()
     rounds = benchable_rounds(root, conn)
     done: set[tuple] = set()
     if conn is not None:
@@ -337,6 +344,9 @@ def plan_pairs(root: str, conn, round_specs: list[str], cells: list[Cell]) -> li
             commit, base, prov = snap["commit_sha"], snap.get("base_sha"), "snapshot"
         for cell in cells:
             p = Pair(r, cell, prov, commit, base)
+            if p.identity in seen:
+                continue            # the same pair requested twice runs (and is budgeted) once
+            seen.add(p.identity)
             p.done = p.identity in done
             pairs.append(p)
     if problems:
@@ -383,44 +393,19 @@ def _git(cwd: str | Path, *args: str, env: dict | None = None, check: bool = Tru
     return r
 
 
-_REPLAY_GIT_CFG = ("-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
-                   "-c", "core.excludesFile=/dev/null", "-c", "core.autocrlf=false")
-
-
 def _replay_env() -> dict:
     env = dict(os.environ)
-    env.update({"GIT_AUTHOR_NAME": "tagteam-bench", "GIT_AUTHOR_EMAIL": "bench@localhost",
-                "GIT_COMMITTER_NAME": "tagteam-bench", "GIT_COMMITTER_EMAIL": "bench@localhost"})
-    for k in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+    for k in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+              "GIT_ALTERNATE_OBJECT_DIRECTORIES"):
         env.pop(k, None)
     return env
 
 
-def _extract(project_root: str, commit: str, dest: Path) -> None:
-    proc = subprocess.Popen(["git", "archive", "--format=tar", commit], cwd=project_root,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    try:
-        with tarfile.open(fileobj=proc.stdout, mode="r|") as tf:
-            try:
-                tf.extractall(dest, filter="data")
-            except TypeError:       # Python < 3.12 without extraction filters
-                tf.extractall(dest)
-    finally:
-        proc.stdout.close()
-        err = proc.stderr.read().decode("utf-8", "replace")
-        proc.stderr.close()
-        if proc.wait() != 0:
-            raise BenchError(f"git archive {commit[:12]} failed: {err.strip()}")
-
-
-def _clear_worktree(repo: Path) -> None:
-    for child in repo.iterdir():
-        if child.name == ".git":
-            continue
-        if child.is_dir() and not child.is_symlink():
-            shutil.rmtree(child)
-        else:
-            child.unlink()
+# Attributes that would transform content between the object store and the
+# working tree (eol conversion, clean/smudge filters, ident, encodings) are
+# neutralised in the replay repo, so checkout writes the blobs byte for byte.
+_RAW_ATTRIBUTES = "* -text -filter -ident -working-tree-encoding\n"
+_REPLAY_BRANCH = "refs/heads/replay"
 
 
 def outcome_paths(phase: str, cycle_type: str) -> list[str]:
@@ -431,54 +416,153 @@ def outcome_paths(phase: str, cycle_type: str) -> list[str]:
             f".tagteam/legacy/{stem}_rounds.jsonl", f".tagteam/legacy/{stem}_status.json"]
 
 
-def scrub_tree(tree: Path, phase: str, cycle_type: str, pre_verdict: list[dict] | None) -> None:
-    """Remove every copy of the target cycle's history; when `pre_verdict` is
-    given, write it as the one canonical rounds file."""
-    for rel in outcome_paths(phase, cycle_type):
-        p = tree / rel
-        if p.is_file() or p.is_symlink():
-            p.unlink()
-    if pre_verdict is not None:
-        p = tree / "docs" / "handoffs" / f"{phase}_{cycle_type}_rounds.jsonl"
-        p.parent.mkdir(parents=True, exist_ok=True)
-        clean = [{k: v for k, v in e.items() if k not in ("interjections", "entries")}
-                 for e in pre_verdict]
-        p.write_text("".join(json.dumps(e) + "\n" for e in clean), encoding="utf-8")
+def pre_verdict_jsonl(pre_verdict: list[dict]) -> bytes:
+    clean = [{k: v for k, v in e.items() if k not in ("interjections", "entries")} for e in pre_verdict]
+    return "".join(json.dumps(e) + "\n" for e in clean).encode("utf-8")
 
 
-def build_replay_repo(project_root: str, repo: Path, pair: Pair) -> None:
+def _tree_entries(project_root: str, commit: str) -> list[tuple[str, str, str, str]]:
+    """(mode, type, sha, path) of every entry of `commit`'s tree, recursively."""
+    out = _git(project_root, "ls-tree", "-r", "-z", "--full-tree", commit, text=False).stdout
+    entries = []
+    for rec in out.split(b"\0"):
+        if not rec:
+            continue
+        meta, _, path = rec.partition(b"\t")
+        mode, otype, sha = meta.decode().split()
+        entries.append((mode, otype, sha, path.decode("utf-8", "surrogateescape")))
+    return entries
+
+
+def _fi_path(path: str) -> bytes:
+    raw = path.encode("utf-8", "surrogateescape")
+    if raw.startswith(b'"') or b"\n" in raw:
+        raw = b'"' + raw.replace(b"\\", b"\\\\").replace(b'"', b'\\"').replace(b"\n", b"\\n") + b'"'
+    return raw
+
+
+def _read_blob(batch: subprocess.Popen, sha: str) -> bytes:
+    batch.stdin.write(sha.encode() + b"\n")
+    batch.stdin.flush()
+    header = batch.stdout.readline().split()
+    if len(header) != 3 or header[1] != b"blob":
+        raise BenchError(f"cannot read blob {sha}: {b' '.join(header).decode(errors='replace')}")
+    data = batch.stdout.read(int(header[2]))
+    batch.stdout.read(1)        # trailing newline
+    return data
+
+
+def _stream_commit(fi, batch, project_root: str, commit: str | None, message: str,
+                   skip: set[str], extra: dict[str, bytes], omitted: list[str]) -> None:
+    body = message.encode()
+    fi.write(b"commit " + _REPLAY_BRANCH.encode() + b"\n")
+    fi.write(b"committer tagteam-bench <bench@localhost> 0 +0000\n")
+    fi.write(b"data %d\n%s\n" % (len(body), body))
+    # No `from`: a second commit to the branch in the same stream takes its tip as parent.
+    fi.write(b"deleteall\n")
+    for mode, otype, sha, path in (_tree_entries(project_root, commit) if commit else []):
+        if path in skip:
+            continue
+        if otype != "blob":             # submodule gitlinks: not materialised
+            omitted.append(path)
+            continue
+        data = _read_blob(batch, sha)
+        fi.write(b"M %s inline %s\ndata %d\n" % (mode.encode(), _fi_path(path), len(data)))
+        fi.write(data + b"\n")
+    for path, data in extra.items():
+        fi.write(b"M 100644 inline %s\ndata %d\n" % (_fi_path(path), len(data)))
+        fi.write(data + b"\n")
+
+
+def build_replay_repo(project_root: str, repo: Path, pair: Pair) -> dict:
+    """Materialise base → submitted from raw tree objects (`ls-tree` +
+    `cat-file --batch` into `fast-import`): no export-ignore/export-subst,
+    no clean filters, no eol conversion. The target cycle's outcome copies
+    are left out of both commits; the submitted commit gets the pre-verdict
+    rounds file. Returns {"omitted": [gitlink paths not materialised]}."""
     r = pair.round
     env = _replay_env()
     repo.mkdir(parents=True, exist_ok=True)
     _git(repo, "init", "-q", env=env)
-    if pair.base_sha:
-        _extract(project_root, pair.base_sha, repo)
-        scrub_tree(repo, r.phase, r.type, None)
-        _git(repo, *_REPLAY_GIT_CFG, "add", "-A", "-f", env=env)
-        _git(repo, *_REPLAY_GIT_CFG, "commit", "-q", "--allow-empty", "-m", "base", env=env)
-        _git(repo, "tag", "base", env=env)
-        _clear_worktree(repo)
-    _extract(project_root, pair.commit_sha, repo)
-    scrub_tree(repo, r.phase, r.type, r.pre_verdict)
-    _git(repo, *_REPLAY_GIT_CFG, "add", "-A", "-f", env=env)
-    _git(repo, *_REPLAY_GIT_CFG, "commit", "-q", "--allow-empty", "-m", "submitted", env=env)
-
-
-def _owner_matches(d: Path, project_root: str) -> bool:
+    (repo / ".git" / "info").mkdir(parents=True, exist_ok=True)
+    (repo / ".git" / "info" / "attributes").write_text(_RAW_ATTRIBUTES, encoding="utf-8")
+    skip = set(outcome_paths(r.phase, r.type))
+    canonical = f"docs/handoffs/{r.phase}_{r.type}_rounds.jsonl"
+    omitted: list[str] = []
+    batch = subprocess.Popen(["git", "cat-file", "--batch"], cwd=project_root, env=env,
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    fi = subprocess.Popen(["git", "fast-import", "--quiet", "--done"], cwd=str(repo), env=env,
+                          stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     try:
-        return json.loads((d / OWNER_FILE).read_text(encoding="utf-8")).get("project") == project_root
-    except (OSError, ValueError, AttributeError):
-        return False
+        try:
+            if pair.base_sha:
+                _stream_commit(fi.stdin, batch, project_root, pair.base_sha, "base", skip, {}, [])
+                fi.stdin.write(b"reset refs/tags/base\nfrom " + _REPLAY_BRANCH.encode() + b"\n\n")
+            _stream_commit(fi.stdin, batch, project_root, pair.commit_sha, "submitted", skip,
+                           {canonical: pre_verdict_jsonl(r.pre_verdict)}, omitted)
+            fi.stdin.write(b"done\n")
+            fi.stdin.close()
+        except BrokenPipeError:
+            pass
+        err = fi.stderr.read().decode("utf-8", "replace")
+        if fi.wait() != 0:
+            raise BenchError(f"git fast-import failed: {err.strip()}")
+    finally:
+        for p in (batch, fi):
+            if p.poll() is None:
+                p.kill()
+        batch.stdin.close()
+        batch.wait()
+    _git(repo, "symbolic-ref", "HEAD", _REPLAY_BRANCH, env=env)
+    _git(repo, "-c", "core.autocrlf=false", "-c", "core.hooksPath=/dev/null", "reset", "-q", "--hard",
+         _REPLAY_BRANCH, env=env)
+    return {"omitted": omitted}
+
+
+# ---------------------------------------------------------------------------
+# replay directories: ownership, liveness, retention
+
+def _read_owner(d: Path) -> dict | None:
+    try:
+        data = json.loads((d / OWNER_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def write_owner(d: Path, project_root: str, run_id: str, attempt: str, keep: bool) -> None:
+    from tagteam import procs
+    pid = os.getpid()
+    (d / OWNER_FILE).write_text(json.dumps({
+        "project": project_root, "run_id": run_id, "attempt": attempt, "keep": bool(keep),
+        "pid": pid, "ident": procs.identity(pid)}), encoding="utf-8")
+
+
+def replay_dir_state(d: Path, project_root: str) -> str:
+    """other | kept | active | abandoned."""
+    from tagteam import procs
+    owner = _read_owner(d)
+    if owner is None or owner.get("project") != project_root:
+        return "other"
+    if owner.get("keep"):
+        return "kept"
+    pid = owner.get("pid")
+    if isinstance(pid, int) and procs.pid_alive(pid):
+        ident = owner.get("ident")
+        if ident is None or procs.identity(pid) in (None, ident):
+            return "active"
+    return "abandoned"
 
 
 def prune_stale_replays(project_root: str) -> int:
+    """Remove this project's replay directories whose owning bench process is
+    gone. Kept (--keep) and live ones are never touched."""
     n = 0
     for d in Path(tempfile.gettempdir()).glob(TEMP_PREFIX + "*"):
-        if d.is_dir() and _owner_matches(d, project_root):
+        if d.is_dir() and replay_dir_state(d, project_root) == "abandoned":
             shutil.rmtree(d, ignore_errors=True)
             n += 1
     return n
-
 
 # ---------------------------------------------------------------------------
 # prompt
@@ -493,7 +577,8 @@ def _name_status(repo: Path, has_base: bool) -> str:
     return "\n".join(lines) or "(no file changes between base and submitted)"
 
 
-def compose_bench_prompt(pair: Pair, repo: Path, verdict_path: Path) -> str:
+def compose_bench_prompt(pair: Pair, repo: Path, verdict_path: Path, *,
+                         omitted: list[str] | None = None) -> str:
     r = pair.round
     contract = CONTRACT_PATH.read_text(encoding="utf-8").format(
         phase=r.phase, type=r.type, round=r.round, verdict_path=str(verdict_path))
@@ -507,6 +592,9 @@ def compose_bench_prompt(pair: Pair, repo: Path, verdict_path: Path) -> str:
     else:
         parts.append("no base: review the plan document and the tree (history is the submitted "
                      "commit only).")
+    if omitted:
+        parts.append(f"Not materialised (submodule entries): {', '.join(omitted[:20])}"
+                     + (f" … {len(omitted) - 20} more" if len(omitted) > 20 else ""))
     parts.append("")
     checklist = repo / "docs" / "checklists" / ("code_review.md" if r.type == "impl" else "plan_review.md")
     if checklist.is_file():
@@ -567,21 +655,24 @@ def run_pair(root: str, pair: Pair, *, run_id: str, executable: str, timeout_s: 
     from tagteam import dualwrite
     from tagteam.panel import verify_verdict
     r = pair.round
+    attempt = uuid.uuid4().hex[:8]
+    version = re.sub(r"[^0-9A-Za-z]", "", r.version_ts or "none")
     stem_dir = (Path(root) / ".tagteam" / "bench" / run_id /
-                _slug(f"{r.phase}_{r.type}_r{r.round}_{pair.provenance}_{pair.cell.label}"))
-    stem_dir.mkdir(parents=True, exist_ok=True)
+                _slug(f"{r.phase}_{r.type}_r{r.round}_{version}_{pair.provenance}_{pair.cell.label}_"
+                      f"{pair.commit_sha[:10]}_{(pair.base_sha or 'nobase')[:10]}_{attempt}"))
+    stem_dir.mkdir(parents=True, exist_ok=False)     # a fresh directory per attempt: no stale verdict
     verdict_path = stem_dir / "verdict.json"
     events_path, log_path = stem_dir / "events.jsonl", stem_dir / "turn.log"
     tmp = Path(tempfile.mkdtemp(prefix=TEMP_PREFIX))
-    (tmp / OWNER_FILE).write_text(json.dumps({"project": root, "run_id": run_id}), encoding="utf-8")
+    write_owner(tmp, root, run_id, attempt, keep)
     repo = tmp / "repo"
     outcome, reason, ustatus, verdict = "failed", "", "spawn_failed", None
     out = h.RunOutput(exit_code=None, timed_out=False, duration_ms=0)
     try:
         try:
-            build_replay_repo(root, repo, pair)
-            prompt = compose_bench_prompt(pair, repo, verdict_path)
-        except (BenchError, OSError, tarfile.TarError) as e:
+            built = build_replay_repo(root, repo, pair)
+            prompt = compose_bench_prompt(pair, repo, verdict_path, omitted=built["omitted"])
+        except (BenchError, OSError) as e:
             reason = f"replay repository: {e}"
             raise _Abort()
         (stem_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
@@ -674,10 +765,10 @@ def table_data(conn, run_id: str | None = None) -> dict:
             latest_ok: dict[tuple, dict] = {}
             for x in crow:
                 if x["outcome"] == "ok":
-                    latest_ok[_result_identity(x)] = x
+                    latest_ok[_aggregation_key(x)] = x      # rows are oldest first: the last one wins
             ok = list(latest_ok.values())
             ok_ids = set(latest_ok)
-            failed = [x for x in crow if x["outcome"] == "failed" and _result_identity(x) not in ok_ids]
+            failed = [x for x in crow if x["outcome"] == "failed" and _aggregation_key(x) not in ok_ids]
             rec_rc = [x for x in ok if x["recorded_verdict"] == "REQUEST_CHANGES"]
             rec_ap = [x for x in ok if x["recorded_verdict"] == "APPROVE"]
             cell_rc = [x for x in ok if x["verdict"] == "REQUEST_CHANGES"]
@@ -865,7 +956,7 @@ def run_command(args: list[str], project_root=None, out=None) -> int:
     pruned = prune_stale_replays(root)
     if pruned:
         print(f"bench run: removed {pruned} stale replay director{'y' if pruned == 1 else 'ies'}", file=out)
-    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:6]
     log = lambda m: print(m, file=out, flush=True)  # noqa: E731
     failed = 0
     for p in todo:
