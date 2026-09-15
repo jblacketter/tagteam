@@ -356,12 +356,13 @@ def test_edited_since_written_drops_entry_and_names_version(proj, monkeypatch, c
     assert "docs/workflows.md" not in manifest(proj)["files"]
 
 
-def test_crash_before_manifest_write_converges(proj, monkeypatch, capsys):
-    monkeypatch.setattr(fw, "_write_manifest", lambda plan: None)     # files land, manifest does not
-    fresh(proj)
+def test_crash_before_manifest_write_converges(proj, capsys):
+    # A scoped patch: monkeypatch.undo() here would also undo the proj
+    # fixture's registry redirect and register the temp dir for real.
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(fw, "_write_manifest", lambda plan: None)     # files land, manifest does not
+        fresh(proj)
     assert not (proj / fw.MANIFEST_NAME).exists()
-    monkeypatch.undo()
-    no_cli(monkeypatch)
     code, out = run(proj, capsys=capsys)
     assert code == 0 and "Manifest: tagteam-manifest.json written" in out
     m = manifest(proj)
@@ -565,3 +566,204 @@ def test_version_line_distinguishes_package_manifest_plugin(proj, monkeypatch):
     monkeypatch.setattr(fw, "package_version", lambda: "1.1.0")
     line = fw.version_line(proj)
     assert line.startswith("package 1.1.0 · manifest 1.0.0 (written 20") and line.endswith("plugin: not installed (claude CLI not found)")
+
+
+# ---------------------------------------------------------------------------
+# round 3 — setup-level boundaries: directories and seed files go through
+# the same lexical-parent checks; nothing is created or written through a
+# link or a non-directory, and unaffected paths still proceed
+# ---------------------------------------------------------------------------
+
+DOCS_PATHS = ["docs/phases", "docs/handoffs", "docs/escalations", "docs/checklists",
+              "docs/workflows.md", "docs/roadmap.md", "docs/decision_log.md"]
+
+
+def _each_flag(proj, capsys, rel):
+    for kw in ({}, {"accept": [rel]}, {"accept": [rel], "force": True}, {"no_plugin": True}):
+        yield run(proj, capsys=capsys, **kw)
+
+
+def test_symlinked_docs_dir_outside_project_refuses_docs_and_proceeds_elsewhere(proj, tmp_path, capsys):
+    """The reviewer's reproduction: docs → an empty directory outside the
+    project. Nothing lands there; templates, the pointers and the manifest
+    are still produced; exit 1 names every refused docs path."""
+    outside = tmp_path / "outside"; outside.mkdir()
+    (proj / "docs").symlink_to(outside)
+    for code, out in _each_flag(proj, capsys, "docs/workflows.md"):
+        assert code == 1, out
+        assert snapshot(outside) == {}
+        for rel in DOCS_PATHS:
+            assert f"refused  {rel} — unsupported filesystem shape (docs is a symlink)" in out, rel
+        for src in (DATA / "checklists").glob("*.md"):
+            assert f"refused  docs/checklists/{src.name} — unsupported filesystem shape (docs is a symlink)" in out
+    assert (proj / "templates" / "cycle.md").read_bytes() == (DATA / "templates" / "cycle.md").read_bytes()
+    assert (proj / "AGENTS.md").read_text() == fw.POINTER and (proj / "CLAUDE.md").read_text() == fw.POINTER
+    files = manifest(proj)["files"]
+    assert files and all(not rel.startswith("docs/") for rel in files)
+    assert (proj / "docs").is_symlink()
+
+
+def test_symlinked_claude_dir_refuses_skill_paths_and_proceeds_elsewhere(proj, tmp_path, capsys):
+    outside = tmp_path / "outside"; outside.mkdir()
+    (proj / ".claude").symlink_to(outside)
+    for code, out in _each_flag(proj, capsys, SKILL):
+        assert code == 1, out
+        assert snapshot(outside) == {}
+        assert "refused  .claude/skills — unsupported filesystem shape (.claude is a symlink)" in out
+        assert f"refused  {SKILL} — unsupported filesystem shape (.claude is a symlink)" in out
+    assert (proj / "docs" / "workflows.md").exists() and (proj / "docs" / "roadmap.md").exists()
+    assert (proj / "templates" / "cycle.md").exists()
+    assert SKILL not in manifest(proj)["files"]
+
+
+@pytest.mark.parametrize("blocker", ["docs", "templates"])
+def test_regular_file_at_required_directory_refuses_that_subtree_only(proj, capsys, blocker):
+    """A file where a directory is required used to raise out of mkdir before
+    any report; now the subtree is refused path by path and the rest runs."""
+    (proj / blocker).write_text("not a directory\n")
+    for kw in ({}, {"no_plugin": True}):
+        code, out = run(proj, capsys=capsys, **kw)
+        assert code == 1, out
+        assert (proj / blocker).read_text() == "not a directory\n"
+        assert f"— unsupported filesystem shape ({blocker} is not a directory)" in out
+        assert "Traceback" not in out
+    if blocker == "docs":
+        for rel in DOCS_PATHS:
+            assert f"refused  {rel} — unsupported filesystem shape (docs is not a directory)" in out
+        assert (proj / "templates" / "cycle.md").exists()
+        assert all(not r.startswith("docs/") for r in manifest(proj)["files"])
+    else:
+        for src in (DATA / "templates").glob("*.md"):
+            assert f"refused  templates/{src.name} — unsupported filesystem shape (templates is not a directory)" in out
+        assert "refused  templates —" not in out       # the file at templates/ itself is left alone, silently
+        assert (proj / "docs" / "workflows.md").exists() and (proj / "docs" / "roadmap.md").exists()
+        assert all(not r.startswith("templates/") for r in manifest(proj)["files"])
+
+
+def test_seed_symlinks_are_left_alone_not_written_through(proj, tmp_path, capsys):
+    """A symlink *at* a seed path (AGENTS.md → CLAUDE.md, roadmap kept
+    elsewhere) is an existing project file: never touched, never a refusal.
+    A symlink *above* one is a write through a link and is refused."""
+    outside = tmp_path / "outside"; outside.mkdir()
+    (outside / "roadmap.md").write_text("theirs\n")
+    (proj / "docs").mkdir()
+    (proj / "docs" / "roadmap.md").symlink_to(outside / "roadmap.md")
+    (proj / "CLAUDE.md").write_text("# ours\n")
+    (proj / "AGENTS.md").symlink_to(proj / "CLAUDE.md")
+    dangling = proj / "docs" / "decision_log.md"; dangling.symlink_to(tmp_path / "nowhere")
+    before_outside = snapshot(outside)
+    for code, out in _each_flag(proj, capsys, "docs/roadmap.md"):
+        assert snapshot(outside) == before_outside
+        assert (proj / "docs" / "roadmap.md").is_symlink() and (proj / "AGENTS.md").is_symlink()
+        assert dangling.is_symlink() and not dangling.exists()
+        assert (proj / "CLAUDE.md").read_text() == "# ours\n"
+        for rel in ("docs/roadmap.md", "AGENTS.md", "docs/decision_log.md"):
+            for verb in ("refused ", "keep    ", "create  ", "created "):
+                assert f"{verb} {rel} —" not in out, (verb, rel)
+    # the accept flags were unknown accepts (seeds are not managed) → 1; the plain runs → 0
+    assert run(proj, capsys=capsys)[0] == 0
+    # directories are still provided next to the links
+    assert (proj / "docs" / "phases").is_dir() and (proj / "docs" / "checklists").is_dir()
+
+
+def test_directory_items_never_mkdir_through_a_link_appearing_late(proj, tmp_path):
+    """Preimage check for a directory: docs turned into a symlink between
+    classification and apply → docs/* creates are refused, nothing lands."""
+    outside = tmp_path / "outside"; outside.mkdir()
+    plan = fw.build_plan(proj, data_dir=DATA)
+    (proj / "docs").symlink_to(outside)
+    fw.apply(plan)
+    assert snapshot(outside) == {}
+    for it in plan.items:
+        if it.rel.startswith("docs/"):
+            assert it.outcome == "refused: changed since classification: docs is a symlink", it.rel
+    assert (proj / "templates" / "cycle.md").exists() and (proj / ".claude" / "skills").is_dir()
+
+
+def test_fresh_setup_reports_directories_and_seeds(proj, capsys):
+    code, out = run(proj, preview=True, capsys=capsys)
+    assert code == 0
+    assert "create   6 directories" in out
+    assert "create   docs/roadmap.md — seeded once; yours from now on" in out
+    assert "create   AGENTS.md — seeded once; yours from now on" in out
+    assert not (proj / "docs").exists()
+    code, out = run(proj, capsys=capsys)
+    assert code == 0 and "created  6 directories" in out and "created  CLAUDE.md" in out
+    for rel in fw.SEED_DIRS:
+        assert (proj / rel).is_dir()
+    assert (proj / "docs" / "roadmap.md").read_bytes() == (DATA / "templates" / "roadmap.md").read_bytes()
+    code, out = run(proj, capsys=capsys)
+    assert code == 0 and "director" not in out and "AGENTS.md" not in out
+
+
+# ---------------------------------------------------------------------------
+# round 3 — the manifest write has the same preimage guard as every path
+# ---------------------------------------------------------------------------
+
+def test_manifest_appearing_between_classification_and_apply_is_refused(proj):
+    """The reviewer's reproduction: no manifest at classification, one written
+    concurrently, apply → refused, concurrent bytes intact."""
+    plan = fw.build_plan(proj, data_dir=DATA)
+    assert plan.manifest is None and plan.manifest_shape.kind == "absent"
+    concurrent = b'{"schema": 1, "files": {}, "tagteam": "concurrent"}\n'
+    (proj / fw.MANIFEST_NAME).write_bytes(concurrent)
+    fw.apply(plan)
+    assert plan.manifest_outcome == "refused: changed since classification: now file, was absent"
+    assert (proj / fw.MANIFEST_NAME).read_bytes() == concurrent
+    assert any(line.startswith(f"{fw.MANIFEST_NAME}: refused") for line in plan.refused)
+    assert f"Manifest: {fw.MANIFEST_NAME} refused: changed since classification" in fw.format_report(plan)
+    assert (proj / "templates" / "cycle.md").exists()        # the files themselves still landed
+
+
+def test_manifest_edited_between_classification_and_apply_is_refused(proj, monkeypatch, tmp_path):
+    monkeypatch.setattr(fw, "package_version", lambda: "1.0.0")
+    fresh(proj)
+    monkeypatch.setattr(fw, "package_version", lambda: "2.0.0")
+    replace_source(monkeypatch, tmp_path, "templates/cycle.md", b"v2\n")
+    plan = fw.build_plan(proj, data_dir=DATA)
+    assert plan.manifest_shape.kind == "file" and fw.manifest_pending(plan)
+    m = manifest(proj); m["tagteam"] = "someone-else"; m["files"]["templates/feedback.md"]["note"] = "edited"
+    concurrent = (json.dumps(m, indent=2, sort_keys=True) + "\n").encode()
+    (proj / fw.MANIFEST_NAME).write_bytes(concurrent)
+    fw.apply(plan)
+    assert plan.manifest_outcome == "refused: changed since classification: content differs"
+    assert (proj / fw.MANIFEST_NAME).read_bytes() == concurrent
+    # the refresh itself happened; the next run adopts it and writes the manifest
+    assert (proj / "templates" / "cycle.md").read_bytes() == b"v2\n"
+    no_cli(monkeypatch)
+    plan2 = fw.apply(fw.build_plan(proj, data_dir=DATA))
+    assert plan2.manifest_outcome == "written" and manifest(proj)["files"]["templates/cycle.md"]["tagteam"] == "2.0.0"
+
+
+def test_manifest_disappearing_between_classification_and_apply_is_refused(proj, monkeypatch, tmp_path):
+    fresh(proj)
+    monkeypatch.setattr(fw, "package_version", lambda: "9.0.0")
+    replace_source(monkeypatch, tmp_path, "templates/cycle.md", b"v9\n")
+    plan = fw.build_plan(proj, data_dir=DATA)
+    (proj / fw.MANIFEST_NAME).unlink()
+    fw.apply(plan)
+    assert plan.manifest_outcome == "refused: changed since classification: now absent, was file"
+    assert not (proj / fw.MANIFEST_NAME).exists()
+
+
+@pytest.mark.parametrize("shape", ["symlink", "directory"])
+def test_manifest_shape_refused_in_preview_and_apply(proj, tmp_path, capsys, shape):
+    """Preview says the manifest would be refused instead of 'would be
+    written'; apply refuses it and writes nothing through the link."""
+    target = tmp_path / "real-manifest.json"; target.write_text("{}\n")
+    p = proj / fw.MANIFEST_NAME
+    if shape == "symlink":
+        p.symlink_to(target); detail = f"{fw.MANIFEST_NAME} is a symlink"
+    else:
+        p.mkdir(); detail = f"{fw.MANIFEST_NAME} is a directory"
+    code, out = run(proj, preview=True, capsys=capsys)
+    assert code == 1
+    assert f"Manifest: {fw.MANIFEST_NAME} would be refused: unsupported filesystem shape ({detail}) (preview — nothing written)" in out
+    assert "would be written" not in out and "1 path(s) would be refused." in out
+    assert not (proj / "templates").exists()
+    code, out = run(proj, capsys=capsys)
+    assert code == 1
+    assert f"Manifest: {fw.MANIFEST_NAME} refused: unsupported filesystem shape ({detail})" in out
+    assert target.read_text() == "{}\n"
+    assert (p.is_symlink() if shape == "symlink" else p.is_dir())
+    assert (proj / "templates" / "cycle.md").exists()

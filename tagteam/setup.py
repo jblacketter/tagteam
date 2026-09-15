@@ -88,11 +88,6 @@ def report_legacy_user_skills() -> bool:
     return False
 
 
-_POINTER = ("# Project workflow\n\nRead `tagteam.yaml` for current roles, "
-            "`docs/workflows.md` for onboarding, and run "
-            "`tagteam contract` for the authoritative workflow.\n")
-
-
 def main(target_dir: str = ".", *, no_plugin: bool = False,
          report_user_skills: bool = True, preview: bool = False,
          accept: tuple[str, ...] | list[str] = (), force: bool = False) -> int:
@@ -130,19 +125,6 @@ def main(target_dir: str = ".", *, no_plugin: bool = False,
         print("The package may not be installed correctly.")
         return 1
 
-    if not preview:
-        dirs_to_create = [
-            ".claude/skills",
-            "docs/phases",
-            "docs/handoffs",
-            "docs/escalations",
-            "docs/checklists",
-            "templates",
-        ]
-        print("Creating directories...")
-        for d in dirs_to_create:
-            (target / d).mkdir(parents=True, exist_ok=True)
-
     # Validate project configuration without baking roles into shipped templates
     config_path = target / "tagteam.yaml"
     config = read_config(config_path)
@@ -156,6 +138,10 @@ def main(target_dir: str = ".", *, no_plugin: bool = False,
                 print(f"  - {err}")
             print()
 
+    # Every write — framework directories, managed files, the once-only seeds
+    # (roadmap, decision log, AGENTS.md / CLAUDE.md pointers) and the manifest —
+    # goes through the engine, which checks each path's lexical parents and
+    # its preimage before touching disk. Nothing here writes directly.
     plan = framework.build_plan(target, data_dir=source, no_plugin=no_plugin,
                                 accept=accept, force=force)
     print(f"plugin: {plan.plugin}")
@@ -170,31 +156,6 @@ def main(target_dir: str = ".", *, no_plugin: bool = False,
         if refused:
             print(f"{len(refused)} path(s) would be refused.")
         return 1 if refused else 0
-
-    # Initialize files if they don't exist
-    roadmap_dst = target / "docs" / "roadmap.md"
-    if not roadmap_dst.exists():
-        print("Creating roadmap template...")
-        roadmap_src = source / "templates" / "roadmap.md"
-        if roadmap_src.exists():
-            copy_md_file(roadmap_src, roadmap_dst)
-
-    decision_log_dst = target / "docs" / "decision_log.md"
-    if not decision_log_dst.exists():
-        print("Creating decision log...")
-        decision_log_src = source / "templates" / "decision_log.md"
-        if decision_log_src.exists():
-            copy_md_file(decision_log_src, decision_log_dst)
-
-    # Instruction adapters are seeded only when absent. Existing project rules
-    # belong to the user, even when they contain outdated workflow references.
-    for name in ("AGENTS.md", "CLAUDE.md"):
-        pointer = target / name
-        try:
-            with pointer.open("x", encoding="utf-8") as out:
-                out.write(_POINTER)
-        except FileExistsError:
-            pass
 
     # Register this project for future upgrades
     from tagteam.registry import register_project
