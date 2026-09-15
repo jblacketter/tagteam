@@ -157,9 +157,11 @@ def main(target_dir: str = ".", *, no_plugin: bool = False,
             print(f"{len(refused)} path(s) would be refused.")
         return 1 if refused else 0
 
-    # Register this project for future upgrades
-    from tagteam.registry import register_project
-    register_project(str(target))
+    # Register this project for future upgrades — unless there is no project
+    # directory to come back to (the target itself was refused).
+    if not plan.root_outcome.startswith("refused"):
+        from tagteam.registry import register_project
+        register_project(str(target))
 
     refused = plan.refused
     print()
