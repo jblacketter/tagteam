@@ -1,0 +1,16 @@
+{
+  "state": "in-progress",
+  "ready_for": "lead",
+  "round": 1,
+  "phase": "measure-the-loop",
+  "type": "plan",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-15",
+  "baseline": {
+    "sha": "ecf0fec4abc2731624a483fcda7a146730a77d09",
+    "dirty_paths": [],
+    "captured_at": "2026-09-15T04:22:07.160654+00:00",
+    "source": "plan-init"
+  }
+}
