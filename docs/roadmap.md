@@ -9,6 +9,11 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 
 ## Phases
 
+### Phase 58a: Watcher SIGTERM test in event mode
+- **Status:** In review — impl cycle open (2026-09-15); carried by PR #42. See `docs/phases/watcher-sigterm-test-event-mode.md`.
+- **Description:** CI (with `watchdog`) failed a Phase 58 test that asserted the poll loop's `Watcher stopped.` log line; the event loop exits cleanly without it. Assert the clean exit (code, pidfile, lock) instead.
+- **Depends on:** Phase 58
+
 ### Phase 58: Cockpit session lifecycle
 - **Status:** ✅ Complete — plan approved round 3, impl approved round 1 (2026-09-15); gate: 1,995 passed, 5 skipped at `97309f7`. Branch `phase/cockpit-session-lifecycle`; PR merge pending. See `docs/phases/cockpit-session-lifecycle.md`.
 - **Description:** One watcher per project (a lifetime per-user lock in `tagteam watch`, refusal naming the running pid); SIGTERM stops a watcher cleanly (pidfile removed, in-flight turn killed via the existing interrupt path); Ctrl+C on `tagteam serve` stops the watchers that cockpit started and leaves others alone; the reviewer lane shows only the current cycle, blank by default, with a "Show last session" toggle, and verdict chips keyed by cycle. From the 2026-09-15 backlog entries below.
