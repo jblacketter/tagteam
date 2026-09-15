@@ -28,6 +28,10 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 - **Description:** Report-only workflow artifact diagnostics and bounded context/capability visibility: a read-only `tagteam doctor` (recognized legacy skills/instructions with evidence and remediation; per-role executables, contract entry points, instruction sources, tool configuration names, protection notes) plus a one-line pointer from `setup`/`upgrade`. Nothing is edited, deleted, probed or read from secrets.
 - **Depends on:** Phase 52
 
+### Phase 55: Measure the loop
+- **Status:** Planning — plan cycle open (2026-09-14). See `docs/phases/measure-the-loop.md`.
+- **Description:** Read-only measurement from data tagteam already stores: `tagteam report --phase P` (rounds, change requests, gate bounces and minutes, per-role elapsed turn time, start-to-approve, tokens where headless turns recorded them), `tagteam usage --by model|kind`, per-model token capture from Claude `modelUsage` (schema v10), and no dollar figures in any human-facing view. Source: `docs/research/2026-09-14-better-tagteam/`. `tagteam grade` is a separate later phase; no reading of user-level transcripts.
+
 ### Phase 50: Read-only Mode
 - **Status:** ✅ Complete — impl approved round 4 (2026-09-04; plan approved round 3); PR #32 merged; released as **3.11.0**. See `docs/phases/read-only-mode.md`
 - **Description:** The one-cycle-writing-call rule is enforced by prose, not by the CLI: panel lenses get a `TAGTEAM_PANEL_LENS` env var nobody reads (the panel only *detects* a stray write after the fact), and the `codex-brief` / verifier agents have Bash and honor-system "never write" rules. Add `TAGTEAM_READ_ONLY=1`, enforced at the two write chokepoints (`dualwrite.writer_lock` and the `db` writer functions) before anything touches disk, surfaced by the CLI as one refusal line with exit 2. Panel lens children get it; headless turns do not. Contract gains a "read-only helpers" paragraph. Prerequisite for ever shipping reviewer agents in the plugin (deferred from Phase 48).
