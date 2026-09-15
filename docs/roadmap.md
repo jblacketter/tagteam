@@ -9,6 +9,11 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 
 ## Phases
 
+### Phase 56: Review bench
+- **Status:** Planning — plan cycle open (2026-09-14). Branch `phase/review-bench`. See `docs/phases/review-bench.md`.
+- **Description:** Replay recorded reviewer rounds at reviewer cells (provider × model × effort) in disposable worktrees under a verdict-file contract that never writes the cycle; tabulate verdict agreement with the recorded reviewer, tokens and seconds. Adds exact round snapshots (a git tree pinned under `refs/tagteam/snapshots/` at every lead submission, no model). Dry-run by default, turn cap, resumable. Claude cells only in v1; no manual labelling (waits for `tagteam grade`); planted-defect control is a follow-up. Source: `docs/research/2026-09-14-better-tagteam/`.
+- **Depends on:** Phase 55
+
 ### Phase 54: Role Neutrality Polish
 - **Status:** ✅ Complete — plan approved round 1, impl approved round 2 (2026-09-09); gate: 1,789 passed, 5 skipped at `8d854b3`. Separate cleanup PR pending merge; version remains 3.12.0, unpublished. See `docs/phases/role-neutrality-polish.md`.
 - **Depends on:** Phase 51
