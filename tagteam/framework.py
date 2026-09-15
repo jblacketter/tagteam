@@ -322,9 +322,9 @@ def _skill_items(root: Path, data_dir: Path, vendor: bool,
         return [it]
     # Vendoring: SKILL.md is a managed file; the directory's other entries are
     # never touched.
-    src = data_dir / ".claude" / "skills" / "handoff" / "SKILL.md"
+    src = data_dir / SKILL_REL
     package = src.read_bytes()
-    it = Item(SKILL_REL, "skill", source=src, source_rel=".claude/skills/handoff/SKILL.md",
+    it = Item(SKILL_REL, "skill", source=src, source_rel=SKILL_REL,
               package_sha=sha256_bytes(package), entry=entries.get(SKILL_REL))
     dshape = observe_dir(root, SKILL_DIR_REL)
     if dshape.kind == "unsupported":
