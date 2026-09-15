@@ -29,7 +29,7 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 - **Depends on:** Phase 52
 
 ### Phase 55: Measure the loop
-- **Status:** In review — plan approved round 3 (2026-09-14); implementation cycle open on `phase/measure-the-loop`. See `docs/phases/measure-the-loop.md`.
+- **Status:** ✅ Complete — plan approved round 3, impl approved round 3 (2026-09-14); gate: 1,938 passed, 5 skipped at `a43b370`. Branch `phase/measure-the-loop`; PR merge pending. See `docs/phases/measure-the-loop.md`.
 - **Description:** Read-only measurement from data tagteam already stores: `tagteam report --phase P` (rounds, change requests, gate bounces and minutes, per-role elapsed turn time, start-to-approve, tokens where headless turns recorded them), `tagteam usage --by model|kind`, per-model token capture from Claude `modelUsage` (schema v10), and no dollar figures in any human-facing view. Source: `docs/research/2026-09-14-better-tagteam/`. `tagteam grade` is a separate later phase; no reading of user-level transcripts.
 
 ### Phase 50: Read-only Mode
