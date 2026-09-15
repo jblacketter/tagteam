@@ -402,6 +402,7 @@ Commands:
   interject     Leave an arbiter note for the next turn (--to lead|reviewer, --list, --retire)
   usage         Per-turn token usage for this project (--by role|cycle|model|kind, --json)
   report        What a phase took: rounds, bounces, gate and turn time, usage coverage (--phase P, --json)
+  bench         Review bench: replay recorded rounds at reviewer cells (select | run [--yes] | table)
   rollback      Print (or with --yes run) the revert recipe for a given version
   brief         Show the escalation decision brief for the current event (--list, --generate)
   gate          Gatekeeper pre-checks: check (lead pre-flight) | run | status | list
@@ -486,7 +487,7 @@ READ_ONLY_COMMANDS: dict[str, "callable"] = {
 # Never a helper's business: parents, humans and installers only. Refused with
 # any arguments — `--help` included (see `read_only_refusal`).
 READ_ONLY_REFUSED = ("quickstart", "init", "setup", "migrate", "watch", "pause", "resume", "cancel-turn",
-                     "rollback", "rule", "session", "serve", "lead", "tui", "upgrade")
+                     "rollback", "rule", "session", "serve", "lead", "tui", "upgrade", "bench")
 
 
 def read_only_refusal(argv: list[str]) -> str | None:
@@ -597,6 +598,10 @@ def _dispatch() -> int:
         from tagteam.report import report_command
 
         return report_command(sys.argv[2:])
+    if command == "bench":
+        from tagteam.bench import bench_command
+
+        return bench_command(sys.argv[2:])
     if command == "rollback":
         from tagteam.controls import rollback_command
 

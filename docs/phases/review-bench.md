@@ -3,7 +3,7 @@
 ## Status
 - [x] Planning
 - [x] Approved: plan round 2 (2026-09-14)
-- [ ] Implementation: phase/review-bench
+- [x] Implementation: phase/review-bench
 - [ ] Implementation Review
 - [ ] Complete
 
