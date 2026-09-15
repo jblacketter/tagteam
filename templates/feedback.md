@@ -1,6 +1,6 @@
 # Feedback: [Phase Name] - [Plan/Implementation] Review
 
-**Reviewer:** Codex
+**Reviewer:** Reviewer (read current tagteam.yaml)
 **Date:** [YYYY-MM-DD]
 **Handoff:** `docs/handoffs/[handoff_file].md`
 

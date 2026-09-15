@@ -2,8 +2,8 @@
 
 ## Current State
 - **Phase:** [name] - [status]
-- **Lead:** Claude
-- **Reviewer:** Codex
+- **Lead:** Lead (read current tagteam.yaml)
+- **Reviewer:** Reviewer (read current tagteam.yaml)
 
 ## Active Context
 [Summary of what is being worked on]

@@ -1,7 +1,7 @@
 # Implementation Log: [Phase Name]
 
 **Started:** [YYYY-MM-DD]
-**Lead:** Claude
+**Lead:** Lead (read current tagteam.yaml)
 **Plan:** docs/phases/[phase_name].md
 
 ## Progress

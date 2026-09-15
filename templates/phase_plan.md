@@ -9,8 +9,8 @@
 - [ ] Complete
 
 ## Roles
-- Lead: Claude
-- Reviewer: Codex
+- Lead: Lead (read current tagteam.yaml)
+- Reviewer: Reviewer (read current tagteam.yaml)
 - Arbiter: Human
 
 ## Summary

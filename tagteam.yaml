@@ -3,14 +3,16 @@
 
 agents:
   lead:
-    name: codex
-  reviewer:
     name: claude
+  reviewer:
+    name: codex
 
-# Escalation briefer and synchronous implementation gate, restored from HEAD.
+# Escalation briefer: writes a decision brief when a cycle escalates.
 briefer:
   enabled: true
 
+# Synchronous implementation gate: the lead's `cycle add` runs the suite +
+# scope + plan-doc checks — the round's one full-suite run on the record.
 gatekeeper:
   enabled: true
   on_submit: true
