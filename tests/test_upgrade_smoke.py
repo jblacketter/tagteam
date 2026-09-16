@@ -313,3 +313,71 @@ def test_installed_wheel_migrates_old_project(wheel_venv, tmp_path, monkeypatch,
     assert code == 0, rep
     assert rep["problems"] == [] and rep["project_diff"] == []
     assert "All 1 project(s) upgraded successfully." in rep["helper_stdout"]
+
+
+# ---------------------------------------------------------------------------
+# Stale build metadata in the checkout
+# ---------------------------------------------------------------------------
+
+def _load_smoke_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "_upgrade_smoke", REPO / "scripts" / "upgrade_smoke.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _fake_checkout(tmp_path: Path, declared: str, egg_version: str | None) -> Path:
+    repo = tmp_path / "checkout"
+    repo.mkdir()
+    (repo / "pyproject.toml").write_text(
+        f'[project]\nname = "tagteam"\nversion = "{declared}"\n', encoding="utf-8")
+    if egg_version is not None:
+        egg = repo / "tagteam.egg-info"
+        egg.mkdir()
+        (egg / "PKG-INFO").write_text(
+            f"Metadata-Version: 2.1\nName: tagteam\nVersion: {egg_version}\n",
+            encoding="utf-8")
+    return repo
+
+
+class TestStaleEggInfo:
+    """`uv build` leaves `tagteam.egg-info/` in the checkout. With the repo
+    root on `sys.path`, that is a discoverable distribution, so the version
+    `importlib.metadata` answers with can depend on the working directory.
+    The symptoms surface far from the cause, so the harness names it."""
+
+    def test_disagreeing_egg_info_is_reported(self, tmp_path):
+        mod = _load_smoke_module()
+        repo = _fake_checkout(tmp_path, "3.12.0", "3.13.0.dev0")
+        problems = mod.stale_egg_info(repo)
+        assert len(problems) == 1
+        p = problems[0]
+        assert "stale build metadata" in p
+        assert "tagteam.egg-info" in p
+        assert "'3.13.0.dev0'" in p and "'3.12.0'" in p
+        assert "rm -rf" in p          # the remedy, not just the diagnosis
+
+    def test_agreeing_egg_info_is_not_a_problem(self, tmp_path):
+        mod = _load_smoke_module()
+        repo = _fake_checkout(tmp_path, "3.12.0", "3.12.0")
+        assert mod.stale_egg_info(repo) == []
+
+    def test_no_egg_info_is_not_a_problem(self, tmp_path):
+        mod = _load_smoke_module()
+        repo = _fake_checkout(tmp_path, "3.12.0", None)
+        assert mod.stale_egg_info(repo) == []
+
+    def test_unreadable_pyproject_is_not_a_problem(self, tmp_path):
+        """No pyproject to compare against: say nothing rather than guess."""
+        mod = _load_smoke_module()
+        repo = tmp_path / "bare"
+        repo.mkdir()
+        assert mod.stale_egg_info(repo) == []
+
+    def test_this_checkout_is_clean(self):
+        """The repo the suite runs from must not carry stale metadata — this
+        is the assertion that would have caught the original failure."""
+        mod = _load_smoke_module()
+        assert mod.stale_egg_info(REPO) == []

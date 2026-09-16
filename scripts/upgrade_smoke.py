@@ -152,6 +152,57 @@ def _real_registry() -> tuple[Path | None, list[str]]:
     return path, entries
 
 
+REPO = Path(__file__).resolve().parents[1]
+
+
+def _pyproject_version(repo: Path) -> str | None:
+    """The version `pyproject.toml` declares, or None if it cannot be read."""
+    try:
+        text = (repo / "pyproject.toml").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("version") and "=" in stripped:
+            return stripped.split("=", 1)[1].strip().strip('"\'')
+    return None
+
+
+def stale_egg_info(repo: Path = REPO) -> list[str]:
+    """Problems caused by build metadata left in the checkout.
+
+    `uv build` / `pip wheel` leave a `*.egg-info/` behind. When the repo root
+    is on `sys.path` — which it is for anything run with the checkout as its
+    working directory — that directory is discovered as an installed
+    distribution, so `importlib.metadata.version("tagteam")` can answer with
+    its stale `Version:` instead of the one the checkout declares. The
+    symptoms show up far from the cause (a manifest written with one version
+    and re-read with another, an unexplained `project_diff`), so name it here
+    rather than let it surface as a diff.
+    """
+    declared = _pyproject_version(repo)
+    if declared is None:
+        return []
+    problems: list[str] = []
+    for egg in sorted(repo.glob("*.egg-info")):
+        pkg_info = egg / "PKG-INFO"
+        try:
+            lines = pkg_info.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        found = next((l.split(":", 1)[1].strip()
+                      for l in lines if l.startswith("Version:")), None)
+        if found is not None and found != declared:
+            problems.append(
+                f"stale build metadata: {egg.name}/PKG-INFO says version "
+                f"{found!r} but pyproject.toml declares {declared!r}. "
+                f"Remove it (rm -rf {egg.name} build dist) and re-run; while "
+                f"it is there, importlib.metadata can report either version "
+                f"depending on the working directory."
+            )
+    return problems
+
+
 def run(project: Path, sentinel: Path | None, python: str, expect_version: str | None,
         preview: bool = False) -> tuple[int, dict]:
     report: dict = {"project": str(project), "sentinel": str(sentinel) if sentinel else None,
@@ -204,7 +255,7 @@ def run(project: Path, sentinel: Path | None, python: str, expect_version: str |
     report["helper"] = ident
 
     # ---- identity checks, before `go`
-    problems: list[str] = []
+    problems: list[str] = list(stale_egg_info())
     try:
         same_exe = Path(ident["executable"]).resolve() == Path(python).resolve() or os.path.samefile(ident["executable"], python)
     except OSError:
