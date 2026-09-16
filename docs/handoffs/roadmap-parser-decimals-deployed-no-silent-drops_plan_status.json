@@ -1,0 +1,19 @@
+{
+  "state": "in-progress",
+  "ready_for": "reviewer",
+  "round": 1,
+  "phase": "roadmap-parser-decimals-deployed-no-silent-drops",
+  "type": "plan",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-16",
+  "baseline": {
+    "sha": "86d1588162325249dc1662951ca7177d4487cf3b",
+    "dirty_paths": [
+      " M docs/roadmap.md",
+      "?? docs/phases/roadmap-parser-decimals-deployed-no-silent-drops.md"
+    ],
+    "captured_at": "2026-09-16T05:31:13.576161+00:00",
+    "source": "plan-init"
+  }
+}
