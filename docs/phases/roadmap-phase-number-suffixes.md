@@ -3,8 +3,8 @@
 ## Status
 - [x] Planning: approved round 1 (2026-09-15)
 - [x] Implementation: branch `phase/roadmap-phase-number-suffixes`
-- [ ] Implementation Review
-- [ ] Complete
+- [x] Implementation Review: **skipped** — closed by arbiter decision
+- [x] Complete: merged to main at `8e12e8b`
 
 ## Summary
 `### Phase 58a: Watcher SIGTERM test in event mode` is invisible to the roadmap
@@ -93,3 +93,21 @@ author put them and no tie-break rule is needed.
    `test_roadmap.py` assertions, including `[p.number for p in phases] ==
    [1, 2, 3, 4]`).
 6. Full suite green at submission.
+
+## Closeout
+Plan approved by codex round 1. Implementation submitted round 2 and passed
+the on-submit gate: 2,006 passed, 5 skipped at `9a9b0cc`. Round 1 bounced on
+three failures that were environmental, not Phase 59 — a `pyproject.toml`
+version bump made for an unrelated local wheel test, and a stale
+`tagteam.egg-info/` left in the checkout by `uv build`; both were reverted
+or removed and each was isolated before re-submitting.
+
+The implementation review round was **not** run. The arbiter closed the phase
+directly and merged (`8e12e8b`), so no reviewer verdict exists for the impl
+cycle — `docs/handoffs/roadmap-phase-number-suffixes_impl_*` records the
+submission and the gate result only.
+
+Result on this repo's own roadmap: 60 of 60 `### Phase` headings parse
+(58 of 59 before), `58a` is present, and `Phase 58` / `Phase 58a` resolve to
+different phases. Bugalizer's `- **Depends on:** Phase 5b` resolves without
+any edit to its roadmap.
