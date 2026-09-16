@@ -9,6 +9,10 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 
 ## Phases
 
+### Phase 59: Roadmap phase-number suffixes
+- **Status:** Planning
+- **Description:** `### Phase 58a:` never matches `_PHASE_HEADING_RE` (`(\d+):` rejects the `a`), so a suffixed phase is not parsed at all — this repo's roadmap has 59 headings and parses 58, and bugalizer's valid `- **Depends on:** Phase 5b` fails as an unknown dependency. Carry an optional single-letter suffix through heading parsing, reference resolution and duplicate detection, keyed as `(number, suffix)` so `Phase 5` and `Phase 5b` stay distinct and neither is reported as a duplicate of the other. Parser only; no renumbering, no ordering change. See `docs/phases/roadmap-phase-number-suffixes.md`.
+
 ### Phase 58a: Watcher SIGTERM test in event mode
 - **Status:** ✅ Complete — impl approved round 1 (2026-09-15); gate: 1,995 passed, 5 skipped at `c75d52f`; PR #42 CI (with watchdog): 2,007 passed, 4 skipped. See `docs/phases/watcher-sigterm-test-event-mode.md`.
 - **Description:** CI (with `watchdog`) failed a Phase 58 test that asserted the poll loop's `Watcher stopped.` log line; the event loop exits cleanly without it. Assert the clean exit (code, pidfile, lock) instead.
