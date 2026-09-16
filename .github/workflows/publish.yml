@@ -10,7 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
-      id-token: write
+      id-token: write      # PyPI trusted publishing
+      contents: write      # create the GitHub Release for the tag
     steps:
       - uses: actions/checkout@v4
         with:
@@ -58,3 +59,19 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+      # Runs only after PyPI succeeds, so a Release never advertises a version
+      # that failed to publish. Idempotent: a Release written by hand before the
+      # tag was pushed (v3.13.0 was) keeps its body — this never overwrites one.
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "Release ${GITHUB_REF_NAME} already exists — leaving its body alone."
+            exit 0
+          fi
+          gh release create "${GITHUB_REF_NAME}" \
+            --verify-tag \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes
