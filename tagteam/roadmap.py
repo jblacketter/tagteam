@@ -37,6 +37,12 @@ class RoadmapPhase:
     # could not be resolved is kept verbatim so `check_graph` can report it;
     # `parse_roadmap` itself stays lenient.
     depends_on: list[str] = field(default_factory=list)
+    # Phase 59: an optional single-letter heading suffix (`### Phase 58a:`),
+    # normalized to lowercase. Appended last so positional construction of the
+    # earlier fields keeps working. Phase identity is the (number, suffix)
+    # pair: `Phase 5` and `Phase 5b` are different phases, and neither is a
+    # duplicate of the other.
+    suffix: str = ""
 
 
 class RoadmapGraphError(ValueError):
@@ -50,12 +56,12 @@ class RoadmapGraphError(ValueError):
 
 # Pattern: ### Phase N: <name>
 _PHASE_HEADING_RE = re.compile(
-    r"^###[ \t]+Phase[ \t]+(\d+):[ \t]+(.+)$", re.MULTILINE
+    r"^###[ \t]+Phase[ \t]+(\d+)([A-Za-z]?):[ \t]+(.+)$", re.MULTILINE
 )
 # Lenient heading scan for identity validation: also matches a bare
 # `### Phase N:` (no name) that the strict pattern skips.
 _PHASE_HEADING_LENIENT_RE = re.compile(
-    r"^###[ \t]+Phase[ \t]+(\d+):[ \t]*(.*)$", re.MULTILINE
+    r"^###[ \t]+Phase[ \t]+(\d+)([A-Za-z]?):[ \t]*(.*)$", re.MULTILINE
 )
 
 # Pattern: - **Status:** <status>
@@ -68,8 +74,10 @@ _DEPENDS_RE = re.compile(
     r"^-\s+\*\*Depends on:?\*\*:?\s*(.*)$", re.MULTILINE | re.IGNORECASE
 )
 _DEP_NONE_WORDS = frozenset({"", "none", "nothing", "-", "—", "n/a", "na"})
-_PHASE_NUM_REF_RE = re.compile(r"^phase[\s_-]*(\d+)$", re.IGNORECASE)
-_PHASE_NUM_SLUG_REF_RE = re.compile(r"^phase-(\d+)-(.+)$", re.IGNORECASE)
+_PHASE_NUM_REF_RE = re.compile(
+    r"^phase[\s_-]*(\d+)([A-Za-z]?)$", re.IGNORECASE)
+_PHASE_NUM_SLUG_REF_RE = re.compile(
+    r"^phase-(\d+)([A-Za-z]?)-(.+)$", re.IGNORECASE)
 
 
 def _slugify(name: str) -> str:
@@ -110,7 +118,8 @@ def parse_roadmap(roadmap_path: Path) -> list[RoadmapPhase]:
     raw_deps: list[list[str]] = []
     for i, match in enumerate(headings):
         number = int(match.group(1))
-        name = match.group(2).strip()
+        suffix = match.group(2).lower()
+        name = match.group(3).strip()
         slug = _slugify(name)
 
         # Extract the section text between this heading and the next
@@ -123,7 +132,7 @@ def parse_roadmap(roadmap_path: Path) -> list[RoadmapPhase]:
         status = status_match.group(1).strip() if status_match else "Unknown"
 
         phases.append(RoadmapPhase(slug=slug, name=name, status=status,
-                                   number=number))
+                                   number=number, suffix=suffix))
         raw_deps.append(_split_dep_refs(section))
 
     # Second pass: resolve dependency references against the full phase list.
@@ -159,7 +168,8 @@ def _resolve_ref(ref: str, phases: list[RoadmapPhase]) -> RoadmapPhase | None:
     text = ref.strip()
     m = _PHASE_NUM_REF_RE.match(text)
     if m:
-        hits = [p for p in phases if p.number == int(m.group(1))]
+        want = (int(m.group(1)), m.group(2).lower())
+        hits = [p for p in phases if (p.number, p.suffix) == want]
         return hits[0] if len(hits) == 1 else None
     folded = text.casefold()
     for p in phases:
@@ -171,7 +181,7 @@ def _resolve_ref(ref: str, phases: list[RoadmapPhase]) -> RoadmapPhase | None:
             return p
     m = _PHASE_NUM_SLUG_REF_RE.match(text)
     if m:
-        inner = _slugify(m.group(2))
+        inner = _slugify(m.group(3))
         for p in phases:
             if inner and p.slug == inner:
                 return p
@@ -231,25 +241,29 @@ def validate_identities(roadmap_text: str) -> list[str]:
     (including a bare `### Phase N:` the strict parser skips), duplicate
     heading numbers, duplicate normalized slugs. Empty list = clean."""
     problems: list[str] = []
-    numbers: dict[int, list[str]] = {}
+    # Phase 59: keyed on the (number, suffix) pair. Keying on the bare number
+    # would report a roadmap carrying both `Phase 5` and `Phase 5b` as a
+    # duplicate and refuse it.
+    numbers: dict[tuple[int, str], list[str]] = {}
     slugs: dict[str, list[str]] = {}
     for m in _PHASE_HEADING_LENIENT_RE.finditer(roadmap_text):
         number = int(m.group(1))
-        name = m.group(2).strip()
-        label = f"Phase {number}"
+        suffix = m.group(2).lower()
+        name = m.group(3).strip()
+        label = f"Phase {number}{suffix}"
         if not name:
             problems.append(f"{label}: empty name")
-        numbers.setdefault(number, []).append(name or "(empty)")
+        numbers.setdefault((number, suffix), []).append(name or "(empty)")
         if name:
             slug = _slugify(name)
             if not slug:
                 problems.append(f"{label}: empty normalized slug ({name!r})")
             else:
                 slugs.setdefault(slug, []).append(label)
-    for number, names in sorted(numbers.items()):
+    for (number, suffix), names in sorted(numbers.items()):
         if len(names) > 1:
             problems.append(
-                f"duplicate phase number {number}: " + ", ".join(names))
+                f"duplicate phase number {number}{suffix}: " + ", ".join(names))
     for slug, labels in slugs.items():
         if len(labels) > 1:
             problems.append(

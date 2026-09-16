@@ -8,11 +8,14 @@ import pytest
 
 from tagteam.roadmap import (
     RoadmapPhase,
+    _resolve_ref,
     _slugify,
     parse_roadmap,
     get_incomplete_phases,
     build_queue,
     roadmap_command,
+    validate_graph,
+    validate_identities,
 )
 from tagteam.state import (
     VALID_RUN_MODES,
@@ -941,3 +944,101 @@ class TestImplRound2Fixes:
         state = _roadmap_state(tmp_path, phase="real", queue=["real", "x"], index=0, completed=[])
         new = _try_roadmap_advance(state, str(tmp_path))
         assert new["status"] == "escalated" and "empty normalized slug" in new["roadmap"]["pause_reason"]
+
+
+# ── Phase 59: suffixed phase numbers ─────────────────────────────
+
+SUFFIX_ROADMAP = """\
+# Roadmap
+
+## Phases
+
+### Phase 5: Deployment Readiness
+- **Status:** Complete
+
+### Phase 5b: Dashboard UX
+- **Status:** Complete
+
+### Phase 6: Integrations
+- **Status:** Not Started
+- **Depends on:** Phase 5b
+
+### Phase 7: Revive
+- **Status:** Not Started
+- **Depends on:** Phase 5
+"""
+
+
+class TestSuffixedPhaseNumbers:
+    """A `### Phase 58a:` heading used to match nothing: `(\\d+):` took the
+    digits and then demanded a colon. The phase vanished from the parse —
+    unqueueable, unstartable, and invalid as a dependency target."""
+
+    def test_suffixed_heading_is_parsed(self, tmp_path):
+        phases = _phases(tmp_path, SUFFIX_ROADMAP)
+        assert [(p.number, p.suffix) for p in phases] == [
+            (5, ""), (5, "b"), (6, ""), (7, ""),
+        ]
+        assert [p.slug for p in phases] == [
+            "deployment-readiness", "dashboard-ux", "integrations", "revive",
+        ]
+
+    def test_dependency_on_a_suffixed_phase_resolves(self, tmp_path):
+        """The bugalizer shape: a valid `- **Depends on:** Phase 5b` was
+        reported as an unknown dependency because 5b was never parsed."""
+        phases = _phases(tmp_path, SUFFIX_ROADMAP)
+        by = {p.slug: p for p in phases}
+        assert by["integrations"].depends_on == ["dashboard-ux"]
+        assert validate_graph(phases) == []
+
+    def test_suffixed_and_unsuffixed_do_not_cross_resolve(self, tmp_path):
+        phases = _phases(tmp_path, SUFFIX_ROADMAP)
+        assert _resolve_ref("Phase 5", phases).slug == "deployment-readiness"
+        assert _resolve_ref("Phase 5b", phases).slug == "dashboard-ux"
+        # `Phase 7` depends on `Phase 5`, not on `Phase 5b`.
+        by = {p.slug: p for p in phases}
+        assert by["revive"].depends_on == ["deployment-readiness"]
+
+    def test_suffix_case_is_normalized(self, tmp_path):
+        phases = _phases(tmp_path, SUFFIX_ROADMAP.replace(
+            "### Phase 5b: Dashboard UX", "### Phase 5B: Dashboard UX"))
+        assert [(p.number, p.suffix) for p in phases][1] == (5, "b")
+        for ref in ("Phase 5b", "Phase 5B", "phase-5b", "phase 5B"):
+            assert _resolve_ref(ref, phases).slug == "dashboard-ux", ref
+
+    def test_state_format_reference_accepts_a_suffix(self, tmp_path):
+        phases = _phases(tmp_path, SUFFIX_ROADMAP)
+        assert _resolve_ref("phase-5b-dashboard-ux", phases).slug == "dashboard-ux"
+        assert _resolve_ref("phase-5-deployment-readiness", phases).slug == (
+            "deployment-readiness")
+
+    def test_number_and_suffix_pair_is_the_identity(self, tmp_path):
+        """Keying duplicates on the bare number would refuse this roadmap for
+        `duplicate phase number 5` — worse than the bug being fixed."""
+        assert validate_identities(textwrap.dedent(SUFFIX_ROADMAP)) == []
+
+    def test_a_real_duplicate_suffixed_number_is_still_reported(self, tmp_path):
+        text = textwrap.dedent(SUFFIX_ROADMAP) + (
+            "\n### Phase 5b: Something Else\n- **Status:** Not Started\n")
+        problems = validate_identities(text)
+        assert any("duplicate phase number 5b" in p for p in problems), problems
+
+    def test_empty_suffixed_heading_is_labelled_with_its_suffix(self):
+        problems = validate_identities("### Phase 5b:\n")
+        assert problems == ["Phase 5b: empty name"]
+
+    def test_queue_order_is_document_order(self, tmp_path):
+        """`number` is not a sort key and must not become one."""
+        roadmap = _write_roadmap(tmp_path, SUFFIX_ROADMAP)
+        assert build_queue(roadmap) == ["integrations", "revive"]
+
+    def test_unsuffixed_roadmaps_are_unchanged(self, tmp_path):
+        phases = _phases(tmp_path, SAMPLE_ROADMAP)
+        assert [p.number for p in phases] == [1, 2, 3, 4]
+        assert all(p.suffix == "" for p in phases)
+
+    def test_positional_construction_still_works(self):
+        """`suffix` is appended last so existing positional callers keep
+        working."""
+        p = RoadmapPhase("slug", "Name", "Not Started", 5)
+        assert (p.number, p.suffix) == (5, "")
