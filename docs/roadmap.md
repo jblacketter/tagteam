@@ -10,7 +10,7 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 ## Phases
 
 ### Phase 60: Roadmap parser: decimals, deployed, no silent drops
-- **Status:** Not started — plan cycle opened 2026-09-15.
+- **Status:** ✅ Complete — plan approved round 1 (2026-09-15); impl approved round 1 (2026-09-16); gate: 2,030 passed, 5 skipped at `3f23845`. Branch `phase/roadmap-parser-decimals-deployed-no-silent-drops`; PR merge pending. **On release:** the release body must note that decimal-numbered phases previously omitted can now enter `roadmap ready`/`queue`. See `docs/phases/roadmap-parser-decimals-deployed-no-silent-drops.md`.
 - **Description:** Three fixes in `tagteam/roadmap.py`, from defects found running tagteam against Liminal. (1) `### Phase 9.1:` matches neither `_PHASE_HEADING_RE` nor `_PHASE_HEADING_LENIENT_RE`, so a decimal-numbered phase is invisible to parsing *and* to identity validation — Liminal has 28 headings, parses 26, silent for ~2 months. Direct sequel to Phase 59, which fixed letters and ruled dotted suffixes out as "speculation". (2) `_TERMINAL_STATUS_WORDS` lacks `deployed`, so a deployed phase never leaves `roadmap ready`. (3) The class defect: a heading that looks like a phase and fails to parse is dropped silently — new non-fatal `warn:` channel in `roadmap check` (separate from `problems`, which are fatal via `check_graph`) so the next unrecognized shape is loud instead. Ships as a plain bug fix; newly-visible phases are a release-note behavior change. See `docs/phases/roadmap-parser-decimals-deployed-no-silent-drops.md`.
 - **Depends on:** Phase 59
 

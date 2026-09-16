@@ -3,8 +3,8 @@
 ## Status
 - [x] Planning: approved round 1 (2026-09-15)
 - [x] Implementation: branch `phase/roadmap-parser-decimals-deployed-no-silent-drops`
-- [ ] Implementation Review
-- [ ] Complete
+- [x] Implementation Review: approved round 1 (2026-09-16) at `3f23845`
+- [ ] Complete: PR open, merge pending
 
 ## Summary
 Two parser defects found on 2026-09-15 while running tagteam against
@@ -178,3 +178,31 @@ not by Liminal.
 - **New warning on existing roadmaps.** If a project has a `### Phase …` line
   that was never meant to be a phase, it now prints a `warn:`. Non-fatal by
   construction; that is the whole design of the separate channel.
+
+
+## Closeout
+
+```
+Phase report: roadmap-parser-decimals-deployed-no-silent-drops — plan approved r1 · impl approved r1
+  plan   1 round · 0 change requests · 0 bounces
+  impl   1 round · 0 change requests · 0 bounces · gate 1 run, 5m 56s
+  time   start→approve 12m 32s · implementation before first submit 4m 44s
+         lead unknown (0 spans, 2 unknown) · reviewer 1m 51s (2 spans) · gate 5m 57s (1 span)  (elapsed; includes relay wait)
+  usage  no usage rows stored under this phase
+  turns  matched 0 of 4 · no token data 0 · unmatched 2 · unknown 2
+```
+
+Gate: 2,030 passed, 5 skipped (5m56s) at `3f23845`. Reviewer accepted the gate
+without rerunning the suite and did a focused run of `tests/test_roadmap.py`
+(102 passed) plus `git diff --check`.
+
+**Carried forward — do not lose these:**
+
+1. **Release note.** There is no `CHANGELOG.md`; whenever this ships, the GitHub
+   release body must carry: *decimal-numbered phases that were previously
+   omitted can now enter `roadmap ready` / `roadmap queue`.* Reviewer restated
+   this requirement on approval.
+2. **Liminal.** The live roadmap no longer reproduces the defect — its decimal
+   headings appear to have been renamed as a workaround before this fix landed.
+   If so, that rename can be reverted once this ships. Liminal's call, not this
+   phase's.
