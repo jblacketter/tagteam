@@ -202,7 +202,8 @@ without rerunning the suite and did a focused run of `tests/test_roadmap.py`
    release body must carry: *decimal-numbered phases that were previously
    omitted can now enter `roadmap ready` / `roadmap queue`.* Reviewer restated
    this requirement on approval.
-2. **Liminal.** The live roadmap no longer reproduces the defect — its decimal
-   headings appear to have been renamed as a workaround before this fix landed.
-   If so, that rename can be reverted once this ships. Liminal's call, not this
+2. **Liminal.** The live roadmap no longer reproduces the defect, and the
+   reason is now confirmed rather than inferred: Liminal renumbered `9.1`/`9.2`
+   to `9a`/`9b` to unblock itself, using the letter form Phase 59 had made work.
+   That workaround can be reverted once this ships. Liminal's call, not this
    phase's.
