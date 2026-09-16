@@ -9,6 +9,11 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 
 ## Phases
 
+### Phase 60: Roadmap parser: decimals, deployed, no silent drops
+- **Status:** Not started — plan cycle opened 2026-09-15.
+- **Description:** Three fixes in `tagteam/roadmap.py`, from defects found running tagteam against Liminal. (1) `### Phase 9.1:` matches neither `_PHASE_HEADING_RE` nor `_PHASE_HEADING_LENIENT_RE`, so a decimal-numbered phase is invisible to parsing *and* to identity validation — Liminal has 28 headings, parses 26, silent for ~2 months. Direct sequel to Phase 59, which fixed letters and ruled dotted suffixes out as "speculation". (2) `_TERMINAL_STATUS_WORDS` lacks `deployed`, so a deployed phase never leaves `roadmap ready`. (3) The class defect: a heading that looks like a phase and fails to parse is dropped silently — new non-fatal `warn:` channel in `roadmap check` (separate from `problems`, which are fatal via `check_graph`) so the next unrecognized shape is loud instead. Ships as a plain bug fix; newly-visible phases are a release-note behavior change. See `docs/phases/roadmap-parser-decimals-deployed-no-silent-drops.md`.
+- **Depends on:** Phase 59
+
 ### Phase 59: Roadmap phase-number suffixes
 - **Status:** ✅ Complete — plan approved round 1 (2026-09-15); impl gate: 2,006 passed, 5 skipped at `9a9b0cc`; impl review skipped, closed by arbiter decision and merged at `8e12e8b`. See `docs/phases/roadmap-phase-number-suffixes.md`.
 - **Description:** `### Phase 58a:` never matches `_PHASE_HEADING_RE` (`(\d+):` rejects the `a`), so a suffixed phase is not parsed at all — this repo's roadmap has 59 headings and parses 58, and bugalizer's valid `- **Depends on:** Phase 5b` fails as an unknown dependency. Carry an optional single-letter suffix through heading parsing, reference resolution and duplicate detection, keyed as `(number, suffix)` so `Phase 5` and `Phase 5b` stay distinct and neither is reported as a duplicate of the other. Parser only; no renumbering, no ordering change. See `docs/phases/roadmap-phase-number-suffixes.md`.
