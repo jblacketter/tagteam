@@ -54,15 +54,30 @@ class RoadmapGraphError(ValueError):
         super().__init__("roadmap invalid: " + "; ".join(self.problems))
 
 
-# Pattern: ### Phase N: <name>
+# Phase 60: the heading suffix, as one fragment shared by every pattern that
+# has to understand a phase number. Phase 59 widened `(\d+):` to accept a
+# letter by editing four patterns independently; the dotted form was ruled out
+# as speculation and turned up in the wild two months later. Keeping the
+# fragment in one place is what stops the next widening from reaching three of
+# the four sites. Two non-empty alternatives under one `?` rather than
+# `(?:\.\d+)?|[A-Za-z]?` — the latter matches empty on its first branch and
+# only reaches the letter by backtracking. The group is optional, so callers
+# read it as `(m.group(2) or "")`.
+_SUFFIX = r"((?:\.\d+)|[A-Za-z])?"
+
+# Pattern: ### Phase N: <name>   (N may carry a suffix: 58a, 9.1)
 _PHASE_HEADING_RE = re.compile(
-    r"^###[ \t]+Phase[ \t]+(\d+)([A-Za-z]?):[ \t]+(.+)$", re.MULTILINE
+    r"^###[ \t]+Phase[ \t]+(\d+)" + _SUFFIX + r":[ \t]+(.+)$", re.MULTILINE
 )
 # Lenient heading scan for identity validation: also matches a bare
 # `### Phase N:` (no name) that the strict pattern skips.
 _PHASE_HEADING_LENIENT_RE = re.compile(
-    r"^###[ \t]+Phase[ \t]+(\d+)([A-Za-z]?):[ \t]*(.*)$", re.MULTILINE
+    r"^###[ \t]+Phase[ \t]+(\d+)" + _SUFFIX + r":[ \t]*(.*)$", re.MULTILINE
 )
+# Phase 60: a line that *looks* like a phase heading. Anything matching this
+# but not the lenient pattern is an unsupported heading shape — reported as a
+# warning rather than dropped in silence. `\b` keeps `### Phases` out.
+_PHASE_HEADING_SUSPECT_RE = re.compile(r"^###[ \t]+Phase\b.*$", re.MULTILINE)
 
 # Pattern: - **Status:** <status>
 _STATUS_RE = re.compile(
@@ -75,9 +90,9 @@ _DEPENDS_RE = re.compile(
 )
 _DEP_NONE_WORDS = frozenset({"", "none", "nothing", "-", "—", "n/a", "na"})
 _PHASE_NUM_REF_RE = re.compile(
-    r"^phase[\s_-]*(\d+)([A-Za-z]?)$", re.IGNORECASE)
+    r"^phase[\s_-]*(\d+)" + _SUFFIX + r"$", re.IGNORECASE)
 _PHASE_NUM_SLUG_REF_RE = re.compile(
-    r"^phase-(\d+)([A-Za-z]?)-(.+)$", re.IGNORECASE)
+    r"^phase-(\d+)" + _SUFFIX + r"-(.+)$", re.IGNORECASE)
 
 
 def _slugify(name: str) -> str:
@@ -118,7 +133,7 @@ def parse_roadmap(roadmap_path: Path) -> list[RoadmapPhase]:
     raw_deps: list[list[str]] = []
     for i, match in enumerate(headings):
         number = int(match.group(1))
-        suffix = match.group(2).lower()
+        suffix = (match.group(2) or "").lower()
         name = match.group(3).strip()
         slug = _slugify(name)
 
@@ -168,7 +183,7 @@ def _resolve_ref(ref: str, phases: list[RoadmapPhase]) -> RoadmapPhase | None:
     text = ref.strip()
     m = _PHASE_NUM_REF_RE.match(text)
     if m:
-        want = (int(m.group(1)), m.group(2).lower())
+        want = (int(m.group(1)), (m.group(2) or "").lower())
         hits = [p for p in phases if (p.number, p.suffix) == want]
         return hits[0] if len(hits) == 1 else None
     folded = text.casefold()
@@ -194,8 +209,11 @@ def _resolve_ref(ref: str, phases: list[RoadmapPhase]) -> RoadmapPhase | None:
 # normalized prefix (emoji/decoration stripped, case-folded) so free-text
 # after the word does not matter, and only on the *first* word so
 # "Not started" and "In progress" stay actionable.
+# Phase 60: `deployed` joins the list — a phase marked "Deployed to prod"
+# stayed in `roadmap ready` and `roadmap queue` forever.
 _TERMINAL_STATUS_WORDS = ("complete", "completed", "done", "absorbed", "deferred",
-                          "superseded", "shipped", "closed", "decided")
+                          "superseded", "shipped", "closed", "decided",
+                          "deployed")
 _STATUS_DECORATION_RE = re.compile(r"^[^A-Za-z]+")
 
 
@@ -248,7 +266,7 @@ def validate_identities(roadmap_text: str) -> list[str]:
     slugs: dict[str, list[str]] = {}
     for m in _PHASE_HEADING_LENIENT_RE.finditer(roadmap_text):
         number = int(m.group(1))
-        suffix = m.group(2).lower()
+        suffix = (m.group(2) or "").lower()
         name = m.group(3).strip()
         label = f"Phase {number}{suffix}"
         if not name:
@@ -269,6 +287,30 @@ def validate_identities(roadmap_text: str) -> list[str]:
             problems.append(
                 f"duplicate slug '{slug}': " + ", ".join(labels))
     return problems
+
+
+def unparsed_phase_headings(roadmap_text: str) -> list[tuple[int, str]]:
+    """Every `### Phase …` line the parser does not understand, as
+    `(line number, line)` in document order.
+
+    Deliberately NOT part of `validate_identities`: those are *problems*, and
+    `check_graph` raises on any of them, which would turn one quietly-missing
+    phase into a wholly refused roadmap for any project carrying a stray
+    `### Phase notes` line. This is a warning channel — nothing here changes
+    an exit code.
+
+    The guarantee is narrow and exact: a line matching the suspect pattern
+    that the *lenient* heading pattern does not match. It is not a general
+    check for strict/lenient formatting discrepancies.
+    """
+    unparsed: list[tuple[int, str]] = []
+    understood = {m.start() for m in _PHASE_HEADING_LENIENT_RE.finditer(roadmap_text)}
+    for m in _PHASE_HEADING_SUSPECT_RE.finditer(roadmap_text):
+        if m.start() in understood:
+            continue
+        line_no = roadmap_text.count("\n", 0, m.start()) + 1
+        unparsed.append((line_no, m.group(0).strip()))
+    return unparsed
 
 
 def dependency_graph(phases: list[RoadmapPhase]) -> dict[str, list[str]]:
@@ -623,6 +665,15 @@ def roadmap_command(args: list[str]) -> int:
         return 0
 
     if subcmd == "check":
+        # Phase 60: warnings first. `graph_problems` raises when *every*
+        # heading is unsupported ("No phases found"), and returns problems
+        # for unrelated graph errors — in both cases the unsupported headings
+        # are the likeliest cause, so they must be on screen before the error.
+        # Printing them changes no exit code below.
+        if roadmap_path.exists():
+            for line_no, line in unparsed_phase_headings(
+                    roadmap_path.read_text(encoding="utf-8")):
+                print(f"warn: unparsed phase heading (line {line_no}): {line}")
         try:
             phases, problems = graph_problems(roadmap_path)
         except (FileNotFoundError, ValueError) as e:

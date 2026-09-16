@@ -13,7 +13,9 @@ from tagteam.roadmap import (
     parse_roadmap,
     get_incomplete_phases,
     build_queue,
+    is_terminal_status,
     roadmap_command,
+    unparsed_phase_headings,
     validate_graph,
     validate_identities,
 )
@@ -1042,3 +1044,189 @@ class TestSuffixedPhaseNumbers:
         working."""
         p = RoadmapPhase("slug", "Name", "Not Started", 5)
         assert (p.number, p.suffix) == (5, "")
+
+
+# ── Phase 60: decimals, deployed, no silent drops ────────────────
+
+DECIMAL_ROADMAP = """\
+# Roadmap
+
+## Phases
+
+### Phase 9: Ordinary
+- **Status:** Not Started
+
+### Phase 9a: Letter Child
+- **Status:** Not Started
+
+### Phase 9.1: Decimal Child
+- **Status:** Not Started
+
+### Phase 10: Consumer
+- **Status:** Not Started
+- **Depends on:** Phase 9.1
+"""
+
+
+class TestDecimalPhaseNumbers:
+    """`### Phase 9.1:` matched neither the strict nor the lenient pattern:
+    `\\d+` took the `9`, the optional letter matched empty, and the pattern
+    then demanded `:` and found `.`. Missing from the lenient scan too, so the
+    phase was absent from identity validation as well as from the parse —
+    nothing anywhere reported it. Found on Liminal: 28 headings, 26 parsed."""
+
+    def test_decimal_heading_is_parsed(self, tmp_path):
+        phases = _phases(tmp_path, DECIMAL_ROADMAP)
+        assert [(p.number, p.suffix) for p in phases] == [
+            (9, ""), (9, "a"), (9, ".1"), (10, ""),
+        ]
+        assert [p.slug for p in phases] == [
+            "ordinary", "letter-child", "decimal-child", "consumer",
+        ]
+
+    def test_dependency_on_a_decimal_phase_resolves(self, tmp_path):
+        phases = _phases(tmp_path, DECIMAL_ROADMAP)
+        by = {p.slug: p for p in phases}
+        assert by["consumer"].depends_on == ["decimal-child"]
+        assert validate_graph(phases) == []
+
+    def test_decimal_letter_and_bare_are_three_distinct_phases(self, tmp_path):
+        """Keying on the bare number would refuse this roadmap outright."""
+        assert validate_identities(textwrap.dedent(DECIMAL_ROADMAP)) == []
+        phases = _phases(tmp_path, DECIMAL_ROADMAP)
+        assert _resolve_ref("Phase 9", phases).slug == "ordinary"
+        assert _resolve_ref("Phase 9a", phases).slug == "letter-child"
+        assert _resolve_ref("Phase 9.1", phases).slug == "decimal-child"
+
+    def test_decimal_state_format_reference_resolves(self, tmp_path):
+        phases = _phases(tmp_path, DECIMAL_ROADMAP)
+        assert _resolve_ref("phase-9.1-decimal-child", phases).slug == "decimal-child"
+
+    def test_a_repeated_decimal_identity_is_reported(self, tmp_path):
+        text = textwrap.dedent(DECIMAL_ROADMAP) + (
+            "\n### Phase 9.1: Something Else\n- **Status:** Not Started\n")
+        problems = validate_identities(text)
+        assert any("duplicate phase number 9.1" in p for p in problems), problems
+
+    def test_decimal_phase_is_queueable(self, tmp_path):
+        roadmap = _write_roadmap(tmp_path, DECIMAL_ROADMAP)
+        assert build_queue(roadmap) == [
+            "ordinary", "letter-child", "decimal-child", "consumer"]
+
+    def test_letter_suffixes_are_unchanged(self, tmp_path):
+        """Phase 59 behaviour must survive the widening."""
+        phases = _phases(tmp_path, SUFFIX_ROADMAP)
+        assert [(p.number, p.suffix) for p in phases] == [
+            (5, ""), (5, "b"), (6, ""), (7, ""),
+        ]
+        assert _resolve_ref("Phase 5b", phases).slug == "dashboard-ux"
+
+
+class TestDeployedIsTerminal:
+    """A phase marked "Deployed" never left `roadmap ready`."""
+
+    def test_deployed_is_terminal(self):
+        assert is_terminal_status("Deployed") is True
+        assert is_terminal_status("Deployed to prod 2026-09-15") is True
+        assert is_terminal_status("✅ Deployed") is True
+
+    def test_deployed_phase_drops_out_of_incomplete(self, tmp_path):
+        roadmap = _write_roadmap(tmp_path, SAMPLE_ROADMAP.replace(
+            "### Phase 3: Dashboard\n- **Status:** Not Started",
+            "### Phase 3: Dashboard\n- **Status:** Deployed to prod"))
+        assert [p.slug for p in get_incomplete_phases(roadmap)] == [
+            "api-gateway", "ci-integration"]
+
+    def test_non_terminal_words_are_unaffected(self):
+        assert is_terminal_status("Not started") is False
+        assert is_terminal_status("In progress") is False
+        assert is_terminal_status("Deploying") is False
+
+
+class TestUnparsedHeadingWarnings:
+    """The class defect under both bugs: a heading that looks like a phase and
+    does not parse was dropped without a word. That silence is why the decimal
+    bug survived two months, and why Phase 59 existed at all."""
+
+    def test_unsupported_shapes_are_reported_with_line_numbers(self):
+        text = (
+            "# Roadmap\n"              # 1
+            "\n"                        # 2
+            "### Phase 9: Fine\n"       # 3
+            "\n"                        # 4
+            "### Phase 9.1.2: Deep\n"   # 5
+            "\n"                        # 6
+            "### Phase 9-1: Dashed\n"   # 7
+            "\n"                        # 8
+            "### Phase IX: Roman\n"     # 9
+        )
+        assert unparsed_phase_headings(text) == [
+            (5, "### Phase 9.1.2: Deep"),
+            (7, "### Phase 9-1: Dashed"),
+            (9, "### Phase IX: Roman"),
+        ]
+
+    def test_supported_shapes_are_not_reported(self):
+        text = textwrap.dedent(DECIMAL_ROADMAP) + textwrap.dedent(SUFFIX_ROADMAP)
+        assert unparsed_phase_headings(text) == []
+
+    def test_bare_heading_without_a_name_is_not_a_warning(self):
+        """The lenient pattern understands it; `validate_identities` already
+        reports the empty name. The warning is only for shapes nothing parses."""
+        assert unparsed_phase_headings("### Phase 5b:\n") == []
+
+    def test_section_headings_are_not_flagged(self):
+        assert unparsed_phase_headings("### Phases\n## Phases\n") == []
+        assert unparsed_phase_headings(
+            "### ~~Old thing~~ → promoted to Phase 43\n") == []
+
+    def test_check_warns_and_still_exits_zero(self, tmp_path, monkeypatch, capsys):
+        _write_roadmap(tmp_path, textwrap.dedent(DECIMAL_ROADMAP)
+                       + "\n### Phase IX: Roman\n- **Status:** Not Started\n")
+        monkeypatch.chdir(tmp_path)
+
+        assert roadmap_command(["check"]) == 0
+        out = capsys.readouterr().out
+        assert "warn: unparsed phase heading (line 18): ### Phase IX: Roman" in out
+        assert "roadmap ok: 4 phase(s), 1 dependency edge(s)" in out
+
+    def test_clean_roadmap_prints_no_warning(self, tmp_path, monkeypatch, capsys):
+        _write_roadmap(tmp_path, SAMPLE_ROADMAP)
+        monkeypatch.chdir(tmp_path)
+
+        assert roadmap_command(["check"]) == 0
+        assert "warn:" not in capsys.readouterr().out
+
+    def test_warning_shows_when_every_heading_is_unsupported(
+            self, tmp_path, monkeypatch, capsys):
+        """`graph_problems` raises "No phases found" here. The headings are the
+        cause, so they must be on screen — and the exit code stays 1."""
+        _write_roadmap(tmp_path, "# Roadmap\n\n### Phase IX: Roman\n")
+        monkeypatch.chdir(tmp_path)
+
+        assert roadmap_command(["check"]) == 1
+        out = capsys.readouterr().out
+        assert "warn: unparsed phase heading (line 3): ### Phase IX: Roman" in out
+        assert "Error:" in out
+
+    def test_warning_shows_alongside_an_unrelated_graph_error(
+            self, tmp_path, monkeypatch, capsys):
+        _write_roadmap(tmp_path, textwrap.dedent(SAMPLE_ROADMAP)
+                       + "\n### Phase 5: Broken\n- **Depends on:** Phase 99\n"
+                       + "\n### Phase IX: Roman\n")
+        monkeypatch.chdir(tmp_path)
+
+        assert roadmap_command(["check"]) == 1
+        out = capsys.readouterr().out
+        assert "warn: unparsed phase heading" in out
+        assert "roadmap invalid" in out
+
+    def test_warnings_do_not_block_ready_or_queue(self, tmp_path, monkeypatch, capsys):
+        """The whole point of the separate channel: an unsupported heading is
+        visible but never refuses the roadmap."""
+        roadmap = _write_roadmap(tmp_path, textwrap.dedent(SAMPLE_ROADMAP)
+                                 + "\n### Phase IX: Roman\n")
+        monkeypatch.chdir(tmp_path)
+
+        assert build_queue(roadmap) == ["api-gateway", "dashboard", "ci-integration"]
+        assert roadmap_command(["ready"]) == 0
