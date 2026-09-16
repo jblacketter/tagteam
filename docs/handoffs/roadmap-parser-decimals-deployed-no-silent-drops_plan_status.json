@@ -1,6 +1,6 @@
 {
-  "state": "in-progress",
-  "ready_for": "reviewer",
+  "state": "approved",
+  "ready_for": null,
   "round": 1,
   "phase": "roadmap-parser-decimals-deployed-no-silent-drops",
   "type": "plan",
@@ -15,5 +15,13 @@
     ],
     "captured_at": "2026-09-16T05:31:13.576161+00:00",
     "source": "plan-init"
+  },
+  "impl_boundary": {
+    "sha": "247dc03ec4bd953c16c2bf4ee05e0ce8813d5955",
+    "dirty": {
+      "docs/handoffs/roadmap-parser-decimals-deployed-no-silent-drops_plan_rounds.jsonl": "f61732b048b8af062855994e5cc6e1c5e4c400e71b1edf8052f2322f64f500e9"
+    },
+    "captured_at": "2026-09-16T05:32:08.584709+00:00",
+    "source": "plan-approve"
   }
 }

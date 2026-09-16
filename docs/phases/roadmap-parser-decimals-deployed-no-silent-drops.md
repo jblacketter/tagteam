@@ -1,8 +1,8 @@
 # Phase 60: Roadmap parser: decimals, deployed, no silent drops
 
 ## Status
-- [ ] Planning
-- [ ] Implementation
+- [x] Planning: approved round 1 (2026-09-15)
+- [x] Implementation: branch `phase/roadmap-parser-decimals-deployed-no-silent-drops`
 - [ ] Implementation Review
 - [ ] Complete
 
@@ -87,6 +87,18 @@ which compares `(9, ".1")` against `(9, "a")` lexically. That is only for
 stable error-message output, so lexical is fine — but the plan names it so the
 reviewer does not have to rediscover it.
 
+### One shared suffix fragment
+Phase 59 widened `(\d+):` to `(\d+)([A-Za-z]?):` by editing four patterns
+independently. This change touches the same four. Rather than edit them again
+in parallel, the suffix becomes one module-level fragment, `_SUFFIX`, that all
+four compose — so the next widening cannot reach three of the four sites.
+
+Written `((?:\.\d+)|[A-Za-z])?` rather than `((?:\.\d+)?|[A-Za-z]?)`: the
+latter's first branch matches empty, so `Phase 9a:` only reaches the letter by
+backtracking. Two non-empty alternatives under one `?` says what is meant. The
+group is optional, so `group(2)` can be `None` — the three call sites read it
+as `(m.group(2) or "")`.
+
 ### The warning channel (the crux)
 `validate_identities` returns `problems`, and `graph_problems` → `check_graph`
 **raises `RoadmapGraphError` on any non-empty problem list**. `roadmap ready`,
@@ -103,6 +115,11 @@ warning. The new check is a separate, non-fatal channel:
 - `roadmap check` prints `warn:` lines and **does not change its exit code**
   for them. `roadmap ok: N phase(s), M edge(s)` still prints, still exits 0.
 - `ready` / `queue` / `graph` are untouched.
+- Warnings print **before** `graph_problems` runs. That call raises
+  `ValueError("No phases found")` when *every* heading is unsupported, and
+  returns problems for unrelated graph errors; in both cases the unsupported
+  headings are the likeliest cause, so they must reach the screen first.
+  Existing error exit codes are preserved exactly (reviewer note, round 1).
 
 Suspect pattern is `^###[ \t]+Phase\b`. `\b` keeps `### Phases` and the `##
 Phases` section heading out; `### ~~Cockpit hardening~~ → promoted to Phase 43`
@@ -120,11 +137,14 @@ roadmap ok: 60 phase(s), 14 dependency edge(s)
 - `tagteam/roadmap.py` — the four changes above.
 - `tests/test_roadmap.py` — new cases (see Success Criteria).
 - `docs/roadmap.md` — Phase 60 entry.
-- Release notes — the behavior-change note.
+- Release notes — the behavior-change note. There is no `CHANGELOG.md` in this
+  repo; releases go out through `scripts/release.py`, so the note belongs in the
+  GitHub release body for the version that ships this. Recorded here and in the
+  roadmap entry so it is not lost between now and then.
 
 ## Success Criteria
 1. `### Phase 9.1: Name` parses; the phase appears in `parse_roadmap`,
-   `roadmap list`, `roadmap queue` and `roadmap ready`.
+   `roadmap phases`, `roadmap queue` and `roadmap ready`.
 2. `- **Depends on:** Phase 9.1` resolves to that phase; an edge appears in
    `roadmap graph`.
 3. A roadmap holding `Phase 9`, `Phase 9a` and `Phase 9.1` reports **no**
@@ -142,10 +162,14 @@ roadmap ok: 60 phase(s), 14 dependency edge(s)
 ## Verification
 Gatekeeper is `on_submit: true`, so the impl submission's `cycle add` runs the
 one full-suite run on the record. Focused runs on `tests/test_roadmap.py`
-while working. Real-world check before the impl submission: run
-`tagteam roadmap check` and `tagteam roadmap ready` against
-`~/Projects/liminal` with the patched install and confirm the two missing
-phases appear and the deployed one drops out.
+while working. Real-world check, run before the impl submission — **result: inconclusive, and
+it does not support the fix.** `~/projects/journaling/Liminal/docs/roadmap.md`
+now parses 29 of 29 headings with **no** unparsed headings and no non-terminal
+statuses, on the pre-fix parser *and* the post-fix parser alike. The roadmap has
+been edited since the 2026-09-15 finding was recorded (the decimal headings
+appear to have been renamed as a workaround), so it no longer reproduces
+anything. The defects are demonstrated by the recorded repro and the new tests,
+not by Liminal.
 
 ## Risks
 - **Behavior change on upgrade.** Projects with decimal phases will see those
