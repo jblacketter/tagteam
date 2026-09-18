@@ -173,9 +173,9 @@ CONVERSATION = [
      "Reasonable. The CSV export is smaller (one endpoint + a streaming writer) and unblocks "
      "three open tickets; the search index needs the schema change we deferred. I'd swap the "
      "order: export now, index next. If you agree I'll rewrite the roadmap entry and open the "
-     "plan cycle with `/handoff start csv-export`."),
+     "plan cycle with `/tagteam:handoff start csv-export`."),
     ("Agreed — do it.",
-     "Done: roadmap reordered (csv-export before search-index). Say `/handoff start csv-export` "
+     "Done: roadmap reordered (csv-export before search-index). Say `/tagteam:handoff start csv-export` "
      "here or press Start and I'll write the plan for review."),
 ]
 
@@ -286,13 +286,9 @@ def seed(root: Path) -> dict:
         (p / "docs" / "escalations").mkdir(parents=True)
         (p / ".tagteam").mkdir()
         _write_yaml(p)
-        # the handoff skill contract (as `tagteam setup` would install it) —
-        # HeadlessEngine.validate() requires it, so Start headless is offered
-        import shutil
-        from tagteam.setup import get_data_dir
-        skill = get_data_dir() / ".claude" / "skills" / "handoff" / "SKILL.md"
-        (p / ".claude" / "skills" / "handoff").mkdir(parents=True)
-        shutil.copy2(skill, p / ".claude" / "skills" / "handoff" / "SKILL.md")
+        # No vendored .claude/skills/handoff/: demos look like plugin installs
+        # (the Start card shows /tagteam:handoff), and headless validation
+        # falls back to the packaged contract (headless.resolve_skill_path).
         (p / "docs" / "roadmap.md").write_text(
             "# Roadmap\n\n### Phase 1: demo\n- **Status:** In progress\n", encoding="utf-8")
         projects[name] = p
