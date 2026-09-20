@@ -50,25 +50,52 @@ that still leaves the files on disk. The report's own closing section
    | Classification | Action | Report line |
    |---|---|---|
    | absent | none | silent |
-   | `current` / `framework` (bytes provably tagteam's: package match, manifest hash, rendered variant) | `retire` → unlink | `retired  templates/cycle.md — no longer installed; written by tagteam 3.13.0` |
+   | `current`, or `framework` by rendered variant — **reconstructible**: the installed package can reproduce the exact bytes | `retire` → unlink | `retired  templates/cycle.md — no longer installed; matches the package` |
+   | `framework` by manifest sha256 only — **historical**: tagteam wrote these bytes, but the installed package no longer contains them | `retire` iff `recoverability()` says tracked and clean; otherwise `keep`, manifest entry preserved | `retired  … — no longer installed; written by tagteam 3.11.0 (tracked and clean)` / `keep     … — no longer installed; written by tagteam 3.11.0; not recoverable: untracked; commit it and re-run, or delete with: tagteam setup DIR --accept templates/cycle.md --force` |
    | `custom` | `keep` | `keep     templates/cycle.md — no longer managed; modified since tagteam 3.13.0 wrote it; delete with: tagteam setup DIR --accept templates/cycle.md` |
    | `unsupported` | `keep` (not `refuse` — tagteam no longer wants to write here, so a symlink at a retired path is not an error and must not fail `upgrade`) | `keep     … — no longer managed; <shape detail>; never touched` |
 
    `--accept PATH` on a custom retired path deletes it under the existing
    recoverability rule (tracked and clean, or `--force`), exactly as it does
    for a legacy flat skill today.
-3. **Why unlinking without a git check is safe here.** A `retire` fires only
-   when the on-disk sha256 equals bytes tagteam can prove it wrote, and those
-   bytes are still in the installed package — nothing of the owner's is lost,
-   tracked or not. This is the `_handover()` precedent (a provably-vendored
-   `SKILL.md` is already removed without a recoverability check). The preimage
-   re-check before every unlink applies unchanged. After the files, `rmdir` on
+3. **When unlinking without a git check is safe — and when it is not**
+   (plan round 2, reviewer finding 1). A digest establishes provenance, not
+   recovery. `_classify()` returns `framework` for a manifest sha256 match
+   independently of the package bytes (`framework.py:322`), so round 1's claim
+   that "those bytes are still in the installed package" was false for that
+   branch. Two cases, told apart by which `_classify()` branch matched (a new
+   `Item.reconstructible: bool`, set for the package-match and
+   rendered-variant branches only):
+   - **Reconstructible** — the installed package reproduces the bytes exactly.
+     Unlinked with no git check: nothing is lost, tracked or not. This is the
+     `_handover()` precedent.
+   - **Historical (manifest-only)** — goes through the existing
+     `recoverability()` rule like any accepted deletion: tracked and clean →
+     retired; anything else → kept, reported with the reason, and its manifest
+     entry **preserved**, so that once the owner commits the file a later run
+     retires it without further input. `--accept PATH --force` deletes it now.
+     No preimage backup directory is introduced: it would be a new kind of
+     tagteam-written path to manage, for a case the 3.13.0 sweep has already
+     made rare (every swept project's copies were refreshed to package bytes).
+
+   The preimage re-check before every unlink applies unchanged. After the files, `rmdir` on
    `templates/` and `docs/checklists/` — never recursive; a directory with
    anything else in it stays, with the same "directory left in place" note
    `_handover()` uses.
-4. **Manifest.** `projected_manifest()` writes no entry for a retired path
-   (removed → dropped; custom → no entry, already the rule). After one run the
-   manifest lists `docs/workflows.md` (+ vendored skill) only. A second run is a
+4. **Manifest** (plan round 2, reviewer finding 2). A retired path's entry is
+   dropped only when the file is actually gone. `projected_manifest()` for
+   `kind == "retired"`:
+   - retired / removed (applied), or planned `retire` / `remove` (preview) →
+     no entry;
+   - `custom` kept → no entry (already the rule for custom);
+   - **unlink refused or failed** (preimage race, `PermissionError`, root
+     refusal), or **historical kept as not recoverable** → the prior entry is
+     carried over unchanged, following the existing refused-item branch.
+     Without this the file's only provenance is forgotten, the next run
+     classifies it `custom`, and automatic retirement never retries.
+
+   After a run with no refusals and no historical-kept paths the manifest
+   lists `docs/workflows.md` (+ vendored skill) only. A second run is a
    byte-identical no-op — the existing idempotence property, with retired-custom
    `keep` lines being the only repeated output (same as legacy flat skills).
 5. **Bench falls back to the package checklist.** `bench.py` uses the
@@ -133,7 +160,15 @@ All in `tagteam/framework.py` unless noted.
   `templates`, `docs/checklists` iff `observe_dir` says plain dir **and** at
   least one item under it was retired/removed this run; `OSError` (not empty)
   is swallowed into a note. Never touches a directory this run did not empty.
-- `projected_manifest()`: `retired` kind is skipped entirely.
+- `_classify()` sets `item.reconstructible = True` in the package-match and
+  rendered-variant branches; the manifest-sha and known-contract branches
+  leave it `False`. For a `retired` item classified `framework` and not
+  reconstructible, `build_plan()` calls `recoverability()`: ok → `retire`
+  (note = "tracked and clean"); not ok → `keep` with the reason, or `remove`
+  when the path is in `accept_set` (then the existing `--force` rule applies).
+- `projected_manifest()`: `retired` kind per Scope item 4 — entry carried over
+  when `it.refused` (applied) or when the item is a historical `keep`;
+  otherwise none.
 - `format_report()`: one `retired` / `keep` line per path, per the table. No
   summary count — the per-path lines are the evidence trail, and N ≤ 12.
 - `setup.py`: `needs_setup()` marker change. `bench.py`: package fallback via
@@ -174,13 +209,27 @@ Each is a test in `tests/test_framework.py` unless noted.
 7. Preimage race: file changed between `build_plan` and `apply` → that path
    `refused: changed since classification`, others retired.
 8. `--preview` writes and deletes nothing (tree hash before == after).
-9. `needs_setup()` is `False` on a retired project (`tests/test_setup.py`).
-10. Bench prompt contains the package checklist when the project has none, and
+9. **Historical bytes, no git** (finding 1): manifest entry whose sha256
+   matches on-disk bytes that differ from the package, path untracked → `keep`
+   with the not-recoverable line, file intact, manifest entry still present
+   after the run. Same bytes tracked and clean → retired, entry dropped.
+   Same bytes untracked with `--accept PATH --force` → removed.
+10. **Failed retire keeps provenance** (finding 2), two runs: run 1 with
+    `os.unlink` patched to raise `PermissionError` for one historical,
+    tracked-and-clean path → `refused`, file intact, its manifest entry
+    unchanged, the other paths retired; run 2 unpatched → that path retired
+    and its entry dropped. Criterion 2's "manifest lists `docs/workflows.md`
+    only" is asserted for the no-refusal case only.
+11. `needs_setup()` is `False` on a retired project (`tests/test_setup.py`).
+12. Bench prompt contains the package checklist when the project has none, and
     the project's when it has one (`tests/test_bench*.py`).
-11. Item 8's output on this repo is in the impl submission.
-12. Gate: full suite green via `on_submit`.
+13. Item 8's output on this repo is in the impl submission.
+14. Gate: full suite green via `on_submit`.
 
 ## Open question for the arbiter
+*(Round 1 reviewer: automatic is consistent with the recorded direction; no
+flag requested. Left open for the arbiter to overrule.)*
+
 **Automatic or flagged?** This plan retires on every plain `setup` / `upgrade`,
 with `--preview` as the look-before. The alternative is `--retire` (nothing is
 removed unless asked; a plain run prints `retire available: 12 file(s)`), which
