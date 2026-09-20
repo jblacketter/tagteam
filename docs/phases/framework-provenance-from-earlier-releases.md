@@ -4,7 +4,7 @@
 - [x] Planning: approved round 1 (2026-09-20) at `76f8f6c`
 - [x] Implementation: branch `phase/framework-provenance-from-earlier-releases`
 - [x] Implementation Review: approved round 2 (2026-09-20) at `386261b`; gate 2,058 passed, 5 skipped. Round 1 was a gate bounce (shipped-docs audit), not a reviewer change request; the digest-only deviation below was approved explicitly.
-- [ ] Complete: PR open, merge pending
+- [x] Complete: PR #46 merged 2026-09-20 (rebase; impl is `ce80e03` + `305d82a` on main).
 
 ## Closeout
 ```
