@@ -72,6 +72,19 @@ them, and the owner is told which lines to rename.
    warnings and `roadmap ok: 0 phase(s) — 3 placeholder heading(s) to rename`,
    exit 0. `ready` / `queue` / `graph` on that roadmap keep exiting 1 with the
    improved message: there is nothing to start.
+
+   **Identity problems are never masked by that** (plan round 2, reviewer
+   finding 1). `graph_problems()` computes `validate_identities()` and then
+   calls `parse_roadmap()`, whose no-real-phase `ValueError` would discard the
+   list — so `### Phase 1: [Name]` + a bare `### Phase 2:` (empty name, a real
+   identity problem) would have been reported `ok`. The placeholder-only
+   success is therefore decided on positive evidence, not by catching an
+   exception: `check` runs `validate_identities()` itself first; any problem →
+   `roadmap invalid`, exit 1, problems listed (warnings still printed). Only
+   with zero identity problems, ≥1 placeholder and **no** heading the lenient
+   pattern matches that is not a placeholder does it print the `ok: 0` line.
+   Every other `ValueError` (no headings at all, …) is reported exactly as
+   today.
 3. **Seeds get their own directory.** `SEED_FILES` reads
    `data/templates/roadmap.md` and `data/templates/decision_log.md` — the same
    files that since Phase 61/62 are the *retired-path provenance*: a project's
@@ -89,10 +102,22 @@ them, and the owner is told which lines to rename.
    `[Name]` heading is a placeholder until renamed. The three `[Name]`
    headings stay — with item 1 they are harmless and self-explanatory.
    `seeds/decision_log.md` is byte-identical to today's.
-5. **The audit learns the older family.** `TestShippedDocsAudit` also rejects
-   `/phase`, `/plan create` and `/status` as commands in shipped `.md` files,
-   excluding the frozen `data/templates/` (which must keep its bytes) — with
-   the exclusion stated in the test, not silent.
+5. **The audit learns the older family — with a narrow, pinned exemption**
+   (plan round 2, reviewer finding 2). A new test in `TestShippedDocsAudit`
+   rejects `` `/phase` ``, `` `/plan …` `` and `` `/status` `` written as
+   commands in shipped `.md` files. A read-only search finds exactly two
+   shipped files with them, both frozen provenance whose bytes must not change
+   (they are what makes a project's old `templates/roadmap.md`
+   *reconstructible* and therefore removable without git):
+   - `tagteam/data/templates/roadmap.md` (the v3.4.0 – v3.14.1 source), and
+   - `tagteam/data/history/v3.3.0/templates/roadmap.md` (the earlier one).
+
+   The exemption is an explicit allowlist of those two **paths** — not a
+   directory, not a pattern — and the test asserts that every allowlisted path
+   is covered by a tag-pin test (`history/…` by Phase 62's table test,
+   `data/templates/…` by item 3's freeze test), so an exempt file cannot drift.
+   Neither file is edited. The existing `/handoff-*` audit is untouched: it
+   keeps scanning everything, including both of these files.
 6. **Docs:** `CLAUDE.md` (seeds vs frozen templates; placeholders);
    `tagteam/data/workflows.md` one sentence where the roadmap is described.
    This repo's `docs/workflows.md` refreshed by `tagteam setup` as the last
@@ -118,9 +143,12 @@ them, and the owner is told which lines to rename.
 - `placeholder_phase_headings()`: lenient regex, so it sees what
   `validate_identities` sees.
 - `roadmap_command("check")`: print placeholder warnings next to the unparsed
-  ones; if `graph_problems` raises `ValueError` **and** placeholders exist
-  **and** no non-placeholder strict heading exists → the `ok: 0 phase(s)` line,
-  return 0. Any other `ValueError` is reported as today.
+  ones. New helper `placeholder_only(text) -> bool`: ≥1 placeholder and no
+  lenient-pattern heading that is not a placeholder. When it holds:
+  `validate_identities(text)` non-empty → `roadmap invalid`, exit 1; empty →
+  the `ok: 0 phase(s)` line, exit 0 — without calling `graph_problems()` and
+  without any `except` deciding success. When it does not hold, the existing
+  path runs unchanged, including its `ValueError` reporting.
 - `framework.SEED_FILES` → `seeds/…`. `_retired_sources()` untouched.
 
 ## Files
@@ -145,18 +173,26 @@ them, and the owner is told which lines to rename.
    exit 1 (unchanged).
 6. Two `[Name]` placeholders sharing a phase number with a real phase → no
    duplicate-number problem from the placeholders.
-7. Roadmap with no headings at all → the existing `No phases found` error,
+7. **Masking regression (finding 1):** `[Name]` placeholder + bare
+   `### Phase 2:` → `check` exits 1 and lists `Phase 2: empty name`; two bare
+   `### Phase 2:` headings + a placeholder → exit 1 with both the empty-name
+   and duplicate-number problems; the untouched seed → exit 0.
+8. Roadmap with no headings at all → the existing `No phases found` error,
    wording unchanged; `ready` on the fresh seed → exit 1 with the
    placeholder-count message.
-8. `launch._actionable_phases`, `launch._next_after` and the watcher's
+9. `launch._actionable_phases`, `launch._next_after` and the watcher's
    roadmap read on a fresh seed behave exactly as on a roadmap with no phases
    today (`[]`, `(None, True)`, one problem string) — asserted, not assumed.
-9. `data/templates/*` and `data/checklists/*` equal `git show v3.14.1:…`
+10. `data/templates/*` and `data/checklists/*` equal `git show v3.14.1:…`
    (skip without tags); the Phase 61/62 retire tests pass unchanged.
-10. A fresh setup's `docs/roadmap.md` equals `data/seeds/roadmap.md`, names no
-    dead command, and the extended audit passes; a wheel contains
-    `data/seeds/*.md`.
-11. Real registry, read-only: `tagteam roadmap check` in the 9 affected
+11. A fresh setup's `docs/roadmap.md` equals `data/seeds/roadmap.md` and names
+    no dead command; a wheel contains `data/seeds/*.md`.
+12. **Audit (finding 2):** the older-family test fails on a shipped `.md`
+    outside the allowlist (proved with a temp file through the same scan
+    function), passes on the tree, its allowlist is exactly the two paths
+    above, each allowlisted path is tag-pinned, and the `/handoff-*` audit
+    still scans both files and passes.
+13. Real registry, read-only: `tagteam roadmap check` in the 9 affected
     projects, before → after, pasted into the impl submission
     (`northstar-test-automation` excluded — its problem is a different one).
-12. Gate: full suite green via `on_submit`.
+14. Gate: full suite green via `on_submit`.
