@@ -25,10 +25,8 @@ def test_no_claude_setup_and_preserved_rules(tmp_path, lead, reviewer):
 
 
 def test_readiness_never_queries_claude(tmp_path):
-    for rel in ('templates', 'docs/checklists'):
-        directory = tmp_path / rel
-        directory.mkdir(parents=True)
-        (directory / 'marker.md').write_text('x')
+    (tmp_path / 'docs').mkdir()
+    (tmp_path / 'docs' / 'workflows.md').write_text('x')
     with patch('tagteam.setup.plugin_status', side_effect=AssertionError('not needed')):
         assert not setup.needs_setup(str(tmp_path))
     with patch('tagteam.contract.contract_text', side_effect=OSError('missing')):

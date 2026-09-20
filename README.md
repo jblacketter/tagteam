@@ -51,7 +51,9 @@ tagteam quickstart
 
 With the plugin installed and enabled, `tagteam setup` (and `tagteam upgrade`) removes the vendored `.claude/skills/handoff/` from a project — only when it is byte-for-byte a contract tagteam shipped; a customized copy or extra files are kept and reported — and headless turns compose their prompt from the packaged contract. Without the plugin, `setup` vendors the skill; `tagteam setup --no-plugin` forces that. The hook is silent outside tagteam projects and never fails a session start. A project that still vendors the skill invokes the same contract as `/handoff`; agents without Claude Code's plugin skills (Codex) read it with `tagteam contract`.
 
-**Safe migration (3.13).** `setup` and `upgrade` no longer overwrite. Every managed file (`templates/*.md`, `docs/checklists/*.md`, `docs/workflows.md`, the vendored skill) is classified against the package and the project's committed `tagteam-manifest.json` of what tagteam last wrote: files that are provably tagteam's are refreshed, anything else is kept and reported with the exact `tagteam setup DIR --accept PATH` line that would overwrite it (or delete a pre-plugin `.claude/skills/handoff-*.md`). An accept needs the path tracked and clean in git so `git checkout -- PATH` can undo it; `--force` lifts only that. `--preview` writes nothing. A second run on a migrated project is a byte-identical no-op. Symlinks and non-regular files at any managed path are refused under every flag. Old projects with templates rendered by an earlier tagteam ("Lead: Claude") see them as custom on the first run — preview, then accept the ones you never edited.
+**Safe migration (3.13).** `setup` and `upgrade` no longer overwrite. Every managed file (`docs/workflows.md`, the vendored skill) is classified against the package and the project's committed `tagteam-manifest.json` of what tagteam last wrote: files that are provably tagteam's are refreshed, anything else is kept and reported with the exact `tagteam setup DIR --accept PATH` line that would overwrite it (or delete a pre-plugin `.claude/skills/handoff-*.md`). An accept needs the path tracked and clean in git so `git checkout -- PATH` can undo it; `--force` lifts only that. `--preview` writes nothing. A second run on a migrated project is a byte-identical no-op. Symlinks and non-regular files at any managed path are refused under every flag. 
+
+**Retired files.** Earlier versions also installed `templates/*.md` and `docs/checklists/*.md`; nothing reads a project's copy, so `setup` and `upgrade` no longer create them and remove the copies tagteam wrote: byte-for-byte package copies always, older-version copies only when git can restore them (tracked and clean). A copy you edited is kept and reported with the `--accept PATH` line that deletes it; an emptied directory is removed, one holding anything of yours is not. `tagteam bench` falls back to the package's review checklist when the project has none.
 
 You'll be prompted for your two agent names, then quickstart sets up the workspace and starts a session. It auto-detects the best terminal backend available on your machine:
 
@@ -122,7 +124,7 @@ tagteam watch --mode notify
 <summary>Advanced setup (run each step yourself)</summary>
 
 ```bash
-tagteam setup               # copy skills, templates, docs
+tagteam setup               # framework docs (+ the handoff skill when the plugin is absent)
 tagteam init                # interactive agent config → tagteam.yaml
 tagteam session start       # create terminals and auto-launch agents
 ```
@@ -303,7 +305,7 @@ tagteam session kill
 tagteam init
 tagteam setup                          # bring framework files up to the package: refreshes only what tagteam wrote, keeps custom files
 tagteam setup --preview                # classify and report, write nothing
-tagteam setup --accept templates/cycle.md   # overwrite (or, for a legacy flat skill, delete) one custom path — needs it tracked and clean; --force lifts that
+tagteam setup --accept docs/workflows.md    # overwrite (or, for a legacy flat skill or a retired template, delete) one custom path — needs it tracked and clean; --force lifts that
 tagteam setup --no-plugin              # force vendoring the handoff skill
 tagteam hook session-start             # the plugin's SessionStart hook body: cycle banner + version-skew warning
 tagteam contract                       # print the handoff contract (for agents without the plugin, e.g. Codex); --path

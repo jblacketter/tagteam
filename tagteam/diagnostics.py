@@ -381,7 +381,9 @@ def observe_framework(root: Path, plugin: dict) -> dict:
     manifest = (f"{m['tagteam']}" + (f" (written {m['written_at']})" if m["written_at"] else "")) \
         if m else plan.manifest_state
     items = [{"path": it.rel, "action": it.action, "reason": it.reason}
-             for it in plan.items if it.kind in _FRAMEWORK_KINDS]
+             for it in plan.items if it.kind in _FRAMEWORK_KINDS
+             # Phase 61: a retired path shows only while a copy is on disk.
+             or (it.kind == "retired" and it.action != "none")]
     return {"package": plan.package_version, "manifest": manifest, "items": items}
 
 

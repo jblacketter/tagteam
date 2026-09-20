@@ -528,3 +528,24 @@ def test_table_counts_one_row_per_round_version(tmp_path):
         conn.close()
     c = data["blocks"][0]["cells"][0]
     assert c["rounds"] == 1 and c["agree"] == 0 and c["extra_rc"] == 1 and c["seconds"] == 5.0
+
+
+# ---------------------------------------------------------------------------
+# Phase 61 — setup no longer installs docs/checklists/; the bench prompt falls
+# back to the package checklist, and a project's own copy still wins
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("rtype,name", [("impl", "code_review.md"), ("plan", "plan_review.md")])
+def test_prompt_checklist_falls_back_to_the_package(tmp_path, rtype, name):
+    from types import SimpleNamespace
+    pair = SimpleNamespace(base_sha=None, round=SimpleNamespace(
+        phase="p", type=rtype, round=1, pre_verdict=[]))
+    packaged = (Path(b.__file__).parent / "data" / "checklists" / name).read_text(encoding="utf-8").strip()
+    prompt = b.compose_bench_prompt(pair, tmp_path, tmp_path / "verdict.json")
+    assert f"=== REVIEW CHECKLIST (tagteam package: checklists/{name}) ===" in prompt
+    assert packaged in prompt
+    (tmp_path / "docs" / "checklists").mkdir(parents=True)
+    (tmp_path / "docs" / "checklists" / name).write_text("- [ ] our own check\n", encoding="utf-8")
+    prompt = b.compose_bench_prompt(pair, tmp_path, tmp_path / "verdict.json")
+    assert f"=== REVIEW CHECKLIST (docs/checklists/{name}) ===" in prompt
+    assert "- [ ] our own check" in prompt and packaged not in prompt

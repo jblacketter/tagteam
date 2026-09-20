@@ -73,12 +73,11 @@ def no_cli(monkeypatch) -> None:
 
 
 def framework_files(project: Path, *, skill: bool = True) -> None:
-    """templates + checklists (+ optionally the vendored skill) so
-    needs_setup's other requirements are met."""
-    (project / "templates").mkdir(parents=True, exist_ok=True)
-    (project / "templates" / "phase_plan.md").write_text("t")
-    (project / "docs" / "checklists").mkdir(parents=True, exist_ok=True)
-    (project / "docs" / "checklists" / "code_review.md").write_text("c")
+    """docs/workflows.md (+ optionally the vendored skill) so needs_setup's
+    other requirements are met. Phase 61: templates/ and docs/checklists/
+    are retired and no longer mark a project as set up."""
+    (project / "docs").mkdir(parents=True, exist_ok=True)
+    (project / "docs" / "workflows.md").write_text("w")
     if skill:
         d = project / ".claude" / "skills" / "handoff"
         d.mkdir(parents=True, exist_ok=True)

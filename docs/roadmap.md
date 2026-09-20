@@ -9,7 +9,7 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 
 ## Phases
 ### Phase 61: Framework files: retire what nothing reads
-- **Status:** Planning — plan cycle opened 2026-09-20. Branch `phase/framework-files-retire-what-nothing-reads`. See `docs/phases/framework-files-retire-what-nothing-reads.md`.
+- **Status:** In review — plan approved round 2 (2026-09-20); impl cycle opened 2026-09-20. Branch `phase/framework-files-retire-what-nothing-reads`. See `docs/phases/framework-files-retire-what-nothing-reads.md`.
 - **Description:** `tagteam setup` installs 13 framework files; nothing reads 12 of them (`templates/*.md`, `docs/checklists/*.md` — the latter only by `bench`, already guarded), and deleting them does not stick because `absent → create` restores them on the next `setup`/`upgrade`. Reported from the `linkedin-articles` project on 3.13.0 (`docs/tagteam-issue-framework-files-no-opt-out-2026-09-20.md`). The managed set shrinks to `docs/workflows.md` (+ the vendored skill); the 12 paths become *retired*: a copy whose bytes tagteam provably wrote is removed, a modified copy is kept and reported with its `--accept` line, emptied directories are `rmdir`'d (never recursive). Bench falls back to the package checklist; `needs_setup()` stops keying on the retired directories. No `framework.skip` key. Docs updated to match.
 - **Depends on:** Phase 52
 
@@ -547,6 +547,6 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 See `docs/decision_log.md`
 
 ## Getting Started
-1. Use `/handoff-phase` to check current phase
-2. Use `/handoff-plan create [phase]` to start planning
-3. Use `/handoff-status` for project overview
+1. Use `/tagteam:handoff status` to see the current phase and whose turn it is
+2. Use `/tagteam:handoff start [phase]` to open a phase's plan cycle
+3. Use `tagteam roadmap ready` to list the phases that can start now

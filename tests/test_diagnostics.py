@@ -159,6 +159,20 @@ class TestLegacyFindings:
         assert {"templates/phase_plan.md", ".claude/skills/handoff/SKILL.md",
                 ".claude/skills/handoff-cycle.md"} <= paths
 
+    def test_retired_paths_show_only_while_a_copy_is_on_disk(self, env):
+        """Phase 61: a project with no templates/ has none in the framework
+        section; an untouched leftover shows as `retire`, an edited one as `keep`."""
+        config(env.proj)
+        assert not [i for i in dg.build_report(env.proj).framework["items"]
+                    if i["path"].startswith(("templates/", "docs/checklists/"))]
+        data = su.get_data_dir()
+        write(env.proj, "templates/cycle.md", (data / "templates" / "cycle.md").read_text(encoding="utf-8"))
+        write(env.proj, "docs/checklists/code_review.md", "ours\n")
+        by = {i["path"]: i["action"] for i in dg.build_report(env.proj).framework["items"]}
+        assert by["templates/cycle.md"] == "retire" and by["docs/checklists/code_review.md"] == "keep"
+        assert "templates/feedback.md" not in by
+        assert (env.proj / "templates" / "cycle.md").exists()        # doctor is read-only
+
     def test_unsupported_shapes_and_oversize(self, env):
         config(env.proj)
         outside = write(env.tmp, "outside.md", "Codex is always the lead. /handoff-plan\n")

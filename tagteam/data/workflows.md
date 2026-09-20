@@ -134,8 +134,8 @@ any other watcher running, saying so.
 
 ## Framework files and upgrades
 
-`templates/*.md`, `docs/checklists/*.md`, `docs/workflows.md` and, without the
-plugin, `.claude/skills/handoff/SKILL.md` are framework files. After
+`docs/workflows.md` and, without the plugin, `.claude/skills/handoff/SKILL.md`
+are framework files. After
 `pip install -U tagteam`, run `tagteam upgrade --preview` (every registered
 project) or `tagteam setup --preview` (this one) to see what would change,
 then run it without `--preview`:
@@ -147,6 +147,23 @@ then run it without `--preview`:
   `tagteam setup DIR --accept PATH` line that overwrites it. Accepting needs
   the path tracked and clean in git (so `git checkout -- PATH` undoes it);
   `--force` lifts only that check.
+
+Earlier versions also installed `templates/*.md` and `docs/checklists/*.md`.
+Nothing reads a project's copy of either, so they are **retired**: no longer
+created, and on the next `setup` / `upgrade`
+
+- a copy the installed package can reproduce byte for byte is removed
+  (`retired  templates/cycle.md`), and the directory with it once empty —
+  your own files in it, and the directory, are left alone;
+- a copy tagteam wrote in an older version whose bytes it no longer ships is
+  removed only when git can restore it (tracked and clean); otherwise it is
+  kept until you commit it, or delete it with `--accept PATH --force`;
+- a copy you edited is kept; `tagteam setup DIR --accept PATH` deletes it
+  under the same tracked-and-clean rule;
+- a symlink or non-regular file there is kept and never an error.
+
+`tagteam bench` uses a project's own `docs/checklists/<type>_review.md` when
+there is one and the package's otherwise.
 
 Pre-plugin flat skills (`.claude/skills/handoff-*.md`) are never deleted
 without `--accept PATH`. Symlinks or directories at a managed path — or at any
