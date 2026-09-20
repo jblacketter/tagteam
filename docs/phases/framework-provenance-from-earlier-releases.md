@@ -3,8 +3,26 @@
 ## Status
 - [x] Planning: approved round 1 (2026-09-20) at `76f8f6c`
 - [x] Implementation: branch `phase/framework-provenance-from-earlier-releases`
-- [ ] Implementation Review
-- [ ] Complete
+- [x] Implementation Review: approved round 2 (2026-09-20) at `386261b`; gate 2,058 passed, 5 skipped. Round 1 was a gate bounce (shipped-docs audit), not a reviewer change request; the digest-only deviation below was approved explicitly.
+- [ ] Complete: PR open, merge pending
+
+## Closeout
+```
+Phase report: framework-provenance-from-earlier-releases — plan approved r1 · impl approved r2
+  plan   1 round · 0 change requests · 0 bounces
+  impl   2 rounds · 0 change requests · 1 bounce · gate 2 runs, 15m 05s
+  time   start→approve 23m 48s · implementation before first submit 3m 40s
+         lead 2m 29s (1 span, 2 unknown) · reviewer 2m 33s (2 spans) · gate 15m 06s (2 spans)  (elapsed; includes relay wait)
+  usage  no usage rows stored under this phase
+  turns  matched 0 of 5 · no token data 0 · unmatched 3 · unknown 2
+```
+Reviewer's non-blocking note at approval — say in the user-facing docs that
+one earlier source is digest-only — applied to `tagteam/data/workflows.md` in
+the closeout commit (docs only, not re-gated).
+
+**After merge:** release 3.14.1, `scripts/upgrade_smoke.py`, then the
+registered-project `tagteam upgrade` sweep (expected from the preview:
+480 retired, 40 `docs/workflows.md` refreshed, 0 kept).
 
 ## Summary
 Phase 61 (3.14.0) retires `templates/*.md` and `docs/checklists/*.md` and

@@ -165,7 +165,10 @@ created, and on the next `setup` / `upgrade`
 
 **Copies from earlier releases.** The package carries the earlier sources of
 its framework files (through 3.12.0 — a fixed set; later versions are recorded
-in the manifest). A file that equals one of them exactly — verbatim, or
+in the manifest). One of them, the pre-plugin `workflows.md` (through 3.10.0),
+is carried as a sha256 digest only, because its text is nothing but commands
+that no longer exist: an exact copy is still recognised and refreshed, but the
+old text cannot be had back from the installed package. A file that equals one of them exactly — verbatim, or
 rendered with this project's configured lead / reviewer names, or with the two
 swapped (`setup` wrote the names into templates until 3.12.0) — counts as
 tagteam's: an old `docs/workflows.md` is refreshed, an old template is

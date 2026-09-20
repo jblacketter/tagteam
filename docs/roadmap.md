@@ -9,7 +9,7 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 
 ## Phases
 ### Phase 62: Framework provenance from earlier releases
-- **Status:** In review — plan approved round 1 (2026-09-20); impl cycle opened 2026-09-20. Branch `phase/framework-provenance-from-earlier-releases`. See `docs/phases/framework-provenance-from-earlier-releases.md`.
+- **Status:** ✅ Complete — plan approved round 1, impl approved round 2 (2026-09-20; round 1 was a gate bounce); gate: 2,058 passed, 5 skipped at `386261b`. Branch `phase/framework-provenance-from-earlier-releases`; PR merge pending. After merge: release 3.14.1, then the registered-project sweep. See `docs/phases/framework-provenance-from-earlier-releases.md`.
 - **Description:** Phase 61's retirement proves too little on real projects: `tagteam upgrade --preview` over the 41 registered projects (3.14.0) retires 184 files and keeps 296 templates plus 36 `docs/workflows.md` as "custom" — yet every one is a byte-exact copy of an earlier release's file (templates: the v0.3.0–v3.11.0 source rendered with the project's agent names, which `setup` baked in until 3.12.0; workflows: verbatim v3.10.0 / v3.11.0). Ship those 13 earlier sources (~31 KB, a closed set) as `tagteam/data/history/<tag>/…` and let `_classify()` match them verbatim or rendered for the configured / swapped names → `framework`, reconstructible: retired paths are removed, `docs/workflows.md` is refreshed. Also closes the Phase 61 review note: `_prune_retired_dirs()` reports a directory it could not remove.
 - **Depends on:** Phase 61
 
