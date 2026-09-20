@@ -1,0 +1,25 @@
+{
+  "state": "approved",
+  "ready_for": null,
+  "round": 1,
+  "phase": "framework-provenance-from-earlier-releases",
+  "type": "plan",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-20",
+  "baseline": {
+    "sha": "76f8f6c2c91fe709e62f91df71c9eba32957c2d0",
+    "dirty_paths": [],
+    "captured_at": "2026-09-20T21:52:33.195174+00:00",
+    "source": "plan-init"
+  },
+  "impl_boundary": {
+    "sha": "76f8f6c2c91fe709e62f91df71c9eba32957c2d0",
+    "dirty": {
+      "docs/handoffs/framework-provenance-from-earlier-releases_plan_rounds.jsonl": "58a4a39d0f32a2e6763d62c2ad020cbeb047a7a2b9885210165f08d05a6e61d6",
+      "docs/handoffs/framework-provenance-from-earlier-releases_plan_status.json": "d2aab61d017d28ec8e3d1e153ccb6d669231b0c4450e89df76a79e3848908538"
+    },
+    "captured_at": "2026-09-20T21:53:53.954489+00:00",
+    "source": "plan-approve"
+  }
+}

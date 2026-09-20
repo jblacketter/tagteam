@@ -140,8 +140,9 @@ are framework files. After
 project) or `tagteam setup --preview` (this one) to see what would change,
 then run it without `--preview`:
 
-- files whose bytes tagteam wrote (recorded in `tagteam-manifest.json`, or a
-  known vendored contract) are refreshed to the new package;
+- files whose bytes tagteam wrote (recorded in `tagteam-manifest.json`, a
+  known vendored contract, or an exact copy of what an earlier release
+  installed — see below) are refreshed to the new package;
 - files that match the new package are left alone;
 - anything else is **kept** and reported with the exact
   `tagteam setup DIR --accept PATH` line that overwrites it. Accepting needs
@@ -161,6 +162,16 @@ created, and on the next `setup` / `upgrade`
 - a copy you edited is kept; `tagteam setup DIR --accept PATH` deletes it
   under the same tracked-and-clean rule;
 - a symlink or non-regular file there is kept and never an error.
+
+**Copies from earlier releases.** The package carries the earlier sources of
+its framework files (through 3.12.0 — a fixed set; later versions are recorded
+in the manifest). A file that equals one of them exactly — verbatim, or
+rendered with this project's configured lead / reviewer names, or with the two
+swapped (`setup` wrote the names into templates until 3.12.0) — counts as
+tagteam's: an old `docs/workflows.md` is refreshed, an old template is
+retired. The match is byte for byte. If the agent names in `tagteam.yaml`
+changed since the file was written, or the file was edited at all, it is kept
+as yours.
 
 `tagteam bench` uses a project's own `docs/checklists/<type>_review.md` when
 there is one and the package's otherwise.

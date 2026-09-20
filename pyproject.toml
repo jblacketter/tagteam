@@ -50,6 +50,7 @@ tagteam = [
     "data/templates/*.md",
     "data/checklists/*.md",
     "data/*.md",
+    "data/history/**/*.md",
     "data/*.json",
     "data/web/*.html",
     "data/web/*.css",

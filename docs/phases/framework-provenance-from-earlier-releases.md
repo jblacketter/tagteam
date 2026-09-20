@@ -1,8 +1,8 @@
 # Phase 62: Framework provenance from earlier releases
 
 ## Status
-- [ ] Planning
-- [ ] Implementation: branch `phase/framework-provenance-from-earlier-releases`
+- [x] Planning: approved round 1 (2026-09-20) at `76f8f6c`
+- [x] Implementation: branch `phase/framework-provenance-from-earlier-releases`
 - [ ] Implementation Review
 - [ ] Complete
 
@@ -179,3 +179,28 @@ provably-tagteam bytes is what `setup` already does for a manifest or
 known-contract match — so the plan refreshes them. In projects where the file
 is tracked it shows up as a modification to commit. Say so if you would rather
 these were reported and left for `--accept`.
+
+## Implementation notes (from the plan approval)
+- `tests/test_upgrade_smoke.py::_old_project` keeps its hand-written
+  `phase_plan.md` as `custom` (it is no release's rendering); an exact ≤3.11.0
+  rendering of `feedback.md` with the project's names was added for the
+  installed-wheel `retire` assertion — which is also the proof that
+  `data/history/` ships in the wheel.
+- Manifest-first order is unchanged: a manifest hash match is decided before
+  historical evidence, so such a copy keeps Phase 61's git rule
+  (`test_manifest_match_is_still_decided_first`). Not every earlier copy is
+  retired: renamed agents or any edit → `custom`.
+- The git-pinned table test covers the older `ai_handoff/data/` prefix and
+  skips only on a checkout without release tags; CI uses `fetch-depth: 0`.
+
+## Registry preview (criterion 10) — `tagteam upgrade --preview`, 41 projects, nothing written
+| | 3.14.0 | this branch |
+|---|---|---|
+| `retire` | 184 | **480** |
+| `keep` | 332 | **0** |
+| `refresh docs/workflows.md` | 4 | **41** |
+| `refuse` | 0 | 0 |
+
+Reasons on this branch: 296 `written by tagteam ≤3.11.0 (rendered for the
+configured names)`, 184 `matches the package`; workflows: 35 `≤3.10.0`,
+1 `≤3.11.0`, 5 by manifest hash (3.13.0).

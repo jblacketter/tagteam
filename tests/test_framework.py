@@ -1114,3 +1114,178 @@ def test_upgrade_retires_across_projects(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert out.count("retired  templates/cycle.md") == 2 and "All 2 project(s) upgraded successfully." in out
     assert all(not (p / "templates").exists() and not (p / "docs" / "checklists").exists() for p in projects)
+
+
+# ---------------------------------------------------------------------------
+# Phase 62 — provenance from earlier releases: data/history/<tag>/… holds the
+# 13 earlier framework sources; a copy equal to one, verbatim or rendered for
+# the configured / swapped names, is tagteam's and reconstructible
+# ---------------------------------------------------------------------------
+
+HISTORY = DATA / "history"
+REPO = Path(__file__).resolve().parent.parent
+PLACEHOLDER_TEMPLATES = ["cycle", "decision_log", "feedback", "handoff_impl", "handoff_plan",
+                         "implementation_log", "phase_plan", "sync_state"]
+
+
+def _names(root: Path, lead: str, reviewer: str) -> None:
+    (root / "tagteam.yaml").write_text(f"agents:\n  lead: {{name: {lead}}}\n  reviewer: {{name: {reviewer}}}\n")
+
+
+def _rendered_era(root: Path, lead: str, reviewer: str) -> None:
+    """templates/ as a ≤3.11.0 setup left it: names baked in, no manifest."""
+    (root / "templates").mkdir(exist_ok=True)
+    for name in PLACEHOLDER_TEMPLATES:
+        text = (HISTORY / "v3.11.0" / "templates" / f"{name}.md").read_text(encoding="utf-8")
+        assert "{{lead}}" in text or "{{reviewer}}" in text, name
+        (root / "templates" / f"{name}.md").write_text(
+            text.replace("{{lead}}", lead).replace("{{reviewer}}", reviewer), encoding="utf-8")
+
+
+def _tagged_blob(tag: str, source_rel: str) -> bytes | None:
+    for pkg in ("tagteam", "ai_handoff"):             # the package was renamed along the way
+        r = subprocess.run(["git", "-C", str(REPO), "show", f"{tag}:{pkg}/data/{source_rel}"], capture_output=True)
+        if r.returncode == 0:
+            return r.stdout
+    return None
+
+
+def test_history_table_is_what_git_history_says():
+    """Every shipped earlier source equals the tagged file, and together with
+    the current package they are *all* the bytes tagteam shipped through
+    v3.12.0 (later workflows.md versions are vouched for by manifests)."""
+    tags = subprocess.run(["git", "-C", str(REPO), "tag", "--list", "v*"], capture_output=True, text=True)
+    if tags.returncode != 0 or "v3.12.0" not in tags.stdout.split():
+        pytest.skip("release tags not available in this checkout")
+    shipped = sorted(p.relative_to(HISTORY).as_posix() for p in HISTORY.rglob("*.md"))
+    assert len(shipped) == 13
+    for rel in shipped:
+        tag, source_rel = rel.split("/", 1)
+        assert (HISTORY / rel).read_bytes() == _tagged_blob(tag, source_rel), rel
+    era = [t for t in tags.stdout.split() if fw._tag_key(t) <= (3, 12, 0)]
+    for _, src, source_rel in fw._sources(DATA) + fw._retired_sources(DATA):
+        in_git = {fw.sha256_bytes(b) for b in (_tagged_blob(t, source_rel) for t in era) if b is not None}
+        known = {fw.sha256_bytes(b) for _, b in fw._history_sources(DATA, source_rel)} | {fw.sha256_bytes(src.read_bytes())}
+        assert in_git <= known, source_rel
+        assert known - in_git <= {fw.sha256_bytes(src.read_bytes())}, source_rel   # nothing invented
+
+
+def test_history_sources_are_newest_first_by_version_not_by_string():
+    assert [t for t, _ in fw._history_sources(DATA, "workflows.md")] == ["v3.12.0", "v3.11.0", "v3.10.0"]
+    assert [t for t, _ in fw._history_sources(DATA, "templates/roadmap.md")] == ["v3.3.0"]
+    assert fw._history_sources(DATA, "templates/requirements_brief.md") == []   # never changed
+
+
+@pytest.mark.parametrize("config,baked", [(("claude", "codex"), ("claude", "codex")),
+                                          (("Claude", "Codex"), ("Claude", "Codex")),
+                                          (("codex", "claude"), ("claude", "codex"))])      # roles swapped since
+def test_rendered_era_templates_are_retired_without_git(proj, capsys, config, baked):
+    _names(proj, *config)
+    _rendered_era(proj, *baked)
+    label = "configured names" if config == baked else "swapped names"
+    code, out = run(proj, capsys=capsys)
+    assert code == 0, out
+    for name in PLACEHOLDER_TEMPLATES:
+        assert (f"retired  templates/{name}.md — no longer installed; written by tagteam ≤3.11.0 "
+                f"(rendered for the {label})") in out
+    assert not (proj / "templates").exists() and "removed  templates/ — empty" in out
+    assert not any(r.startswith("templates/") for r in manifest(proj)["files"])
+
+
+def test_rendering_with_other_names_or_an_edit_stays_custom(proj, capsys):
+    _names(proj, "architect", "critic")                 # renamed since the render
+    _rendered_era(proj, "claude", "codex")
+    edited = proj / "templates" / "cycle.md"
+    code, out = run(proj, capsys=capsys)
+    assert code == 0 and "retired" not in out
+    assert out.count("no longer managed; differs from the package; delete with:") == 8
+    _names(proj, "claude", "codex")                     # names restored, one file edited by a byte
+    edited.write_bytes(edited.read_bytes() + b"\n")
+    code, out = run(proj, capsys=capsys)
+    assert code == 0 and out.count("retired  ") == 7
+    assert "keep     templates/cycle.md — no longer managed; differs from the package" in out
+    assert edited.exists() and (proj / "templates").is_dir()
+
+
+@pytest.mark.parametrize("tag", ["v3.10.0", "v3.11.0", "v3.12.0"])
+def test_pre_manifest_workflows_from_an_earlier_release_is_refreshed(proj, capsys, tag):
+    (proj / "docs").mkdir()
+    wf = proj / "docs" / "workflows.md"
+    wf.write_bytes((HISTORY / tag / "workflows.md").read_bytes())
+    code, out = run(proj, capsys=capsys)
+    assert code == 0, out
+    assert f"refreshed docs/workflows.md — written by tagteam ≤{tag[1:]}" in out
+    assert wf.read_bytes() == (DATA / "workflows.md").read_bytes()
+    assert manifest(proj)["files"]["docs/workflows.md"]["tagteam"] == fw.package_version()
+
+
+def test_edited_earlier_workflows_is_still_custom(proj, capsys):
+    (proj / "docs").mkdir()
+    wf = proj / "docs" / "workflows.md"
+    mine = (HISTORY / "v3.10.0" / "workflows.md").read_bytes() + b"\n## Our own section\n"
+    wf.write_bytes(mine)
+    code, out = run(proj, capsys=capsys)
+    assert code == 0 and wf.read_bytes() == mine
+    assert "keep     docs/workflows.md — differs from the package; accept with:" in out
+
+
+def test_earlier_verbatim_retired_sources_are_retired(proj, capsys):
+    (proj / "templates").mkdir(); (proj / "docs" / "checklists").mkdir(parents=True)
+    (proj / "templates" / "roadmap.md").write_bytes((HISTORY / "v3.3.0" / "templates" / "roadmap.md").read_bytes())
+    (proj / "docs" / "checklists" / "code_review.md").write_bytes(
+        (HISTORY / "v3.4.0" / "checklists" / "code_review.md").read_bytes())
+    code, out = run(proj, capsys=capsys)
+    assert code == 0
+    assert "retired  templates/roadmap.md — no longer installed; written by tagteam ≤3.3.0" in out
+    assert "retired  docs/checklists/code_review.md — no longer installed; written by tagteam ≤3.4.0" in out
+    assert not (proj / "templates").exists() and not (proj / "docs" / "checklists").exists()
+
+
+def test_without_history_everything_earlier_is_custom_as_in_3_14_0(proj, tmp_path, monkeypatch, capsys):
+    assert fw._history_sources(tmp_path, "workflows.md") == []              # no history/ at all
+    (tmp_path / "history").write_text("not a directory\n")
+    assert fw._history_sources(tmp_path, "workflows.md") == []
+    monkeypatch.setattr(fw, "_history_sources", lambda data_dir, source_rel: [])
+    _names(proj, "claude", "codex")
+    _rendered_era(proj, "claude", "codex")
+    code, out = run(proj, capsys=capsys)
+    assert code == 0 and "retired" not in out and out.count("no longer managed; differs from the package") == 8
+
+
+def test_manifest_match_is_still_decided_first(proj, capsys):
+    """Scoped conservatively (plan review): a manifest hash match returns
+    before the historical evidence is consulted, so such a copy keeps the
+    Phase 61 git rule even when an earlier source would also explain it."""
+    _names(proj, "claude", "codex")
+    fresh(proj)
+    _rendered_era(proj, "claude", "codex")
+    m = manifest(proj)
+    rel = "templates/cycle.md"
+    m["files"][rel] = {"sha256": fw.sha256_bytes((proj / rel).read_bytes()), "source": rel, "tagteam": "3.11.0"}
+    (proj / fw.MANIFEST_NAME).write_text(json.dumps(m, indent=2, sort_keys=True) + "\n")
+    it = next(i for i in fw.build_plan(proj, data_dir=DATA).items if i.rel == rel)
+    assert it.cls == fw.FRAMEWORK and not it.reconstructible and it.action == "keep"
+    assert "written by tagteam 3.11.0; not recoverable" in it.reason
+
+
+def test_prune_reports_a_directory_it_could_not_remove(proj, capsys):
+    _installed_by_3_13(proj)
+    real_rmdir = os.rmdir
+
+    def denied(path, *a, **kw):
+        if Path(path).name == "templates":
+            raise PermissionError(13, "Permission denied", str(path))
+        return real_rmdir(path, *a, **kw)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(fw.os, "rmdir", denied)
+        code, out = run(proj, capsys=capsys)
+    assert code == 0, out                                # not a refusal
+    assert "kept     templates/ — directory left in place (PermissionError)" in out
+    assert "removed  docs/checklists/ — empty" in out and (proj / "templates").is_dir()
+    assert set(manifest(proj)["files"]) == {"docs/workflows.md", SKILL}
+    # not-empty is the ordinary case and stays silent
+    (proj / "templates" / "mine.md").write_text("ours\n")
+    (proj / "templates" / "cycle.md").write_bytes((DATA / "templates" / "cycle.md").read_bytes())
+    code, out = run(proj, capsys=capsys)
+    assert code == 0 and "retired  templates/cycle.md" in out and "templates/ —" not in out
