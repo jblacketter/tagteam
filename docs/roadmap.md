@@ -9,7 +9,7 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 
 ## Phases
 ### Phase 61: Framework files: retire what nothing reads
-- **Status:** In review — plan approved round 2 (2026-09-20); impl cycle opened 2026-09-20. Branch `phase/framework-files-retire-what-nothing-reads`. See `docs/phases/framework-files-retire-what-nothing-reads.md`.
+- **Status:** ✅ Complete — plan approved round 2, impl approved round 1 (2026-09-20); gate: 2,044 passed, 5 skipped at `ca36dc7`. Branch `phase/framework-files-retire-what-nothing-reads`; PR merge pending. **On release:** the release body must note that `setup`/`upgrade` stop installing `templates/` and `docs/checklists/` and remove unmodified copies; then run the registered-project sweep. See `docs/phases/framework-files-retire-what-nothing-reads.md`.
 - **Description:** `tagteam setup` installs 13 framework files; nothing reads 12 of them (`templates/*.md`, `docs/checklists/*.md` — the latter only by `bench`, already guarded), and deleting them does not stick because `absent → create` restores them on the next `setup`/`upgrade`. Reported from the `linkedin-articles` project on 3.13.0 (`docs/tagteam-issue-framework-files-no-opt-out-2026-09-20.md`). The managed set shrinks to `docs/workflows.md` (+ the vendored skill); the 12 paths become *retired*: a copy whose bytes tagteam provably wrote is removed, a modified copy is kept and reported with its `--accept` line, emptied directories are `rmdir`'d (never recursive). Bench falls back to the package checklist; `needs_setup()` stops keying on the retired directories. No `framework.skip` key. Docs updated to match.
 - **Depends on:** Phase 52
 
@@ -519,6 +519,9 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 
 ### Lead lane: cycle-turn cards from earlier cycles (for later, unscheduled)
 - **Status:** Found during Phase 58 (2026-09-15); not started. The lead lane's cycle-turn cards (`LLANE` in `cockpit.js`) come from the same project-wide `/api/activity` list the reviewer lane used and are not scoped to the current cycle, so earlier cycles' lead turns stay visible as if current. Phase 58 scoped only the reviewer lane (arbiter request). The same `cycleKey` / "Show last session" pattern would apply.
+
+### Retired-directory prune: report a directory left in place (from Phase 61 review, unscheduled)
+- **Status:** Not started. `framework._prune_retired_dirs()` swallows `OSError` from `os.rmdir`, so a retired directory that could not be removed (not empty, or a permission failure) is left without a word; the Phase 61 plan promised a "directory left in place (<why>)" note like `_handover()`'s. Reviewer's non-blocking note at impl approval (2026-09-20). Small: record `(dir, reason)` on the plan and print one report line; distinguish "not empty" (expected, arguably silent) from a permission failure (worth saying).
 
 ### Reviewer agents in the plugin (deferred from Phase 48)
 - **Status:** Deferred 2026-09-03 by arbiter ruling; depends on Phase 50 (read-only mode). Ship `codex-brief` (the submission drafter) in the plugin only after Phase 50 gives the CLI an enforced read-only mode, and extend Phase 49's user-level conflict report to agents. `doc-drift` is generic, not tagteam-specific — leave it out of the plugin. Before scheduling: check whether the user-level `codex-brief` briefs are actually what gets submitted or get rewritten; if rewritten, the agent is not earning its keep.

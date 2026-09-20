@@ -3,8 +3,30 @@
 ## Status
 - [x] Planning: approved round 2 (2026-09-20) at `47ba579`
 - [x] Implementation: branch `phase/framework-files-retire-what-nothing-reads`
-- [ ] Implementation Review
-- [ ] Complete
+- [x] Implementation Review: approved round 1 (2026-09-20) at `ca36dc7`; gate 2,044 passed, 5 skipped
+- [ ] Complete: PR open, merge pending
+
+## Closeout
+```
+Phase report: framework-files-retire-what-nothing-reads — plan approved r2 · impl approved r1
+  plan   2 rounds · 1 change request · 0 bounces
+  impl   1 round · 0 change requests · 0 bounces · gate 1 run, 7m 38s
+  time   start→approve 21m 41s · implementation before first submit 10m 04s
+         lead 1m 06s (1 span, 2 unknown) · reviewer 2m 54s (3 spans) · gate 7m 38s (1 span)  (elapsed; includes relay wait)
+  usage  no usage rows stored under this phase
+  turns  matched 0 of 6 · no token data 0 · unmatched 4 · unknown 2
+```
+
+Reviewer's non-blocking notes at approval:
+- `_prune_retired_dirs()` swallows `OSError` silently; the plan promised a
+  "directory left in place" note. **Not changed after approval** — a code
+  change belongs in a cycle; logged in the roadmap backlog.
+- Trailing whitespace at `README.md:54` — fixed in the closeout commit (docs only).
+
+**On release:** the release body must say that `setup`/`upgrade` no longer
+install `templates/` or `docs/checklists/` and remove unmodified copies they
+wrote; modified copies are kept. Then `scripts/upgrade_smoke.py`, then the
+registered-project `tagteam upgrade` sweep.
 
 ## Summary
 `tagteam setup` installs 13 framework files into every project. Twelve of them

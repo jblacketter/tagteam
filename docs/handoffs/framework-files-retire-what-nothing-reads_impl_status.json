@@ -1,0 +1,28 @@
+{
+  "state": "approved",
+  "ready_for": null,
+  "round": 1,
+  "phase": "framework-files-retire-what-nothing-reads",
+  "type": "impl",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-20",
+  "baseline": {
+    "sha": "09612991f62224f371687c7dde4ea900ef15c544",
+    "dirty_paths": [
+      "?? tagteam-manifest.json"
+    ],
+    "captured_at": "2026-09-20T21:08:22.036330+00:00",
+    "source": "copied-from-plan"
+  },
+  "impl_boundary": {
+    "sha": "47ba5791cd7b9312ab8079b537349d77a7fb5c24",
+    "dirty": {
+      "docs/handoffs/framework-files-retire-what-nothing-reads_plan_rounds.jsonl": "a99e314bdefe316b197f25b1770e85297c55a640c68d9d7693e09329a42b09b8",
+      "docs/handoffs/framework-files-retire-what-nothing-reads_plan_status.json": "d863b2884a960e24bd44886395ebc3f5e67640cbf5fb7799b24f2b12ae968e34",
+      "tagteam-manifest.json": "c06eeb54a09b2ebcf08a99d45dd0da8ba4d9c84254eb73f51ecc9b737912594d"
+    },
+    "captured_at": "2026-09-20T21:11:08.270569+00:00",
+    "source": "copied-from-plan"
+  }
+}
