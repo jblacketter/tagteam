@@ -99,3 +99,34 @@ earlier sweep before today.
   (Liminal, techpacker, screen_work). The never-recursive rule left them
   alone, as intended — noted because the directory name collides with what
   tagteam used to install.
+
+### 8. The roadmap `tagteam setup` seeds is invalid out of the box
+Reproduced on 3.14.1 in an empty directory: run the framework plan (seeds
+`docs/roadmap.md` from `data/templates/roadmap.md`), then `tagteam roadmap check`:
+
+```
+roadmap invalid (2 problem(s)):
+  - duplicate slug 'name': Phase 1, Phase 2, Phase 3
+  - name: depends on itself
+```
+
+The seed has three `### Phase N: [Name]` headings (all slug `name`) and
+Phase 3 carries `- **Depends on:** Phase 2`, which resolves to the same slug.
+Found because 8 of the 41 registered projects still have the unedited seed and
+report exactly this (agent-gate, agent-ledger, jobs/demoapp,
+northstar/clearpath-cloud, screen_work, skill-forge, token-economy,
+token-mint); linkedin-articles reports both lines. It does not affect
+ordinary `/tagteam:handoff` cycles; it breaks `roadmap ready` / `queue` and
+full-roadmap mode until the owner renames the phases.
+*Suggestion:* seed distinct placeholder titles (`[First phase]`, …) or treat
+bracketed placeholder headings as "not a phase yet" in `roadmap check`. A code
+change — needs a cycle.
+
+### 9. Other roadmap findings from the per-project pass (2026-09-20)
+- Free text in `Depends on:` is read as phase references. Fixed by hand in
+  bugalizer (`Phase 8 (credential code), Dan's token …` → `Phase 8` + a
+  `Needs:` line) and designwing (`homepage-fixes and about-page-fixes
+  complete` → `Phase 11, Phase 12`). The error message names the unknown
+  dependency but not the line; a line number would have saved a grep.
+- `northstar-test-automation`: `duplicate phase number 7` and `8` — two phases
+  share each number. Not touched (arbiter: leave that project for now).
