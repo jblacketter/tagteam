@@ -142,13 +142,26 @@ them, and the owner is told which lines to rename.
   number/slug bookkeeping.
 - `placeholder_phase_headings()`: lenient regex, so it sees what
   `validate_identities` sees.
-- `roadmap_command("check")`: print placeholder warnings next to the unparsed
-  ones. New helper `placeholder_only(text) -> bool`: ≥1 placeholder and no
-  lenient-pattern heading that is not a placeholder. When it holds:
-  `validate_identities(text)` non-empty → `roadmap invalid`, exit 1; empty →
-  the `ok: 0 phase(s)` line, exit 0 — without calling `graph_problems()` and
-  without any `except` deciding success. When it does not hold, the existing
-  path runs unchanged, including its `ValueError` reporting.
+- `roadmap_command("check")` — one algorithm, the same one Scope item 2
+  describes (plan round 3: the round-2 text ran identity validation only
+  inside the `placeholder_only` branch, which `[Name]` + bare `### Phase 2:`
+  never enters, so its identity problem was still lost):
+  1. Print the unparsed-heading and placeholder warnings.
+  2. `identity = validate_identities(text)` — always, up front, kept.
+  3. `has_real_phase(text)`: some *strict*-pattern heading is not a
+     placeholder — i.e. exactly the condition under which `parse_roadmap()`
+     returns instead of raising.
+  4. **No real phase** (the case where `graph_problems()` would raise and
+     drop `identity`):
+     - `identity` non-empty → `roadmap invalid (N problem(s))`, the problems
+       listed, exit 1. Covers the placeholder + bare-heading fixtures.
+     - `identity` empty and ≥1 placeholder → `roadmap ok: 0 phase(s) — N
+       placeholder heading(s) to rename`, exit 0.
+     - `identity` empty and no placeholder → fall through to step 5, which
+       reports today's `No phases found` error, exit 1.
+  5. **Otherwise** the existing `graph_problems()` path, unchanged: identity +
+     graph problems aggregated, any `ValueError` / `FileNotFoundError` printed
+     as `Error: …`, exit 1. No `except` ever produces a success.
 - `framework.SEED_FILES` → `seeds/…`. `_retired_sources()` untouched.
 
 ## Files
