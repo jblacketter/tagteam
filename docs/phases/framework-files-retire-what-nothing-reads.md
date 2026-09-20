@@ -4,7 +4,7 @@
 - [x] Planning: approved round 2 (2026-09-20) at `47ba579`
 - [x] Implementation: branch `phase/framework-files-retire-what-nothing-reads`
 - [x] Implementation Review: approved round 1 (2026-09-20) at `ca36dc7`; gate 2,044 passed, 5 skipped
-- [ ] Complete: PR open, merge pending
+- [x] Complete: PR #45 merged 2026-09-20 (rebase; impl is `3dfaf1c` on main). Release and the registered-project sweep still to do.
 
 ## Closeout
 ```
