@@ -100,7 +100,7 @@ earlier sweep before today.
   alone, as intended — noted because the directory name collides with what
   tagteam used to install.
 
-### 8. The roadmap `tagteam setup` seeds is invalid out of the box
+### 8. The roadmap `tagteam setup` seeds is invalid out of the box — FIXED in Phase 63
 Reproduced on 3.14.1 in an empty directory: run the framework plan (seeds
 `docs/roadmap.md` from `data/templates/roadmap.md`), then `tagteam roadmap check`:
 
