@@ -3,8 +3,22 @@
 ## Status
 - [x] Planning: approved round 3 (2026-09-20) at `61f4a23`
 - [x] Implementation: branch `phase/roadmap-placeholders-are-not-phases`
-- [ ] Implementation Review
-- [ ] Complete
+- [x] Implementation Review: approved round 1 (2026-09-20) at `c35e793`; gate 2,074 passed, 5 skipped
+- [ ] Complete: PR open, merge pending
+
+## Closeout
+```
+Phase report: roadmap-placeholders-are-not-phases — plan approved r3 · impl approved r1
+  plan   3 rounds · 2 change requests · 0 bounces
+  impl   1 round · 0 change requests · 0 bounces · gate 1 run, 7m 41s
+  time   start→approve 16m 35s · implementation before first submit 3m 55s
+         lead 1m 26s (2 spans, 2 unknown) · reviewer 3m 32s (4 spans) · gate 7m 42s (1 span)  (elapsed; includes relay wait)
+  usage  no usage rows stored under this phase
+  turns  matched 0 of 8 · no token data 0 · unmatched 6 · unknown 2
+```
+No reviewer notes at approval. **On release:** note that a `[Name]` heading is
+no longer a phase — a roadmap that relied on one (none known) would lose it
+from `roadmap ready`/`queue`, with a `warn:` from `roadmap check`.
 
 ## Summary
 The roadmap `tagteam setup` seeds fails `tagteam roadmap check`. Reproduced on
