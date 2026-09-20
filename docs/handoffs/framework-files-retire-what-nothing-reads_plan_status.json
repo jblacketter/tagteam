@@ -1,0 +1,18 @@
+{
+  "state": "in-progress",
+  "ready_for": "lead",
+  "round": 1,
+  "phase": "framework-files-retire-what-nothing-reads",
+  "type": "plan",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-20",
+  "baseline": {
+    "sha": "09612991f62224f371687c7dde4ea900ef15c544",
+    "dirty_paths": [
+      "?? tagteam-manifest.json"
+    ],
+    "captured_at": "2026-09-20T21:08:22.036330+00:00",
+    "source": "plan-init"
+  }
+}
