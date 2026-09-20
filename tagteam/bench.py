@@ -596,9 +596,16 @@ def compose_bench_prompt(pair: Pair, repo: Path, verdict_path: Path, *,
         parts.append(f"Not materialised (submodule entries): {', '.join(omitted[:20])}"
                      + (f" … {len(omitted) - 20} more" if len(omitted) > 20 else ""))
     parts.append("")
-    checklist = repo / "docs" / "checklists" / ("code_review.md" if r.type == "impl" else "plan_review.md")
+    # The project's own checklist wins; otherwise the package's (Phase 61:
+    # setup no longer installs docs/checklists/).
+    name = "code_review.md" if r.type == "impl" else "plan_review.md"
+    checklist = repo / "docs" / "checklists" / name
+    label = f"docs/checklists/{name}"
+    if not checklist.is_file():
+        checklist = Path(__file__).parent / "data" / "checklists" / name
+        label = f"tagteam package: checklists/{name}"
     if checklist.is_file():
-        parts += [f"=== REVIEW CHECKLIST ({checklist.relative_to(repo).as_posix()}) ===",
+        parts += [f"=== REVIEW CHECKLIST ({label}) ===",
                   checklist.read_text(encoding="utf-8", errors="replace").strip(), ""]
     pre = r.pre_verdict
     gate = next((e for e in reversed(pre) if e.get("role") == "gatekeeper"

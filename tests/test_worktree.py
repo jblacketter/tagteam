@@ -308,7 +308,7 @@ class TestImplRound2Fixes:
         info = wt.create_worktree(repo, "beta")
         assert Path(info.path).exists()
         assert not (Path(info.path) / ".claude" / "skills" / "handoff").exists()
-        assert (Path(info.path) / "templates").is_dir()
+        assert (Path(info.path) / "docs" / "workflows.md").is_file()
 
     def test_project_scoped_plugin_vendors_into_worktree(self, repo, monkeypatch):
         """A project-scope record names the main checkout, not the worktree,

@@ -45,8 +45,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-# What tagteam.setup.main can write inside a project (kept in sync with
-# tagteam/setup.py; the whole subtrees are snapshotted so new files show up).
+# What tagteam.setup.main can write — or, for the retired templates/ and
+# docs/checklists/ (Phase 61), delete — inside a project (kept in sync with
+# tagteam/framework.py; whole subtrees are snapshotted so new files show up).
 MANAGED_SUBTREES = (".claude/skills", "templates", "docs/checklists")
 MANAGED_FILES = ("docs/workflows.md", "docs/roadmap.md", "docs/decision_log.md",
                  "tagteam-manifest.json", "AGENTS.md", "CLAUDE.md")

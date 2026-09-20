@@ -1,8 +1,8 @@
 # Phase 61: Framework files: retire what nothing reads
 
 ## Status
-- [ ] Planning
-- [ ] Implementation: branch `phase/framework-files-retire-what-nothing-reads`
+- [x] Planning: approved round 2 (2026-09-20) at `47ba579`
+- [x] Implementation: branch `phase/framework-files-retire-what-nothing-reads`
 - [ ] Implementation Review
 - [ ] Complete
 
@@ -235,4 +235,7 @@ with `--preview` as the look-before. The alternative is `--retire` (nothing is
 removed unless asked; a plain run prints `retire available: 12 file(s)`), which
 costs one more sweep per release and leaves the files in every project whose
 owner never passes it. The plan takes automatic because the deletion is limited
-to bytes tagteam can prove it wrote and still ships. Say so if you want the flag.
+to bytes tagteam can prove it wrote and that can be had again: either the
+installed package still ships them, or — for an older version's bytes — git
+can restore them (tracked and clean); anything else is kept. Say so if you want
+the flag.

@@ -52,15 +52,9 @@ def needs_setup(project_dir: str = ".", plugin: PluginStatus | None = None) -> b
     except (OSError, UnicodeError):
         return True
 
-    templates = target / "templates"
-    if not templates.exists() or not any(templates.glob("*.md")):
-        return True
-
-    checklists = target / "docs" / "checklists"
-    if not checklists.exists() or not any(checklists.glob("*.md")):
-        return True
-
-    return False
+    # Phase 61: docs/workflows.md is the one framework file every project
+    # gets; templates/ and docs/checklists/ are retired and say nothing.
+    return not (target / "docs" / "workflows.md").is_file()
 
 
 def run_setup(project_dir: str = ".", *, no_plugin: bool = False,

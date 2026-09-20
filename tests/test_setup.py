@@ -36,7 +36,7 @@ class TestRemovePath:
         assert not skill_dir(project).exists()
         assert "plugin: installed (user scope" in out
         assert "removed vendored handoff skill (" in out and "contract) — served by the plugin" in out
-        assert (project / "templates" / "phase_plan.md").exists()   # everything else vendored as usual
+        assert (project / "docs" / "workflows.md").exists()   # everything else as usual
         assert not su.needs_setup(str(project))
 
     def test_modified_skill_is_kept_and_not_overwritten(self, project, tmp_path, monkeypatch, capsys):
@@ -232,13 +232,15 @@ class TestLegacyUserSkillNote:
         assert self._snapshot(cfg) == before
 
 
-def test_setup_copies_shipped_templates_without_rendering(project, monkeypatch, capsys):
+def test_setup_copies_shipped_files_without_rendering(project, monkeypatch, capsys):
     def unexpected_render(*args, **kwargs):
         raise AssertionError("shipped files must not render role variables")
     monkeypatch.setattr(su, "render_template", unexpected_render)
     su.main(str(project), no_plugin=True, report_user_skills=False)
-    for source in (su.get_data_dir() / "templates").glob("*.md"):
-        assert (project / "templates" / source.name).read_bytes() == source.read_bytes()
+    data = su.get_data_dir()
+    assert (project / "docs" / "workflows.md").read_bytes() == (data / "workflows.md").read_bytes()
+    assert (project / "docs" / "roadmap.md").read_bytes() == (data / "templates" / "roadmap.md").read_bytes()
+    assert not (project / "templates").exists()            # Phase 61: retired, never created
     output = capsys.readouterr().out
     assert "Using agent names from config" not in output
     assert "templates will have" not in output

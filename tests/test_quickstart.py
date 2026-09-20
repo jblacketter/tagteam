@@ -22,48 +22,43 @@ from tagteam.cli import (
 # --- needs_setup tests ---
 
 class TestNeedsSetup:
+    """Phase 61: readiness keys on docs/workflows.md — the one framework file
+    every project gets. templates/ and docs/checklists/ are retired."""
+
     def test_all_present(self, tmp_path):
-        """Setup complete when skills + templates + checklists all exist."""
         (tmp_path / ".claude" / "skills" / "handoff").mkdir(parents=True)
         (tmp_path / ".claude" / "skills" / "handoff" / "SKILL.md").write_text("skill")
-        (tmp_path / "templates").mkdir()
-        (tmp_path / "templates" / "phase_plan.md").write_text("template")
-        (tmp_path / "docs" / "checklists").mkdir(parents=True)
-        (tmp_path / "docs" / "checklists" / "code_review.md").write_text("checklist")
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "workflows.md").write_text("workflows")
 
         assert needs_setup(str(tmp_path)) is False
 
     def test_packaged_contract_needs_no_local_skill(self, tmp_path):
-        (tmp_path / "templates").mkdir()
-        (tmp_path / "templates" / "phase_plan.md").write_text("template")
-        (tmp_path / "docs" / "checklists").mkdir(parents=True)
-        (tmp_path / "docs" / "checklists" / "code_review.md").write_text("checklist")
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "workflows.md").write_text("workflows")
 
         assert needs_setup(str(tmp_path)) is False
 
-    def test_missing_templates(self, tmp_path):
+    def test_missing_workflows(self, tmp_path):
         (tmp_path / ".claude" / "skills" / "handoff").mkdir(parents=True)
         (tmp_path / ".claude" / "skills" / "handoff" / "SKILL.md").write_text("skill")
-        (tmp_path / "docs" / "checklists").mkdir(parents=True)
-        (tmp_path / "docs" / "checklists" / "code_review.md").write_text("checklist")
+        (tmp_path / "docs").mkdir()
 
         assert needs_setup(str(tmp_path)) is True
 
-    def test_missing_checklists(self, tmp_path):
-        (tmp_path / ".claude" / "skills" / "handoff").mkdir(parents=True)
-        (tmp_path / ".claude" / "skills" / "handoff" / "SKILL.md").write_text("skill")
+    def test_retired_directories_do_not_count(self, tmp_path):
+        """A pre-Phase-61 tree without workflows.md is not ready, and a
+        retired one (no templates/, no checklists/) is."""
         (tmp_path / "templates").mkdir()
         (tmp_path / "templates" / "phase_plan.md").write_text("template")
-
-        assert needs_setup(str(tmp_path)) is True
-
-    def test_empty_templates_dir(self, tmp_path):
-        """Templates dir exists but has no .md files."""
-        (tmp_path / ".claude" / "skills" / "handoff").mkdir(parents=True)
-        (tmp_path / ".claude" / "skills" / "handoff" / "SKILL.md").write_text("skill")
-        (tmp_path / "templates").mkdir()
         (tmp_path / "docs" / "checklists").mkdir(parents=True)
         (tmp_path / "docs" / "checklists" / "code_review.md").write_text("checklist")
+        assert needs_setup(str(tmp_path)) is True
+        (tmp_path / "docs" / "workflows.md").write_text("workflows")
+        assert needs_setup(str(tmp_path)) is False
+
+    def test_directory_at_workflows_path(self, tmp_path):
+        (tmp_path / "docs" / "workflows.md").mkdir(parents=True)
 
         assert needs_setup(str(tmp_path)) is True
 
@@ -104,11 +99,10 @@ class TestNeedsSetupWithPlugin:
         fake_plugin(tmp_path, monkeypatch, scope="project", project_path=other)
         assert needs_setup(str(p)) is False
 
-    def test_plugin_does_not_excuse_templates_or_checklists(self, tmp_path, monkeypatch):
+    def test_plugin_does_not_excuse_workflows(self, tmp_path, monkeypatch):
         from tests._plugin_env import fake_plugin
         p = self._project(tmp_path); fake_plugin(tmp_path, monkeypatch)
-        for f in (p / "templates").glob("*.md"):
-            f.unlink()
+        (p / "docs" / "workflows.md").unlink()
         assert needs_setup(str(p)) is True
 
     def test_precomputed_plugin_status_is_not_required(self, tmp_path, monkeypatch):
@@ -161,10 +155,8 @@ class TestRunSetup:
         # Set up all required files
         (tmp_path / ".claude" / "skills" / "handoff").mkdir(parents=True)
         (tmp_path / ".claude" / "skills" / "handoff" / "SKILL.md").write_text("skill")
-        (tmp_path / "templates").mkdir()
-        (tmp_path / "templates" / "phase_plan.md").write_text("t")
-        (tmp_path / "docs" / "checklists").mkdir(parents=True)
-        (tmp_path / "docs" / "checklists" / "code_review.md").write_text("c")
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "workflows.md").write_text("w")
 
         run_setup(str(tmp_path))
         mock_main.assert_not_called()

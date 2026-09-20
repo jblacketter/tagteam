@@ -93,26 +93,26 @@ def test_upgrade_smoke_isolated(tmp_path):
 def test_upgrade_smoke_detects_project_change_without_breaking_isolation(tmp_path, monkeypatch):
     """A project that is NOT a no-op is reported as exit 1 with the diff,
     while every isolation check still holds. Since Phase 52 the customised
-    template itself is kept — what changes is the manifest, which drops the
+    file itself is kept — what changes is the manifest, which drops the
     entry for bytes that are no longer tagteam's."""
     monkeypatch.setenv("TAGTEAM_CLAUDE_BIN", "")
     project = tmp_path / "stale"
     _setup_project_isolated(project, tmp_path)
-    template = project / "templates" / "phase_plan.md"
+    template = project / "docs" / "workflows.md"
     template.write_text("- Lead: Claude\n", encoding="utf-8")
     # a preview of the project writes nothing at all
     code, rep = _run(["--project", str(project), "--preview"])
     assert code == 0, rep
     assert rep["problems"] == [] and rep["project_diff"] == []
-    assert "keep     templates/phase_plan.md" in rep["helper_stdout"]
+    assert "keep     docs/workflows.md" in rep["helper_stdout"]
     assert "would be written (preview" in rep["helper_stdout"]
-    # the apply keeps the template and rewrites only the manifest
+    # the apply keeps the file and rewrites only the manifest
     code, rep = _run(["--project", str(project)])
     assert code == 1, rep
     assert rep["problems"] == []
     assert rep["project_diff"] == ["~ tagteam-manifest.json"]
     assert template.read_text(encoding="utf-8") == "- Lead: Claude\n"
-    assert "keep     templates/phase_plan.md" in rep["helper_stdout"]
+    assert "keep     docs/workflows.md" in rep["helper_stdout"]
 
 
 STUB_INIT = textwrap.dedent('''
@@ -239,15 +239,16 @@ def wheel_venv(tmp_path_factory) -> dict:
 
 
 def _old_project(root: Path) -> dict[str, bytes]:
-    """Old Claude-lead scaffolding: rendered templates, a customised
-    checklist, a current workflows.md, real history. Returns the bytes that
-    must survive untouched."""
+    """Old Claude-lead scaffolding: a rendered template, an untouched one
+    (package bytes — Phase 61 retires it), a customised checklist, a current
+    workflows.md, real history. Returns the bytes that must survive untouched."""
     from tagteam import setup as tsetup
     data = tsetup.get_data_dir()
     root.mkdir(parents=True)
     (root / "tagteam.yaml").write_text("agents:\n  lead:\n    name: claude\n  reviewer:\n    name: codex\n", encoding="utf-8")
     (root / "templates").mkdir()
     (root / "templates" / "phase_plan.md").write_text("# Phase\n\n## Roles\n- Lead: Claude\n- Reviewer: Codex\n", encoding="utf-8")
+    (root / "templates" / "cycle.md").write_bytes((data / "templates" / "cycle.md").read_bytes())
     (root / "docs" / "checklists").mkdir(parents=True)
     (root / "docs" / "checklists" / "code_review.md").write_bytes(
         (data / "checklists" / "code_review.md").read_bytes() + b"\n- [ ] our extra check\n")
@@ -284,9 +285,10 @@ def test_installed_wheel_migrates_old_project(wheel_venv, tmp_path, monkeypatch,
     # rep["problems"] == [] already proved the helper imported the wheel under
     # the venv prefix at the expected version (the harness's identity check).
     assert rep["helper"]["version"] == wheel_venv["version"]
-    assert "keep     templates/phase_plan.md — differs from the package" in out
-    assert "keep     docs/checklists/code_review.md — differs from the package" in out
-    assert "create   templates/cycle.md" in out
+    assert "keep     templates/phase_plan.md — no longer managed; differs from the package" in out
+    assert "keep     docs/checklists/code_review.md — no longer managed; differs from the package" in out
+    assert "retire   templates/cycle.md — no longer installed; matches the package" in out
+    assert "create   templates/" not in out and "create   docs/checklists/" not in out
     assert "would be written (preview" in out
 
     # apply: only framework paths move; custom content and history survive
@@ -294,14 +296,16 @@ def test_installed_wheel_migrates_old_project(wheel_venv, tmp_path, monkeypatch,
     assert code == 1, rep                            # 1 = isolation held, project changed
     assert rep["problems"] == []
     diff = rep["project_diff"]
-    assert "+ tagteam-manifest.json" in diff and "+ templates/cycle.md" in diff
+    assert "+ tagteam-manifest.json" in diff and "- templates/cycle.md" in diff
+    assert not any(d.startswith(("+ templates/", "+ docs/checklists/")) for d in diff), diff
     assert not any(d.startswith("~ ") for d in diff), diff       # nothing existing was modified
     assert ("+ .claude/skills/handoff/SKILL.md" in diff) == (plugin == "absent")
     for rel, data in keep.items():
         assert (project / rel).read_bytes() == data, rel
     out = rep["helper_stdout"]
     assert "keep     templates/phase_plan.md" in out and "keep     docs/checklists/code_review.md" in out
-    assert f"accept with: tagteam setup {project.resolve()} --accept templates/phase_plan.md" in out
+    assert "retired  templates/cycle.md" in out
+    assert f"delete with: tagteam setup {project.resolve()} --accept templates/phase_plan.md" in out
     manifest = json.loads((project / "tagteam-manifest.json").read_text(encoding="utf-8"))
     assert manifest["tagteam"] == wheel_venv["version"]
     assert "templates/phase_plan.md" not in manifest["files"] and "docs/checklists/code_review.md" not in manifest["files"]

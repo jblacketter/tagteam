@@ -17,6 +17,15 @@ last wrote:
 * ``unsupported`` → a symlink, directory, or non-regular file at the path or
                     any component → refused under every flag
 
+Phase 61: the managed set is ``docs/workflows.md`` plus the vendored skill.
+``templates/*.md`` and ``docs/checklists/*.md`` — which nothing reads from a
+project — are *retired*: no longer created, and a copy tagteam provably wrote
+is removed. A copy the installed package can reproduce byte for byte goes
+without a git check; one known only by its manifest hash (an older version's
+bytes) goes only when git can restore it, else it is kept with its manifest
+entry so a later run can retire it. A modified copy is kept; ``--accept PATH``
+deletes it. A symlink or directory at a retired path is kept, never refused.
+
 Recovery is git: an accepted overwrite or deletion needs the path tracked and
 clean so ``git checkout -- PATH`` restores it; ``--force`` lifts only that
 refusal. Every write and delete — including the project directory itself
@@ -55,8 +64,10 @@ SKILLS_DIR_REL = ".claude/skills"
 # Directories setup provides, and files it seeds once and never touches again
 # (round 3: these go through the same lexical-parent checks as managed files,
 # so setup never mkdirs or writes through a link or a non-directory).
-SEED_DIRS = (".claude/skills", "docs/phases", "docs/handoffs", "docs/escalations",
-             "docs/checklists", "templates")
+SEED_DIRS = (".claude/skills", "docs/phases", "docs/handoffs", "docs/escalations")
+# Phase 61: directories whose tagteam files are retired; removed when a run
+# leaves them empty (rmdir, never recursive).
+RETIRED_DIRS = ("templates", "docs/checklists")
 POINTER = ("# Project workflow\n\nRead `tagteam.yaml` for current roles, "
            "`docs/workflows.md` for onboarding, and run "
            "`tagteam contract` for the authoritative workflow.\n")
@@ -68,9 +79,12 @@ SEED_FILES = (("docs/roadmap.md", "templates/roadmap.md"),
 UNSUPPORTED, ABSENT, CURRENT, FRAMEWORK, CUSTOM = (
     "unsupported", "absent", "current", "framework", "custom")
 
+# Actions that touch disk.
+_WRITES = ("create", "refresh", "accept", "remove", "retire")
+
 # Verbs: planned action → outcome after apply.
 _DONE = {"create": "created", "refresh": "refreshed", "accept": "accepted",
-         "remove": "removed", "keep": "keep", "current": "current",
+         "remove": "removed", "retire": "retired", "keep": "keep", "current": "current",
          "refuse": "refused", "none": ""}
 
 
@@ -225,7 +239,7 @@ def _same_manifest(a: dict | None, b: dict | None) -> bool:
 @dataclass
 class Item:
     rel: str
-    kind: str                       # file | skill | skill-handover | extra | legacy | dir | seed
+    kind: str                       # file | skill | skill-handover | extra | legacy | dir | seed | retired
     source: Path | None = None
     source_rel: str = ""
     content: bytes | None = None    # literal payload (seeds without a package file)
@@ -233,14 +247,15 @@ class Item:
     shape: Shape = field(default_factory=lambda: Shape("absent"))
     cls: str = ""
     reason: str = ""
-    action: str = "none"            # create | refresh | accept | remove | keep | current | refuse | none
+    action: str = "none"            # create | refresh | accept | remove | retire | keep | current | refuse | none
+    reconstructible: bool = False   # the installed package reproduces the on-disk bytes exactly
     entry: dict | None = None       # the manifest entry for this path, if any
     outcome: str = ""               # after apply: created | refreshed | … | refused: <why>
     note: str = ""                  # extra text for the report line
 
     @property
     def done(self) -> bool:
-        return self.outcome in ("created", "refreshed", "accepted", "removed")
+        return self.outcome in ("created", "refreshed", "accepted", "removed", "retired")
 
     @property
     def refused(self) -> bool:
@@ -264,6 +279,7 @@ class Plan:
     manifest_outcome: str = ""      # after apply: written | unchanged | refused: <why>
     root_shape: Shape = field(default_factory=lambda: Shape("dir"))          # preimage of root
     root_outcome: str = ""          # "" (existed) | created | refused: <why>
+    pruned_dirs: list[str] = field(default_factory=list)   # retired dirs rmdir'd this run
     applied: bool = False
 
     @property
@@ -280,15 +296,24 @@ class Plan:
 
 def _sources(data_dir: Path) -> list[tuple[str, Path, str]]:
     """(project relpath, package file, data-relative source) for every managed
-    file the package ships — templates, checklists, workflows.md."""
+    file the package ships — workflows.md (the vendored skill is separate)."""
+    out: list[tuple[str, Path, str]] = []
+    wf = data_dir / "workflows.md"
+    if wf.is_file():
+        out.append(("docs/workflows.md", wf, "workflows.md"))
+    return out
+
+
+def _retired_sources(data_dir: Path) -> list[tuple[str, Path, str]]:
+    """Same triples for the paths tagteam used to install and no longer does.
+    The package files stay: two are seed sources, the checklists are bench's
+    fallback, and all of them are what lets a pre-manifest copy be recognised
+    as tagteam's bytes."""
     out: list[tuple[str, Path, str]] = []
     for f in sorted((data_dir / "templates").glob("*.md")):
         out.append((f"templates/{f.name}", f, f"templates/{f.name}"))
     for f in sorted((data_dir / "checklists").glob("*.md")):
         out.append((f"docs/checklists/{f.name}", f, f"checklists/{f.name}"))
-    wf = data_dir / "workflows.md"
-    if wf.is_file():
-        out.append(("docs/workflows.md", wf, "workflows.md"))
     return out
 
 
@@ -317,7 +342,7 @@ def _classify(item: Item, package: bytes, root: Path, known: dict[str, str]) -> 
         return
     sha = s.sha256
     if sha == item.package_sha:
-        item.cls, item.reason = CURRENT, "matches the package"
+        item.cls, item.reason, item.reconstructible = CURRENT, "matches the package", True
         return
     if item.entry is not None and item.entry.get("sha256") == sha:
         item.cls, item.reason = FRAMEWORK, f"written by tagteam {item.entry.get('tagteam', '?')}"
@@ -328,6 +353,7 @@ def _classify(item: Item, package: bytes, root: Path, known: dict[str, str]) -> 
     for label, variant in _render_variants(package, root):
         if sha == sha256_bytes(variant):
             item.cls, item.reason = FRAMEWORK, f"matches the package rendered for the {label}"
+            item.reconstructible = True
             return
     if item.entry is not None:
         item.cls = CUSTOM
@@ -470,6 +496,33 @@ def _seed_items(root: Path, data_dir: Path) -> tuple[list[Item], list[Item]]:
     return dirs, seeds
 
 
+def _plan_retired(root: Path, it: Item, accept: set[str]) -> None:
+    """Action for a path tagteam no longer installs. A digest is provenance,
+    not recovery: only bytes the installed package reproduces go without a
+    git check."""
+    why = it.reason
+    if it.cls == ABSENT:
+        it.action = "none"
+    elif it.cls == UNSUPPORTED:
+        # Nothing is written here any more, so an odd shape is not an error.
+        it.action, it.reason = "keep", f"no longer managed; {it.shape.detail}; never touched"
+    elif it.cls == CUSTOM:
+        it.action = "remove" if it.rel in accept else "keep"
+        it.reason = f"no longer managed; {why}"
+    elif it.reconstructible:
+        it.action, it.reason = "retire", f"no longer installed; {why}"
+    elif it.rel in accept:
+        it.action, it.reason = "remove", f"no longer installed; {why}"
+    else:
+        ok, git_why = recoverability(root, it.rel)
+        it.reason = f"no longer installed; {why}"
+        if ok:
+            it.action, it.note = "retire", git_why
+        else:
+            it.action = "keep"
+            it.reason += f"; not recoverable: {git_why}"
+
+
 def build_plan(target: str | Path, *, data_dir: Path, no_plugin: bool = False,
                accept: tuple[str, ...] | list[str] = (), force: bool = False,
                plugin: PluginStatus | None = None) -> Plan:
@@ -491,12 +544,23 @@ def build_plan(target: str | Path, *, data_dir: Path, no_plugin: bool = False,
                   shape=observe(root, rel), entry=entries.get(rel))
         _classify(it, package, root, known)
         items.append(it)
+    for rel, src, src_rel in _retired_sources(data_dir):
+        package = src.read_bytes()
+        it = Item(rel, "retired", source=src, source_rel=src_rel, package_sha=sha256_bytes(package),
+                  shape=observe(root, rel), entry=entries.get(rel))
+        _classify(it, package, root, known)
+        items.append(it)
     items += _skill_items(root, data_dir, vendor, entries, known)
     items += _legacy_items(root, accept_set)
     items += seeds
 
     matched: set[str] = set()
     for it in items:
+        if it.kind == "retired":
+            _plan_retired(root, it, accept_set)
+            if it.action == "remove":
+                matched.add(it.rel)
+            continue
         if it.kind in ("skill-handover", "extra", "legacy", "dir", "seed"):
             if it.action == "remove" and it.kind == "legacy":
                 matched.add(it.rel)
@@ -536,7 +600,7 @@ def build_plan(target: str | Path, *, data_dir: Path, no_plugin: bool = False,
         why = f"unsupported filesystem shape ({rshape.detail})"
         plan.root_outcome = f"refused: {why}"
         for it in items:
-            if it.action in ("create", "refresh", "accept", "remove", "refuse"):
+            if it.action in _WRITES + ("refuse",):
                 it.cls, it.action, it.reason = UNSUPPORTED, "refuse", why
     # Preview verdict for the manifest: a write that would be needed but is
     # impossible at this shape is a refusal now, not a promise.
@@ -649,9 +713,9 @@ def _act(root: Path, item: Item) -> None:
         elif item.action in ("refresh", "accept"):
             _replace(path, payload())
             item.outcome = _DONE[item.action]
-        elif item.action == "remove":
+        elif item.action in ("remove", "retire"):
             os.unlink(path)
-            item.outcome = "removed"
+            item.outcome = _DONE[item.action]
     except FileExistsError:
         item.outcome = "refused: appeared since classification"
     except OSError as e:
@@ -682,12 +746,39 @@ def _handover(root: Path, item: Item) -> None:
         item.note = f"directory left in place ({e.__class__.__name__})"
 
 
+def _prune_retired_dirs(plan: Plan) -> None:
+    """rmdir a retired directory this run emptied. Never recursive: anything
+    else in it (the owner's file, a kept custom copy) leaves it in place."""
+    for d in RETIRED_DIRS:
+        if not any(it.kind == "retired" and it.done and it.rel.startswith(d + "/")
+                   for it in plan.items):
+            continue
+        if observe_dir(plan.root, d).kind != "dir":
+            continue
+        try:
+            os.rmdir(plan.root / d)
+        except OSError:
+            continue
+        plan.pruned_dirs.append(d)
+
+
 def projected_manifest(plan: Plan) -> dict | None:
     """The manifest the tree should have after this run: entries exactly for
     paths whose bytes are verified package output."""
     prior = plan.manifest["files"] if plan.manifest else {}
     files: dict[str, dict] = {}
     for it in plan.items:
+        if it.kind == "retired":
+            # The entry goes only when the file does. A refused or failed
+            # unlink, a historical copy kept for want of git recovery and an
+            # unsupported shape keep theirs — it is the only provenance the
+            # next run has. A custom copy has none to keep.
+            gone = it.done if plan.applied else it.action in ("retire", "remove")
+            refused = it.refused if plan.applied else it.action == "refuse"
+            held = it.action == "keep" and it.cls in (FRAMEWORK, UNSUPPORTED)
+            if not gone and (refused or held) and it.rel in prior:
+                files[it.rel] = prior[it.rel]
+            continue
         if it.kind not in ("file", "skill", "skill-handover"):
             continue
         done = it.done if plan.applied else it.action in ("create", "refresh", "accept")
@@ -766,7 +857,7 @@ def apply(plan: Plan) -> Plan:
         # No directory to write into: every write is refused with that reason.
         plan.root_outcome = f"refused: {why}"
         for it in plan.items:
-            if it.action in ("create", "refresh", "accept", "remove"):
+            if it.action in _WRITES:
                 it.outcome = f"refused: {why}"
             elif it.action == "refuse":
                 it.outcome = f"refused: {it.reason}"
@@ -781,12 +872,13 @@ def apply(plan: Plan) -> Plan:
                 _handover(plan.root, it)
             else:
                 it.outcome = _DONE.get(it.action, "")
-        elif it.action in ("create", "refresh", "accept", "remove"):
+        elif it.action in _WRITES:
             _act(plan.root, it)
         elif it.action == "refuse":
             it.outcome = f"refused: {it.reason}"
         else:
             it.outcome = _DONE.get(it.action, "")
+    _prune_retired_dirs(plan)
     plan.applied = True
     _write_manifest(plan)
     return plan
@@ -863,19 +955,28 @@ def format_report(plan: Plan) -> str:
         if it.action == "current" and not it.refused:
             current += 1
             continue
+        if it.kind == "retired" and it.action == "none":
+            continue                                # never installed, or already gone
         verb = it.outcome if plan.applied else it.action
         if it.refused:
             text = _refusal(it, plan.applied)
         else:
             verb = verb or it.action
             text = f"  {verb:<8} {it.rel} — {it.reason}"
-            if it.action in ("accept", "remove") and it.note:
+            if it.action in ("accept", "remove", "retire") and it.note:
                 text += f" ({it.note})"
             if it.action == "keep" and it.kind in ("file", "skill"):
                 text += f"; {_accept_hint(plan, it)}"
             elif it.action == "keep" and it.kind == "legacy":
                 text += f"; delete with: tagteam setup {plan.root} --accept {it.rel}"
+            elif it.action == "keep" and it.kind == "retired" and it.cls == CUSTOM:
+                text += f"; delete with: tagteam setup {plan.root} --accept {it.rel}"
+            elif it.action == "keep" and it.kind == "retired" and it.cls == FRAMEWORK:
+                text += (f"; commit it and re-run, or delete with: "
+                         f"tagteam setup {plan.root} --accept {it.rel} --force")
         lines.append(text)
+    for d in plan.pruned_dirs:
+        lines.append(f"  removed  {d}/ — empty")
     if made_dirs:
         lines.append(f"  {'created' if plan.applied else 'create':<8} {made_dirs} director{'y' if made_dirs == 1 else 'ies'}")
     if current:

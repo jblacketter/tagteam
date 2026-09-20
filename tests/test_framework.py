@@ -107,8 +107,8 @@ def replace_source(monkeypatch, tmp_path: Path, rel: str, new_bytes: bytes) -> N
 def test_fresh_setup_creates_everything_and_writes_manifest(proj, capsys):
     assert fresh(proj) == 0
     out = capsys.readouterr().out
-    for src in (DATA / "templates").glob("*.md"):
-        assert (proj / "templates" / src.name).read_bytes() == src.read_bytes()
+    assert (proj / "docs" / "workflows.md").read_bytes() == (DATA / "workflows.md").read_bytes()
+    assert not (proj / "templates").exists() and not (proj / "docs" / "checklists").exists()   # Phase 61
     assert (proj / SKILL).read_bytes() == PACKAGED_SKILL
     assert (proj / "docs" / "roadmap.md").exists() and (proj / "AGENTS.md").exists()
     m = manifest(proj)
@@ -116,7 +116,7 @@ def test_fresh_setup_creates_everything_and_writes_manifest(proj, capsys):
     assert set(m["files"]) == {i.rel for i in fw.build_plan(proj, data_dir=DATA).items if i.kind in ("file", "skill")}
     for rel, e in m["files"].items():
         assert e["sha256"] == fw.sha256_bytes((proj / rel).read_bytes()) and e["tagteam"] == fw.package_version()
-    assert "created  templates/phase_plan.md" in out and "Manifest: tagteam-manifest.json written" in out
+    assert "created  docs/workflows.md" in out and "templates/" not in out and "Manifest: tagteam-manifest.json written" in out
     assert not su.needs_setup(str(proj))
     assert json.loads((registry_mod.REGISTRY_FILE).read_text()) == [str(proj.resolve())]
 
@@ -136,8 +136,8 @@ def test_preview_writes_nothing_and_reports(proj, capsys):
     code, out = run(proj, preview=True, capsys=capsys)
     assert code == 0 and snapshot(proj) == before
     assert "preview (nothing will be written)" in out
-    assert "create   templates/cycle.md" in out
-    assert f"keep     templates/phase_plan.md — differs from the package; accept with: tagteam setup {proj.resolve()} --accept templates/phase_plan.md" in out
+    assert "create   docs/workflows.md" in out
+    assert f"keep     templates/phase_plan.md — no longer managed; differs from the package; delete with: tagteam setup {proj.resolve()} --accept templates/phase_plan.md" in out
     assert "would be written (preview — nothing written)" in out
     assert not (proj / fw.MANIFEST_NAME).exists() and not (proj / "docs").exists()
 
@@ -156,11 +156,11 @@ def test_old_rendered_templates_are_custom_and_kept(proj, capsys):
 def test_render_variant_counts_as_framework(proj, monkeypatch, tmp_path):
     """Pre-manifest evidence: the file equals the package rendered for the
     configured (or swapped) names → an older tagteam wrote it → refresh."""
-    replace_source(monkeypatch, tmp_path, "templates/cycle.md", b"Lead: {{lead}} / Reviewer: {{reviewer}}\n")
-    (proj / "templates").mkdir()
-    (proj / "templates" / "cycle.md").write_bytes(b"Lead: B / Reviewer: A\n")     # swapped names
+    replace_source(monkeypatch, tmp_path, "docs/workflows.md", b"Lead: {{lead}} / Reviewer: {{reviewer}}\n")
+    (proj / "docs").mkdir()
+    (proj / "docs" / "workflows.md").write_bytes(b"Lead: B / Reviewer: A\n")     # swapped names
     plan = fw.build_plan(proj, data_dir=DATA)
-    it = next(i for i in plan.items if i.rel == "templates/cycle.md")
+    it = next(i for i in plan.items if i.rel == "docs/workflows.md")
     assert it.cls == fw.FRAMEWORK and "swapped names" in it.reason and it.action == "refresh"
 
 
@@ -170,45 +170,45 @@ def test_render_variant_counts_as_framework(proj, monkeypatch, tmp_path):
 
 def test_accept_requires_tracked_and_clean(proj, capsys):
     fresh(proj)
-    t = proj / "templates" / "cycle.md"
+    t = proj / "docs" / "workflows.md"
     t.write_text("mine\n")
     # not a git repository
-    code, out = run(proj, accept=["templates/cycle.md"], capsys=capsys)
+    code, out = run(proj, accept=["docs/workflows.md"], capsys=capsys)
     assert code == 1 and t.read_text() == "mine\n"
-    assert "refused  templates/cycle.md — not recoverable: not a git repository (use --force)" in out
+    assert "refused  docs/workflows.md — not recoverable: not a git repository (use --force)" in out
     # untracked
     git(proj, "init", "-q")
-    code, out = run(proj, accept=["templates/cycle.md"], capsys=capsys)
+    code, out = run(proj, accept=["docs/workflows.md"], capsys=capsys)
     assert code == 1 and "not recoverable: untracked" in out
     # uncommitted changes
     commit_all(proj); t.write_text("mine again\n")
-    code, out = run(proj, accept=["templates/cycle.md"], capsys=capsys)
+    code, out = run(proj, accept=["docs/workflows.md"], capsys=capsys)
     assert code == 1 and "not recoverable: uncommitted changes" in out and t.read_text() == "mine again\n"
     # tracked and clean → overwritten, entry recorded
     commit_all(proj)
-    code, out = run(proj, accept=["templates/cycle.md"], capsys=capsys)
-    assert code == 0 and "accepted templates/cycle.md" in out and "(tracked and clean)" in out
-    assert t.read_bytes() == (DATA / "templates" / "cycle.md").read_bytes()
-    assert manifest(proj)["files"]["templates/cycle.md"]["sha256"] == fw.sha256_bytes(t.read_bytes())
+    code, out = run(proj, accept=["docs/workflows.md"], capsys=capsys)
+    assert code == 0 and "accepted docs/workflows.md" in out and "(tracked and clean)" in out
+    assert t.read_bytes() == (DATA / "workflows.md").read_bytes()
+    assert manifest(proj)["files"]["docs/workflows.md"]["sha256"] == fw.sha256_bytes(t.read_bytes())
 
 
 def test_force_lifts_recoverability_only(proj, capsys):
     fresh(proj)
-    t = proj / "templates" / "cycle.md"; t.write_text("mine\n")
-    other = proj / "templates" / "feedback.md"; other.write_text("also mine\n")
-    code, out = run(proj, accept=["templates/cycle.md"], force=True, capsys=capsys)
+    t = proj / "docs" / "workflows.md"; t.write_text("mine\n")
+    other = proj / SKILL; other.write_text("also mine\n")
+    code, out = run(proj, accept=["docs/workflows.md"], force=True, capsys=capsys)
     assert code == 0
     assert "--force: recoverability refusals lifted" in out
-    assert "accepted templates/cycle.md" in out and "; --force)" in out
-    assert t.read_bytes() == (DATA / "templates" / "cycle.md").read_bytes()
-    assert other.read_text() == "also mine\n" and "keep     templates/feedback.md" in out   # never widened
+    assert "accepted docs/workflows.md" in out and "; --force)" in out
+    assert t.read_bytes() == (DATA / "workflows.md").read_bytes()
+    assert other.read_text() == "also mine\n" and f"keep     {SKILL}" in out   # never widened
 
 
 def test_unknown_accept_is_refused(proj, capsys):
     fresh(proj)
-    code, out = run(proj, accept=["templates/cycle.md", "nope/x.md"], capsys=capsys)
+    code, out = run(proj, accept=["docs/workflows.md", "nope/x.md"], capsys=capsys)
     assert code == 1
-    assert "refused  --accept templates/cycle.md — not a custom managed path" in out
+    assert "refused  --accept docs/workflows.md — not a custom managed path" in out
     assert "refused  --accept nope/x.md — not a custom managed path" in out
 
 
@@ -319,28 +319,28 @@ def test_bootstrap_at_A_then_package_B_refreshes_changed_paths_only(proj, monkey
     fresh(proj)
     assert all(e["tagteam"] == "1.0.0" for e in manifest(proj)["files"].values())
     monkeypatch.setattr(fw, "package_version", lambda: "2.0.0")
-    replace_source(monkeypatch, tmp_path, "templates/cycle.md", b"cycle v2\n")
+    replace_source(monkeypatch, tmp_path, "docs/workflows.md", b"cycle v2\n")
     code, out = run(proj, capsys=capsys)
     assert code == 0
-    assert "refreshed templates/cycle.md — written by tagteam 1.0.0" in out
-    assert (proj / "templates" / "cycle.md").read_bytes() == b"cycle v2\n"
+    assert "refreshed docs/workflows.md — written by tagteam 1.0.0" in out
+    assert (proj / "docs" / "workflows.md").read_bytes() == b"cycle v2\n"
     m = manifest(proj)
     assert m["tagteam"] == "2.0.0"
-    assert m["files"]["templates/cycle.md"]["tagteam"] == "2.0.0"
-    assert m["files"]["templates/feedback.md"]["tagteam"] == "1.0.0"       # untouched keeps A
+    assert m["files"]["docs/workflows.md"]["tagteam"] == "2.0.0"
+    assert m["files"][SKILL]["tagteam"] == "1.0.0"       # untouched keeps A
 
 
 def test_custom_path_among_framework_refreshes(proj, monkeypatch, tmp_path, capsys):
     fresh(proj)
-    (proj / "templates" / "feedback.md").write_text("mine\n")
+    (proj / SKILL).write_text("mine\n")
     monkeypatch.setattr(fw, "package_version", lambda: "9.0.0")
-    replace_source(monkeypatch, tmp_path, "templates/cycle.md", b"cycle v9\n")
+    replace_source(monkeypatch, tmp_path, "docs/workflows.md", b"cycle v9\n")
     code, out = run(proj, capsys=capsys)
     assert code == 0
-    assert (proj / "templates" / "cycle.md").read_bytes() == b"cycle v9\n"
-    assert (proj / "templates" / "feedback.md").read_text() == "mine\n"
+    assert (proj / "docs" / "workflows.md").read_bytes() == b"cycle v9\n"
+    assert (proj / SKILL).read_text() == "mine\n"
     m = manifest(proj)
-    assert "templates/feedback.md" not in m["files"] and m["files"]["templates/cycle.md"]["tagteam"] == "9.0.0"
+    assert SKILL not in m["files"] and m["files"]["docs/workflows.md"]["tagteam"] == "9.0.0"
     before = snapshot(proj)
     code, out = run(proj, capsys=capsys)
     assert code == 0 and snapshot(proj) == before and "unchanged" in out
@@ -396,36 +396,23 @@ def _assert_refused_unchanged(proj, rel, capsys, detail):
 
 def test_symlink_to_identical_bytes_is_refused(proj, capsys):
     fresh(proj)
-    real = proj / "real-cycle.md"; real.write_bytes((DATA / "templates" / "cycle.md").read_bytes())
-    t = proj / "templates" / "cycle.md"; t.unlink(); t.symlink_to(real)
-    _assert_refused_unchanged(proj, "templates/cycle.md", capsys, "templates/cycle.md is a symlink")
-
-
-def test_symlinked_templates_dir_outside_project_is_refused(proj, tmp_path, capsys):
-    outside = tmp_path / "outside"; outside.mkdir()
-    (outside / "cycle.md").write_text("theirs\n")
-    (proj / "templates").symlink_to(outside)
-    before = snapshot(outside)
-    code, out = run(proj, capsys=capsys)
-    assert code == 1
-    for src in (DATA / "templates").glob("*.md"):
-        assert f"refused  templates/{src.name} — unsupported filesystem shape (templates is a symlink)" in out
-    assert snapshot(outside) == before
-    assert "templates/" not in json.dumps(manifest(proj)["files"])
+    real = proj / "real-cycle.md"; real.write_bytes((DATA / "workflows.md").read_bytes())
+    t = proj / "docs" / "workflows.md"; t.unlink(); t.symlink_to(real)
+    _assert_refused_unchanged(proj, "docs/workflows.md", capsys, "docs/workflows.md is a symlink")
 
 
 def test_directory_at_managed_path_and_symlinked_skill_dir_are_refused(proj, tmp_path, capsys):
-    (proj / "templates" / "cycle.md").mkdir(parents=True)
+    (proj / "docs" / "workflows.md").mkdir(parents=True)
     elsewhere = tmp_path / "skill-elsewhere"; elsewhere.mkdir()
     (elsewhere / "SKILL.md").write_bytes(PACKAGED_SKILL)
     (proj / ".claude" / "skills").mkdir(parents=True)
     (proj / ".claude" / "skills" / "handoff").symlink_to(elsewhere)
     code, out = run(proj, capsys=capsys)
     assert code == 1
-    assert "refused  templates/cycle.md — unsupported filesystem shape (templates/cycle.md is a directory)" in out
+    assert "refused  docs/workflows.md — unsupported filesystem shape (docs/workflows.md is a directory)" in out
     assert f"refused  {SKILL} — unsupported filesystem shape (.claude/skills/handoff is a symlink)" in out
     assert (proj / ".claude" / "skills" / "handoff").is_symlink()
-    assert (elsewhere / "SKILL.md").read_bytes() == PACKAGED_SKILL and (proj / "templates" / "cycle.md").is_dir()
+    assert (elsewhere / "SKILL.md").read_bytes() == PACKAGED_SKILL and (proj / "docs" / "workflows.md").is_dir()
 
 
 # ---------------------------------------------------------------------------
@@ -434,27 +421,27 @@ def test_directory_at_managed_path_and_symlinked_skill_dir_are_refused(proj, tmp
 
 def test_file_appearing_at_absent_path_is_refused(proj):
     plan = fw.build_plan(proj, data_dir=DATA)
-    (proj / "templates").mkdir()
-    (proj / "templates" / "cycle.md").write_text("appeared\n")
+    (proj / "docs").mkdir()
+    (proj / "docs" / "workflows.md").write_text("appeared\n")
     fw.apply(plan)
-    it = next(i for i in plan.items if i.rel == "templates/cycle.md")
+    it = next(i for i in plan.items if i.rel == "docs/workflows.md")
     assert it.outcome.startswith("refused: changed since classification")
-    assert (proj / "templates" / "cycle.md").read_text() == "appeared\n"
-    assert "templates/cycle.md" not in fw.projected_manifest(plan)["files"]
+    assert (proj / "docs" / "workflows.md").read_text() == "appeared\n"
+    assert "docs/workflows.md" not in fw.projected_manifest(plan)["files"]
 
 
 def test_file_swapped_for_symlink_is_refused(proj, monkeypatch, tmp_path):
     fresh(proj)
     monkeypatch.setattr(fw, "package_version", lambda: "9.0.0")
-    replace_source(monkeypatch, tmp_path, "templates/cycle.md", b"v9\n")
+    replace_source(monkeypatch, tmp_path, "docs/workflows.md", b"v9\n")
     plan = fw.build_plan(proj, data_dir=DATA)
-    it = next(i for i in plan.items if i.rel == "templates/cycle.md")
+    it = next(i for i in plan.items if i.rel == "docs/workflows.md")
     assert it.action == "refresh"
-    t = proj / "templates" / "cycle.md"
+    t = proj / "docs" / "workflows.md"
     real = proj / "same-bytes.md"; real.write_bytes(t.read_bytes())
     t.unlink(); t.symlink_to(real)
     fw.apply(plan)
-    assert it.outcome == "refused: changed since classification: templates/cycle.md is a symlink"
+    assert it.outcome == "refused: changed since classification: docs/workflows.md is a symlink"
     assert t.is_symlink() and real.read_bytes() != b"v9\n"
 
 
@@ -475,13 +462,13 @@ def test_refreshed_file_changed_underneath_is_refused_and_entry_kept(proj, monke
     monkeypatch.setattr(fw, "package_version", lambda: "1.0.0")
     fresh(proj)
     monkeypatch.setattr(fw, "package_version", lambda: "2.0.0")
-    replace_source(monkeypatch, tmp_path, "templates/cycle.md", b"v2\n")
+    replace_source(monkeypatch, tmp_path, "docs/workflows.md", b"v2\n")
     plan = fw.build_plan(proj, data_dir=DATA)
-    (proj / "templates" / "cycle.md").write_text("user edit in between\n")
+    (proj / "docs" / "workflows.md").write_text("user edit in between\n")
     fw.apply(plan)
-    it = next(i for i in plan.items if i.rel == "templates/cycle.md")
-    assert it.outcome.startswith("refused") and (proj / "templates" / "cycle.md").read_text() == "user edit in between\n"
-    assert manifest(proj)["files"]["templates/cycle.md"]["tagteam"] == "1.0.0"      # left as it was
+    it = next(i for i in plan.items if i.rel == "docs/workflows.md")
+    assert it.outcome.startswith("refused") and (proj / "docs" / "workflows.md").read_text() == "user edit in between\n"
+    assert manifest(proj)["files"]["docs/workflows.md"]["tagteam"] == "1.0.0"      # left as it was
 
 
 # ---------------------------------------------------------------------------
@@ -500,11 +487,11 @@ def test_upgrade_refreshes_framework_paths_and_never_accepts(tmp_path, monkeypat
         p = tmp_path / f"p{i}"; p.mkdir()
         (p / "tagteam.yaml").write_text("agents:\n  lead: {name: A}\n  reviewer: {name: B}\n")
         fresh(p)
-        (p / "templates" / "feedback.md").write_text(f"custom {i}\n")
+        (p / SKILL).write_text(f"custom {i}\n")
         projects.append(p)
     capsys.readouterr()
     monkeypatch.setattr(fw, "package_version", lambda: "2.0.0")
-    replace_source(monkeypatch, tmp_path, "templates/cycle.md", b"v2\n")
+    replace_source(monkeypatch, tmp_path, "docs/workflows.md", b"v2\n")
     # preview first: nothing moves
     befores = [snapshot(p) for p in projects]
     assert upgrade_command(["--preview"]) == 0
@@ -513,10 +500,10 @@ def test_upgrade_refreshes_framework_paths_and_never_accepts(tmp_path, monkeypat
     assert upgrade_command() == 0
     out = capsys.readouterr().out
     for i, p in enumerate(projects):
-        assert (p / "templates" / "cycle.md").read_bytes() == b"v2\n"
-        assert (p / "templates" / "feedback.md").read_text() == f"custom {i}\n"
-        assert f"accept with: tagteam setup {p.resolve()} --accept templates/feedback.md" in out
-    assert out.count("refreshed templates/cycle.md") == 2 and "accepted" not in out
+        assert (p / "docs" / "workflows.md").read_bytes() == b"v2\n"
+        assert (p / SKILL).read_text() == f"custom {i}\n"
+        assert f"accept with: tagteam setup {p.resolve()} --accept {SKILL}" in out
+    assert out.count("refreshed docs/workflows.md") == 2 and "accepted" not in out
     assert "All 2 project(s) upgraded successfully." in out
     assert upgrade_command(["--bogus"]) == 2
 
@@ -529,7 +516,7 @@ def test_upgrade_reports_refused_projects(tmp_path, monkeypatch, capsys):
     no_cli(monkeypatch)
     p = tmp_path / "p"; p.mkdir()
     (p / "tagteam.yaml").write_text("agents:\n  lead: {name: A}\n  reviewer: {name: B}\n")
-    (p / "templates" / "cycle.md").mkdir(parents=True)
+    (p / "docs" / "workflows.md").mkdir(parents=True)
     registry_mod.register_project(str(p))
     assert upgrade_command() == 1
     assert "1 project(s) with refused paths" in capsys.readouterr().out
@@ -555,7 +542,7 @@ def test_cli_setup_flags_and_exit_code(proj, monkeypatch, capsys):
     monkeypatch.setattr("sys.argv", ["tagteam", "setup", str(proj), "--accept"])
     assert cli.main() == 2
     assert "usage: tagteam setup" in capsys.readouterr().out
-    monkeypatch.setattr("sys.argv", ["tagteam", "setup", str(proj), "--accept", "templates/cycle.md"])
+    monkeypatch.setattr("sys.argv", ["tagteam", "setup", str(proj), "--accept", "docs/workflows.md"])
     assert cli.main() == 1            # nothing custom to accept
 
 
@@ -574,7 +561,7 @@ def test_version_line_distinguishes_package_manifest_plugin(proj, monkeypatch):
 # link or a non-directory, and unaffected paths still proceed
 # ---------------------------------------------------------------------------
 
-DOCS_PATHS = ["docs/phases", "docs/handoffs", "docs/escalations", "docs/checklists",
+DOCS_PATHS = ["docs/phases", "docs/handoffs", "docs/escalations",
               "docs/workflows.md", "docs/roadmap.md", "docs/decision_log.md"]
 
 
@@ -585,7 +572,7 @@ def _each_flag(proj, capsys, rel):
 
 def test_symlinked_docs_dir_outside_project_refuses_docs_and_proceeds_elsewhere(proj, tmp_path, capsys):
     """The reviewer's reproduction: docs → an empty directory outside the
-    project. Nothing lands there; templates, the pointers and the manifest
+    project. Nothing lands there; the skill, the pointers and the manifest
     are still produced; exit 1 names every refused docs path."""
     outside = tmp_path / "outside"; outside.mkdir()
     (proj / "docs").symlink_to(outside)
@@ -594,9 +581,7 @@ def test_symlinked_docs_dir_outside_project_refuses_docs_and_proceeds_elsewhere(
         assert snapshot(outside) == {}
         for rel in DOCS_PATHS:
             assert f"refused  {rel} — unsupported filesystem shape (docs is a symlink)" in out, rel
-        for src in (DATA / "checklists").glob("*.md"):
-            assert f"refused  docs/checklists/{src.name} — unsupported filesystem shape (docs is a symlink)" in out
-    assert (proj / "templates" / "cycle.md").read_bytes() == (DATA / "templates" / "cycle.md").read_bytes()
+    assert (proj / SKILL).read_bytes() == PACKAGED_SKILL
     assert (proj / "AGENTS.md").read_text() == fw.POINTER and (proj / "CLAUDE.md").read_text() == fw.POINTER
     files = manifest(proj)["files"]
     assert files and all(not rel.startswith("docs/") for rel in files)
@@ -612,32 +597,23 @@ def test_symlinked_claude_dir_refuses_skill_paths_and_proceeds_elsewhere(proj, t
         assert "refused  .claude/skills — unsupported filesystem shape (.claude is a symlink)" in out
         assert f"refused  {SKILL} — unsupported filesystem shape (.claude is a symlink)" in out
     assert (proj / "docs" / "workflows.md").exists() and (proj / "docs" / "roadmap.md").exists()
-    assert (proj / "templates" / "cycle.md").exists()
     assert SKILL not in manifest(proj)["files"]
 
 
-@pytest.mark.parametrize("blocker", ["docs", "templates"])
-def test_regular_file_at_required_directory_refuses_that_subtree_only(proj, capsys, blocker):
+def test_regular_file_at_required_directory_refuses_that_subtree_only(proj, capsys):
     """A file where a directory is required used to raise out of mkdir before
-    any report; now the subtree is refused path by path and the rest runs."""
-    (proj / blocker).write_text("not a directory\n")
+    any report; now the subtree is refused path by path and the rest runs.
+    (A file at a *retired* directory is not an error — see the Phase 61 tests.)"""
+    (proj / "docs").write_text("not a directory\n")
     for kw in ({}, {"no_plugin": True}):
         code, out = run(proj, capsys=capsys, **kw)
         assert code == 1, out
-        assert (proj / blocker).read_text() == "not a directory\n"
-        assert f"— unsupported filesystem shape ({blocker} is not a directory)" in out
+        assert (proj / "docs").read_text() == "not a directory\n"
         assert "Traceback" not in out
-    if blocker == "docs":
         for rel in DOCS_PATHS:
             assert f"refused  {rel} — unsupported filesystem shape (docs is not a directory)" in out
-        assert (proj / "templates" / "cycle.md").exists()
-        assert all(not r.startswith("docs/") for r in manifest(proj)["files"])
-    else:
-        for src in (DATA / "templates").glob("*.md"):
-            assert f"refused  templates/{src.name} — unsupported filesystem shape (templates is not a directory)" in out
-        assert "refused  templates —" not in out       # the file at templates/ itself is left alone, silently
-        assert (proj / "docs" / "workflows.md").exists() and (proj / "docs" / "roadmap.md").exists()
-        assert all(not r.startswith("templates/") for r in manifest(proj)["files"])
+    assert (proj / SKILL).exists()
+    assert all(not r.startswith("docs/") for r in manifest(proj)["files"])
 
 
 def test_seed_symlinks_are_left_alone_not_written_through(proj, tmp_path, capsys):
@@ -663,7 +639,7 @@ def test_seed_symlinks_are_left_alone_not_written_through(proj, tmp_path, capsys
     # the accept flags were unknown accepts (seeds are not managed) → 1; the plain runs → 0
     assert run(proj, capsys=capsys)[0] == 0
     # directories are still provided next to the links
-    assert (proj / "docs" / "phases").is_dir() and (proj / "docs" / "checklists").is_dir()
+    assert (proj / "docs" / "phases").is_dir() and (proj / "docs" / "handoffs").is_dir()
 
 
 def test_directory_items_never_mkdir_through_a_link_appearing_late(proj, tmp_path):
@@ -675,20 +651,20 @@ def test_directory_items_never_mkdir_through_a_link_appearing_late(proj, tmp_pat
     fw.apply(plan)
     assert snapshot(outside) == {}
     for it in plan.items:
-        if it.rel.startswith("docs/"):
+        if it.rel.startswith("docs/") and it.kind != "retired":   # absent retired paths: no action
             assert it.outcome == "refused: changed since classification: docs is a symlink", it.rel
-    assert (proj / "templates" / "cycle.md").exists() and (proj / ".claude" / "skills").is_dir()
+    assert (proj / SKILL).exists() and (proj / ".claude" / "skills").is_dir()
 
 
 def test_fresh_setup_reports_directories_and_seeds(proj, capsys):
     code, out = run(proj, preview=True, capsys=capsys)
     assert code == 0
-    assert "create   6 directories" in out
+    assert "create   4 directories" in out
     assert "create   docs/roadmap.md — seeded once; yours from now on" in out
     assert "create   AGENTS.md — seeded once; yours from now on" in out
     assert not (proj / "docs").exists()
     code, out = run(proj, capsys=capsys)
-    assert code == 0 and "created  6 directories" in out and "created  CLAUDE.md" in out
+    assert code == 0 and "created  4 directories" in out and "created  CLAUDE.md" in out
     for rel in fw.SEED_DIRS:
         assert (proj / rel).is_dir()
     assert (proj / "docs" / "roadmap.md").read_bytes() == (DATA / "templates" / "roadmap.md").read_bytes()
@@ -712,33 +688,33 @@ def test_manifest_appearing_between_classification_and_apply_is_refused(proj):
     assert (proj / fw.MANIFEST_NAME).read_bytes() == concurrent
     assert any(line.startswith(f"{fw.MANIFEST_NAME}: refused") for line in plan.refused)
     assert f"Manifest: {fw.MANIFEST_NAME} refused: changed since classification" in fw.format_report(plan)
-    assert (proj / "templates" / "cycle.md").exists()        # the files themselves still landed
+    assert (proj / "docs" / "workflows.md").exists()        # the files themselves still landed
 
 
 def test_manifest_edited_between_classification_and_apply_is_refused(proj, monkeypatch, tmp_path):
     monkeypatch.setattr(fw, "package_version", lambda: "1.0.0")
     fresh(proj)
     monkeypatch.setattr(fw, "package_version", lambda: "2.0.0")
-    replace_source(monkeypatch, tmp_path, "templates/cycle.md", b"v2\n")
+    replace_source(monkeypatch, tmp_path, "docs/workflows.md", b"v2\n")
     plan = fw.build_plan(proj, data_dir=DATA)
     assert plan.manifest_shape.kind == "file" and fw.manifest_pending(plan)
-    m = manifest(proj); m["tagteam"] = "someone-else"; m["files"]["templates/feedback.md"]["note"] = "edited"
+    m = manifest(proj); m["tagteam"] = "someone-else"; m["files"][SKILL]["note"] = "edited"
     concurrent = (json.dumps(m, indent=2, sort_keys=True) + "\n").encode()
     (proj / fw.MANIFEST_NAME).write_bytes(concurrent)
     fw.apply(plan)
     assert plan.manifest_outcome == "refused: changed since classification: content differs"
     assert (proj / fw.MANIFEST_NAME).read_bytes() == concurrent
     # the refresh itself happened; the next run adopts it and writes the manifest
-    assert (proj / "templates" / "cycle.md").read_bytes() == b"v2\n"
+    assert (proj / "docs" / "workflows.md").read_bytes() == b"v2\n"
     no_cli(monkeypatch)
     plan2 = fw.apply(fw.build_plan(proj, data_dir=DATA))
-    assert plan2.manifest_outcome == "written" and manifest(proj)["files"]["templates/cycle.md"]["tagteam"] == "2.0.0"
+    assert plan2.manifest_outcome == "written" and manifest(proj)["files"]["docs/workflows.md"]["tagteam"] == "2.0.0"
 
 
 def test_manifest_disappearing_between_classification_and_apply_is_refused(proj, monkeypatch, tmp_path):
     fresh(proj)
     monkeypatch.setattr(fw, "package_version", lambda: "9.0.0")
-    replace_source(monkeypatch, tmp_path, "templates/cycle.md", b"v9\n")
+    replace_source(monkeypatch, tmp_path, "docs/workflows.md", b"v9\n")
     plan = fw.build_plan(proj, data_dir=DATA)
     (proj / fw.MANIFEST_NAME).unlink()
     fw.apply(plan)
@@ -766,7 +742,7 @@ def test_manifest_shape_refused_in_preview_and_apply(proj, tmp_path, capsys, sha
     assert f"Manifest: {fw.MANIFEST_NAME} refused: unsupported filesystem shape ({detail})" in out
     assert target.read_text() == "{}\n"
     assert (p.is_symlink() if shape == "symlink" else p.is_dir())
-    assert (proj / "templates" / "cycle.md").exists()
+    assert (proj / "docs" / "workflows.md").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -792,16 +768,16 @@ def test_fresh_setup_creates_an_absent_target(home, tmp_path, capsys, depth):
     target = tmp_path / depth
     code, out = run(target, preview=True, capsys=capsys)
     assert code == 0, out
-    assert f"create   {target} — new project directory" in out and "create   6 directories" in out
+    assert f"create   {target} — new project directory" in out and "create   4 directories" in out
     assert not target.exists() and not (tmp_path / Path(depth).parts[0]).exists()
     assert not registry_mod.REGISTRY_FILE.exists()
     code, out = run(target, capsys=capsys)
     assert code == 0, out
-    assert f"created  {target} — new project directory" in out and "created  6 directories" in out
+    assert f"created  {target} — new project directory" in out and "created  4 directories" in out
     assert "FileNotFoundError" not in out and "Traceback" not in out
     for rel in fw.SEED_DIRS:
         assert (target / rel).is_dir()
-    assert (target / "templates" / "cycle.md").read_bytes() == (DATA / "templates" / "cycle.md").read_bytes()
+    assert (target / "docs" / "workflows.md").read_bytes() == (DATA / "workflows.md").read_bytes()
     assert (target / SKILL).read_bytes() == PACKAGED_SKILL and (target / "AGENTS.md").read_text() == fw.POINTER
     assert manifest(target)["files"] and not su.needs_setup(str(target))
     assert json.loads(registry_mod.REGISTRY_FILE.read_text()) == [str(target.resolve())]
@@ -818,7 +794,7 @@ def test_file_at_target_refuses_everything_without_traceback(home, tmp_path, cap
         assert "Traceback" not in out
         verb = "refuse " if kw.get("preview") else "refused"
         assert f"{verb}  {target} — unsupported filesystem shape ({target} is not a directory)" in out
-        assert f"{verb}  templates/cycle.md — unsupported filesystem shape ({target} is not a directory)" in out
+        assert f"{verb}  docs/workflows.md — unsupported filesystem shape ({target} is not a directory)" in out
         assert target.read_text() == "a file\n"
     assert not registry_mod.REGISTRY_FILE.exists()
 
@@ -828,10 +804,10 @@ def test_target_appearing_between_classification_and_apply_is_refused(home, tmp_
     plan = fw.build_plan(target, data_dir=DATA)
     assert plan.root_shape.kind == "absent" and all(i.action == "create" for i in plan.items if i.kind == "file")
     target.mkdir()
-    (target / "templates").mkdir(); (target / "templates" / "cycle.md").write_text("theirs\n")
+    (target / "docs").mkdir(); (target / "docs" / "workflows.md").write_text("theirs\n")
     fw.apply(plan)
     assert plan.root_outcome == "refused: changed since classification: now dir, was absent"
-    assert snapshot(target) == {"templates": "dir", "templates/cycle.md": b"theirs\n"}
+    assert snapshot(target) == {"docs": "dir", "docs/workflows.md": b"theirs\n"}
     assert plan.refused[0].startswith(f"{target.resolve()}: refused")
     assert all(i.outcome.startswith("refused") for i in plan.items if i.kind == "file")
     assert plan.manifest_outcome == "unchanged" and not (target / fw.MANIFEST_NAME).exists()   # nothing to record
@@ -839,7 +815,7 @@ def test_target_appearing_between_classification_and_apply_is_refused(home, tmp_
     # the next run sees the tree as it is and converges
     plan2 = fw.apply(fw.build_plan(target, data_dir=DATA))
     assert plan2.root_outcome == "" and plan2.manifest_outcome == "written"
-    assert (target / "templates" / "cycle.md").read_text() == "theirs\n"
+    assert (target / "docs" / "workflows.md").read_text() == "theirs\n"
 
 
 def test_upgrade_preview_never_touches_the_registry(home, tmp_path, capsys):
@@ -882,15 +858,259 @@ def test_preview_names_refused_directories_and_seeds(proj, tmp_path, capsys):
     n = len([l for l in out.splitlines() if l.strip().startswith("refuse ")])
     assert f"{n} path(s) would be refused." in out
     # a file where a directory is required: the subtree, in preview too
-    (proj / "templates").write_text("not a directory\n")
+    (proj / ".claude").write_text("not a directory\n")
     code, out = run(proj, preview=True, capsys=capsys)
     assert code == 1
-    assert "refuse   templates/cycle.md — unsupported filesystem shape (templates is not a directory)" in out
-    assert "templates —" not in out
-    (proj / "templates").unlink()
+    assert f"refuse   {SKILL} — unsupported filesystem shape (.claude is not a directory)" in out
+    assert ".claude —" not in out
+    (proj / ".claude").unlink()
     # apply says the same, past tense
     code, out = run(proj, capsys=capsys)
     assert code == 1
     for rel in DOCS_PATHS:
         assert f"refused  {rel} — unsupported filesystem shape (docs is a symlink)" in out, rel
     assert snapshot(outside) == {}
+
+
+# ---------------------------------------------------------------------------
+# Phase 61 — templates/*.md and docs/checklists/*.md are retired: never
+# created, removed when provably tagteam's, kept when not
+# ---------------------------------------------------------------------------
+
+RETIRED = [rel for rel, _, _ in fw._retired_sources(DATA)]
+OLD_CYCLE = b"# cycle template as an older tagteam shipped it\n"
+
+
+def _installed_by_3_13(root: Path, *, version: str = "3.13.0", historical: dict[str, bytes] | None = None) -> None:
+    """The tree a pre-Phase-61 setup left behind: workflows.md, the vendored
+    skill and the 12 retired files, all recorded in the manifest.
+    ``historical`` swaps in bytes the current package no longer ships."""
+    fresh(root)
+    m = manifest(root)
+    for rel, src, src_rel in fw._retired_sources(DATA):
+        data = (historical or {}).get(rel, src.read_bytes())
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_bytes(data)
+        m["files"][rel] = {"sha256": fw.sha256_bytes(data), "source": src_rel, "tagteam": version}
+    for e in m["files"].values():
+        e["tagteam"] = version
+    m["tagteam"] = version
+    (root / fw.MANIFEST_NAME).write_text(json.dumps(m, indent=2, sort_keys=True) + "\n")
+
+
+def test_retired_set_is_the_twelve_and_disjoint_from_managed():
+    assert len(RETIRED) == 12 and {r.split("/")[0] for r in RETIRED} == {"templates", "docs"}
+    assert [rel for rel, _, _ in fw._sources(DATA)] == ["docs/workflows.md"]
+    assert not set(fw.RETIRED_DIRS) & set(fw.SEED_DIRS)
+
+
+def test_project_set_up_by_3_13_retires_all_twelve_then_is_a_noop(proj, capsys):
+    _installed_by_3_13(proj)
+    code, out = run(proj, preview=True, capsys=capsys)
+    assert code == 0 and "retire   templates/cycle.md — no longer installed; matches the package" in out
+    code, out = run(proj, capsys=capsys)
+    assert code == 0, out
+    for rel in RETIRED:
+        assert f"retired  {rel} — no longer installed; matches the package" in out
+        assert not (proj / rel).exists()
+    assert "removed  templates/ — empty" in out and "removed  docs/checklists/ — empty" in out
+    assert not (proj / "templates").exists() and not (proj / "docs" / "checklists").exists()
+    assert set(manifest(proj)["files"]) == {"docs/workflows.md", SKILL}
+    assert not su.needs_setup(str(proj))
+    before = snapshot(proj)
+    code, out = run(proj, capsys=capsys)
+    assert code == 0 and snapshot(proj) == before
+    assert "retired" not in out and "keep  " not in out and "unchanged" in out
+
+
+def test_preview_of_a_retire_touches_nothing(proj, capsys):
+    _installed_by_3_13(proj)
+    before = snapshot(proj)
+    code, out = run(proj, preview=True, capsys=capsys)
+    assert code == 0 and snapshot(proj) == before
+    assert out.count("retire   ") == 12 and "would be written (preview — nothing written)" in out
+
+
+def test_edited_retired_file_is_kept_and_deleted_only_on_accept(proj, capsys):
+    _installed_by_3_13(proj)
+    mine = proj / "templates" / "cycle.md"; mine.write_text("my cycle notes\n")
+    code, out = run(proj, capsys=capsys)
+    assert code == 0 and out.count("retired  ") == 11
+    assert (f"keep     templates/cycle.md — no longer managed; modified since tagteam 3.13.0 wrote it; "
+            f"delete with: tagteam setup {proj.resolve()} --accept templates/cycle.md") in out
+    assert mine.read_text() == "my cycle notes\n" and (proj / "templates").is_dir()
+    assert not (proj / "docs" / "checklists").exists()
+    assert "templates/cycle.md" not in manifest(proj)["files"]
+    # untracked: refused without --force
+    git(proj, "init", "-q")
+    code, out = run(proj, accept=["templates/cycle.md"], capsys=capsys)
+    assert code == 1 and mine.exists() and "not recoverable: untracked (use --force)" in out
+    # tracked and clean: removed, and the directory with it
+    commit_all(proj)
+    code, out = run(proj, accept=["templates/cycle.md"], capsys=capsys)
+    assert code == 0, out
+    assert "removed  templates/cycle.md — no longer managed" in out and "(tracked and clean)" in out
+    assert not (proj / "templates").exists()
+
+
+def test_pre_manifest_package_bytes_are_retired_other_bytes_kept(proj, capsys):
+    (proj / "templates").mkdir()
+    same = proj / "templates" / "feedback.md"; same.write_bytes((DATA / "templates" / "feedback.md").read_bytes())
+    other = proj / "templates" / "phase_plan.md"; other.write_text("- Lead: Claude\n")
+    code, out = run(proj, capsys=capsys)
+    assert code == 0
+    assert "retired  templates/feedback.md — no longer installed; matches the package" in out and not same.exists()
+    assert "keep     templates/phase_plan.md — no longer managed; differs from the package" in out
+    assert other.read_text() == "- Lead: Claude\n"
+
+
+def test_render_variant_of_a_retired_file_is_reconstructible(proj, monkeypatch, tmp_path):
+    real = fw._retired_sources
+    src = tmp_path / "cycle.md"; src.write_bytes(b"Lead: {{lead}} / Reviewer: {{reviewer}}\n")
+    monkeypatch.setattr(fw, "_retired_sources", lambda d: [
+        (r, src if r == "templates/cycle.md" else s, sr) for r, s, sr in real(d)])
+    (proj / "templates").mkdir()
+    (proj / "templates" / "cycle.md").write_bytes(b"Lead: A / Reviewer: B\n")
+    it = next(i for i in fw.build_plan(proj, data_dir=DATA).items if i.rel == "templates/cycle.md")
+    assert it.cls == fw.FRAMEWORK and it.reconstructible and it.action == "retire"
+
+
+def test_owner_file_in_a_retired_directory_keeps_the_directory(proj, capsys):
+    _installed_by_3_13(proj)
+    (proj / "templates" / "mine.md").write_text("ours\n")
+    code, out = run(proj, capsys=capsys)
+    assert code == 0 and out.count("retired  ") == 12
+    assert snapshot(proj)["templates/mine.md"] == b"ours\n"
+    assert sorted(p.name for p in (proj / "templates").iterdir()) == ["mine.md"]
+    assert "removed  templates/" not in out and "mine.md" not in out
+
+
+def test_odd_shapes_at_retired_paths_are_kept_not_refused(proj, tmp_path, capsys):
+    """Nothing is written under a retired path any more, so a symlink or a
+    file-for-a-directory there is the owner's business: kept, exit 0, and
+    nothing is unlinked through the link."""
+    outside = tmp_path / "outside"; outside.mkdir()
+    (outside / "cycle.md").write_bytes((DATA / "templates" / "cycle.md").read_bytes())
+    (proj / "templates").symlink_to(outside)
+    (proj / "docs").mkdir(); (proj / "docs" / "checklists").write_text("not a directory\n")
+    before = snapshot(outside)
+    for kw in ({"preview": True}, {}, {"no_plugin": True}):
+        code, out = run(proj, capsys=capsys, **kw)
+        assert code == 0, out
+        assert "keep     templates/cycle.md — no longer managed; templates is a symlink; never touched" in out
+        assert "keep     docs/checklists/code_review.md — no longer managed; docs/checklists is not a directory; never touched" in out
+        assert "refuse" not in out
+    assert snapshot(outside) == before and (proj / "templates").is_symlink()
+    assert (proj / "docs" / "checklists").read_text() == "not a directory\n"
+    # the leaf itself a symlink to identical bytes
+    (proj / "templates").unlink(); (proj / "templates").mkdir()
+    (proj / "templates" / "cycle.md").symlink_to(outside / "cycle.md")
+    code, out = run(proj, capsys=capsys)
+    assert code == 0 and (proj / "templates" / "cycle.md").is_symlink() and (outside / "cycle.md").exists()
+    assert "keep     templates/cycle.md — no longer managed; templates/cycle.md is a symlink; never touched" in out
+    # accepting one is an unknown accept, as for any path with nothing custom to delete
+    code, out = run(proj, accept=["templates/cycle.md"], force=True, capsys=capsys)
+    assert code == 1 and "refused  --accept templates/cycle.md" in out and (proj / "templates" / "cycle.md").is_symlink()
+
+
+def test_retired_file_changed_between_classification_and_apply_is_refused_alone(proj):
+    _installed_by_3_13(proj)
+    plan = fw.build_plan(proj, data_dir=DATA)
+    (proj / "templates" / "cycle.md").write_text("edited in between\n")
+    fw.apply(plan)
+    by = {i.rel: i for i in plan.items if i.kind == "retired"}
+    assert by["templates/cycle.md"].outcome == "refused: changed since classification: content differs"
+    assert (proj / "templates" / "cycle.md").read_text() == "edited in between\n"
+    assert sum(i.outcome == "retired" for i in by.values()) == 11
+    assert (proj / "templates").is_dir() and plan.pruned_dirs == ["docs/checklists"]
+    assert "templates/cycle.md" in manifest(proj)["files"]          # provenance survives the refusal
+
+
+def test_historical_bytes_need_git_recovery(proj, capsys):
+    """Reviewer finding 1: a manifest hash proves tagteam wrote the bytes, not
+    that they can be had again. Bytes the installed package no longer ships
+    are removed only when git can restore them."""
+    _installed_by_3_13(proj, version="3.11.0", historical={"templates/cycle.md": OLD_CYCLE})
+    t = proj / "templates" / "cycle.md"
+    it = next(i for i in fw.build_plan(proj, data_dir=DATA).items if i.rel == "templates/cycle.md")
+    assert it.cls == fw.FRAMEWORK and not it.reconstructible and it.action == "keep"
+    code, out = run(proj, capsys=capsys)
+    assert code == 0 and out.count("retired  ") == 11
+    assert (f"keep     templates/cycle.md — no longer installed; written by tagteam 3.11.0; "
+            f"not recoverable: not a git repository; commit it and re-run, or delete with: "
+            f"tagteam setup {proj.resolve()} --accept templates/cycle.md --force") in out
+    assert t.read_bytes() == OLD_CYCLE
+    entry = manifest(proj)["files"]["templates/cycle.md"]
+    assert entry["sha256"] == fw.sha256_bytes(OLD_CYCLE) and entry["tagteam"] == "3.11.0"
+    # a second run says the same and still writes nothing
+    before = snapshot(proj)
+    code, out = run(proj, capsys=capsys)
+    assert code == 0 and snapshot(proj) == before and "not recoverable: not a git repository" in out
+    # once the owner commits it, the next plain run retires it
+    commit_all(proj)
+    code, out = run(proj, capsys=capsys)
+    assert code == 0, out
+    assert "retired  templates/cycle.md — no longer installed; written by tagteam 3.11.0 (tracked and clean)" in out
+    assert not (proj / "templates").exists() and "templates/cycle.md" not in manifest(proj)["files"]
+    assert git(proj, "show", "HEAD:templates/cycle.md").stdout.encode() == OLD_CYCLE
+
+
+def test_historical_bytes_untracked_go_with_accept_force(proj, capsys):
+    _installed_by_3_13(proj, version="3.11.0", historical={"templates/cycle.md": OLD_CYCLE})
+    code, out = run(proj, accept=["templates/cycle.md"], capsys=capsys)
+    assert code == 1 and (proj / "templates" / "cycle.md").exists()
+    assert "refused  templates/cycle.md — not recoverable: not a git repository (use --force)" in out
+    assert "templates/cycle.md" in manifest(proj)["files"]
+    code, out = run(proj, accept=["templates/cycle.md"], force=True, capsys=capsys)
+    assert code == 0 and not (proj / "templates").exists()
+    assert "removed  templates/cycle.md — no longer installed; written by tagteam 3.11.0" in out
+    assert "templates/cycle.md" not in manifest(proj)["files"]
+
+
+def test_failed_retire_keeps_provenance_and_the_retry_succeeds(proj, capsys):
+    """Reviewer finding 2: dropping the entry of a file that is still on disk
+    forgets the only proof tagteam wrote it; the next run would call it
+    custom and never retry."""
+    _installed_by_3_13(proj, version="3.11.0", historical={"templates/cycle.md": OLD_CYCLE})
+    commit_all(proj)
+    target = proj / "templates" / "cycle.md"
+    real_unlink = os.unlink
+
+    def flaky(path, *a, **kw):
+        if Path(path) == target:
+            raise PermissionError(13, "Permission denied", str(path))
+        return real_unlink(path, *a, **kw)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(fw.os, "unlink", flaky)
+        code, out = run(proj, capsys=capsys)
+    assert code == 1
+    assert "refused  templates/cycle.md — PermissionError" in out and out.count("retired  ") == 11
+    assert target.read_bytes() == OLD_CYCLE and (proj / "templates").is_dir()
+    m = manifest(proj)
+    assert m["files"]["templates/cycle.md"] == {"sha256": fw.sha256_bytes(OLD_CYCLE),
+                                                "source": "templates/cycle.md", "tagteam": "3.11.0"}
+    assert set(m["files"]) == {"docs/workflows.md", SKILL, "templates/cycle.md"}
+    code, out = run(proj, capsys=capsys)
+    assert code == 0, out
+    assert "retired  templates/cycle.md" in out and not (proj / "templates").exists()
+    assert set(manifest(proj)["files"]) == {"docs/workflows.md", SKILL}
+
+
+def test_upgrade_retires_across_projects(tmp_path, monkeypatch, capsys):
+    from tagteam.cli import upgrade_command
+    home = tmp_path / "home"; home.mkdir()
+    monkeypatch.setattr(registry_mod, "REGISTRY_DIR", home)
+    monkeypatch.setattr(registry_mod, "REGISTRY_FILE", home / "projects.json")
+    no_cli(monkeypatch)
+    projects = []
+    for i in range(2):
+        p = tmp_path / f"p{i}"; p.mkdir()
+        (p / "tagteam.yaml").write_text("agents:\n  lead: {name: A}\n  reviewer: {name: B}\n")
+        _installed_by_3_13(p)
+        projects.append(p)
+    capsys.readouterr()
+    assert upgrade_command() == 0
+    out = capsys.readouterr().out
+    assert out.count("retired  templates/cycle.md") == 2 and "All 2 project(s) upgraded successfully." in out
+    assert all(not (p / "templates").exists() and not (p / "docs" / "checklists").exists() for p in projects)
