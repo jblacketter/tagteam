@@ -1157,22 +1157,29 @@ def test_history_table_is_what_git_history_says():
     tags = subprocess.run(["git", "-C", str(REPO), "tag", "--list", "v*"], capture_output=True, text=True)
     if tags.returncode != 0 or "v3.12.0" not in tags.stdout.split():
         pytest.skip("release tags not available in this checkout")
-    shipped = sorted(p.relative_to(HISTORY).as_posix() for p in HISTORY.rglob("*.md"))
-    assert len(shipped) == 13
+    shipped = sorted(p.relative_to(HISTORY).as_posix() for p in HISTORY.rglob("*") if p.is_file())
+    assert len(shipped) == 13 and [r for r in shipped if r.endswith(".sha256")] == ["v3.10.0/workflows.md.sha256"]
     for rel in shipped:
         tag, source_rel = rel.split("/", 1)
-        assert (HISTORY / rel).read_bytes() == _tagged_blob(tag, source_rel), rel
+        if rel.endswith(".sha256"):          # the one source the Phase 49 audit forbids shipping as text
+            blob = _tagged_blob(tag, source_rel[:-len(".sha256")])
+            assert (HISTORY / rel).read_text().strip() == fw.sha256_bytes(blob), rel
+        else:
+            assert (HISTORY / rel).read_bytes() == _tagged_blob(tag, source_rel), rel
     era = [t for t in tags.stdout.split() if fw._tag_key(t) <= (3, 12, 0)]
     for _, src, source_rel in fw._sources(DATA) + fw._retired_sources(DATA):
         in_git = {fw.sha256_bytes(b) for b in (_tagged_blob(t, source_rel) for t in era) if b is not None}
-        known = {fw.sha256_bytes(b) for _, b in fw._history_sources(DATA, source_rel)} | {fw.sha256_bytes(src.read_bytes())}
+        known = {sha for _, sha, _ in fw._history_sources(DATA, source_rel)} | {fw.sha256_bytes(src.read_bytes())}
         assert in_git <= known, source_rel
         assert known - in_git <= {fw.sha256_bytes(src.read_bytes())}, source_rel   # nothing invented
 
 
 def test_history_sources_are_newest_first_by_version_not_by_string():
-    assert [t for t, _ in fw._history_sources(DATA, "workflows.md")] == ["v3.12.0", "v3.11.0", "v3.10.0"]
-    assert [t for t, _ in fw._history_sources(DATA, "templates/roadmap.md")] == ["v3.3.0"]
+    wf = fw._history_sources(DATA, "workflows.md")
+    assert [t for t, _, _ in wf] == ["v3.12.0", "v3.11.0", "v3.10.0"]
+    assert [b is None for _, _, b in wf] == [False, False, True]             # v3.10.0: digest only
+    assert all(sha == fw.sha256_bytes(b) for _, sha, b in wf if b is not None)
+    assert [t for t, _, _ in fw._history_sources(DATA, "templates/roadmap.md")] == ["v3.3.0"]
     assert fw._history_sources(DATA, "templates/requirements_brief.md") == []   # never changed
 
 
@@ -1207,11 +1214,23 @@ def test_rendering_with_other_names_or_an_edit_stays_custom(proj, capsys):
     assert edited.exists() and (proj / "templates").is_dir()
 
 
+def _earlier_workflows(tag: str) -> bytes:
+    f = HISTORY / tag / "workflows.md"
+    if f.is_file():
+        return f.read_bytes()
+    blob = _tagged_blob(tag, "workflows.md")            # shipped as a digest only — take it from git
+    if blob is None:
+        pytest.skip(f"{tag} not available in this checkout")
+    return blob
+
+
 @pytest.mark.parametrize("tag", ["v3.10.0", "v3.11.0", "v3.12.0"])
 def test_pre_manifest_workflows_from_an_earlier_release_is_refreshed(proj, capsys, tag):
     (proj / "docs").mkdir()
     wf = proj / "docs" / "workflows.md"
-    wf.write_bytes((HISTORY / tag / "workflows.md").read_bytes())
+    wf.write_bytes(_earlier_workflows(tag))
+    it = next(i for i in fw.build_plan(proj, data_dir=DATA).items if i.rel == "docs/workflows.md")
+    assert it.cls == fw.FRAMEWORK and it.reconstructible == (tag != "v3.10.0")
     code, out = run(proj, capsys=capsys)
     assert code == 0, out
     assert f"refreshed docs/workflows.md — written by tagteam ≤{tag[1:]}" in out
@@ -1222,7 +1241,7 @@ def test_pre_manifest_workflows_from_an_earlier_release_is_refreshed(proj, capsy
 def test_edited_earlier_workflows_is_still_custom(proj, capsys):
     (proj / "docs").mkdir()
     wf = proj / "docs" / "workflows.md"
-    mine = (HISTORY / "v3.10.0" / "workflows.md").read_bytes() + b"\n## Our own section\n"
+    mine = _earlier_workflows("v3.10.0") + b"\n## Our own section\n"
     wf.write_bytes(mine)
     code, out = run(proj, capsys=capsys)
     assert code == 0 and wf.read_bytes() == mine

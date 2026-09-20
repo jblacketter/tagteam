@@ -30,7 +30,10 @@ Phase 62: ``data/history/<tag>/…`` holds the earlier sources of the framework
 files — a closed set of 13, by the last release that shipped each. A copy
 equal to one of them, verbatim or rendered for the configured / swapped names
 (``setup`` baked the names in until 3.12.0), is tagteam's and reconstructible.
-Exact bytes only; names are never inferred from the file.
+Exact bytes only; names are never inferred from the file. One of the 13 — the
+pre-plugin ``workflows.md`` — is all dead ``/handoff-*`` commands, which
+nothing tagteam ships may mention (Phase 49 audit), so it is present as
+``<name>.sha256`` only: provenance (enough to refresh it), not reconstructible.
 
 Recovery is git: an accepted overwrite or deletion needs the path tracked and
 clean so ``git checkout -- PATH`` restores it; ``--force`` lifts only that
@@ -329,21 +332,28 @@ def _tag_key(tag: str) -> tuple[int, ...]:
     return tuple(int(n) for n in tag.lstrip("v").split(".") if n.isdigit())
 
 
-def _history_sources(data_dir: Path, source_rel: str) -> list[tuple[str, bytes]]:
-    """(last tag that shipped it, bytes) for every earlier source of
-    ``source_rel`` under ``data/history/``, newest first. Anything missing or
+def _history_sources(data_dir: Path, source_rel: str) -> list[tuple[str, str, bytes | None]]:
+    """(last tag that shipped it, sha256, bytes) for every earlier source of
+    ``source_rel`` under ``data/history/``, newest first. ``bytes`` is None
+    where only ``<source_rel>.sha256`` is shipped. Anything missing or
     unreadable yields less evidence, which only ever means ``custom``."""
-    out: list[tuple[str, bytes]] = []
+    out: list[tuple[str, str, bytes | None]] = []
     try:
         tags = [e.name for e in os.scandir(data_dir / "history") if e.is_dir(follow_symlinks=False)]
     except OSError:
         return out
     for tag in sorted(tags, key=_tag_key, reverse=True):
         f = data_dir / "history" / tag / source_rel
+        digest = f.with_name(f.name + ".sha256")
         try:
             if f.is_file() and not f.is_symlink():
-                out.append((tag, f.read_bytes()))
-        except OSError:
+                data = f.read_bytes()
+                out.append((tag, sha256_bytes(data), data))
+            elif digest.is_file() and not digest.is_symlink():
+                sha = digest.read_text(encoding="ascii").strip()
+                if len(sha) == 64 and all(c in "0123456789abcdef" for c in sha):
+                    out.append((tag, sha, None))
+        except (OSError, UnicodeError):
             continue
     return out
 
@@ -364,7 +374,7 @@ def _render_variants(package: bytes, root: Path) -> list[tuple[str, bytes]]:
 
 
 def _classify(item: Item, package: bytes, root: Path, known: dict[str, str],
-              history: list[tuple[str, bytes]] | tuple = ()) -> None:
+              history: list[tuple[str, str, bytes | None]] | tuple = ()) -> None:
     s = item.shape
     if s.kind == "unsupported":
         item.cls, item.reason = UNSUPPORTED, f"unsupported filesystem shape ({s.detail})"
@@ -388,12 +398,12 @@ def _classify(item: Item, package: bytes, root: Path, known: dict[str, str],
             item.reconstructible = True
             return
     # Phase 62: an earlier release's source, verbatim or as setup rendered it.
-    for tag, source in history:
+    for tag, source_sha, source in history:
         era = f"written by tagteam ≤{tag.lstrip('v')}"
-        if sha == sha256_bytes(source):
-            item.cls, item.reason, item.reconstructible = FRAMEWORK, era, True
+        if sha == source_sha:
+            item.cls, item.reason, item.reconstructible = FRAMEWORK, era, source is not None
             return
-        for label, variant in _render_variants(source, root):
+        for label, variant in _render_variants(source, root) if source is not None else ():
             if sha == sha256_bytes(variant):
                 item.cls, item.reason = FRAMEWORK, f"{era} (rendered for the {label})"
                 item.reconstructible = True

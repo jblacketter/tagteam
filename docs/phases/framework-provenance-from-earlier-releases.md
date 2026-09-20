@@ -193,6 +193,21 @@ these were reported and left for `--accept`.
 - The git-pinned table test covers the older `ai_handoff/data/` prefix and
   skips only on a checkout without release tags; CI uses `fetch-depth: 0`.
 
+## Deviation from the approved plan (impl round 1 gate bounce)
+Scope item 4 chose "sources, not a sha table". The gate bounced on
+`tests/test_plugin.py::TestShippedDocsAudit::test_no_legacy_command_family`
+(Phase 49: nothing tagteam ships may mention the dead `/handoff-*` family):
+`history/v3.10.0/workflows.md` — the pre-plugin doc — has 45 such lines. The
+other 12 sources are clean. Rather than exempt `data/history/` from the audit,
+that one file ships as `v3.10.0/workflows.md.sha256`. `_history_sources()`
+returns `(tag, sha, bytes | None)`; a digest-only match is `framework` but
+**not** `reconstructible`. For `docs/workflows.md` that changes nothing — a
+refresh needs provenance only, as a manifest or known-contract match does — so
+the 35 real copies are still refreshed. A digest-only match on a *retired*
+path would fall to Phase 61's git rule by construction; none exists. Cost: the
+overwritten v3.10.0 text is not reproducible from the package (it is in every
+release ≤ 3.10.0 on PyPI and in git).
+
 ## Registry preview (criterion 10) — `tagteam upgrade --preview`, 41 projects, nothing written
 | | 3.14.0 | this branch |
 |---|---|---|
