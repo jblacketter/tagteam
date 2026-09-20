@@ -79,6 +79,16 @@ _PHASE_HEADING_LENIENT_RE = re.compile(
 # warning rather than dropped in silence. `\b` keeps `### Phases` out.
 _PHASE_HEADING_SUSPECT_RE = re.compile(r"^###[ \t]+Phase\b.*$", re.MULTILINE)
 
+# Phase 63: a heading whose whole title is one bracketed token (`[Name]`, as
+# the seeded roadmap ships them) is a placeholder, not a phase yet. A title
+# that merely contains brackets (`Parser [v2]`) is an ordinary phase.
+_PLACEHOLDER_NAME_RE = re.compile(r"^\[[^\]]*\]$")
+
+
+def _is_placeholder(name: str) -> bool:
+    return bool(_PLACEHOLDER_NAME_RE.match(name.strip()))
+
+
 # Pattern: - **Status:** <status>
 _STATUS_RE = re.compile(
     r"^-\s+\*\*Status:\*\*\s+(.+)$", re.MULTILINE
@@ -110,9 +120,12 @@ def _slugify(name: str) -> str:
 def parse_roadmap(roadmap_path: Path) -> list[RoadmapPhase]:
     """Parse docs/roadmap.md and return all phases in order.
 
+    Placeholder headings (`### Phase 1: [Name]`) are not phases and are not
+    returned; they still bound the sections around them.
+
     Raises:
         FileNotFoundError: If roadmap_path does not exist.
-        ValueError: If no phase headings are found.
+        ValueError: If no phase headings are found (placeholders aside).
     """
     if not roadmap_path.exists():
         raise FileNotFoundError(
@@ -135,6 +148,8 @@ def parse_roadmap(roadmap_path: Path) -> list[RoadmapPhase]:
         number = int(match.group(1))
         suffix = (match.group(2) or "").lower()
         name = match.group(3).strip()
+        if _is_placeholder(name):
+            continue        # bounds its neighbours' sections (`headings[i + 1]`), is no phase itself
         slug = _slugify(name)
 
         # Extract the section text between this heading and the next
@@ -149,6 +164,12 @@ def parse_roadmap(roadmap_path: Path) -> list[RoadmapPhase]:
         phases.append(RoadmapPhase(slug=slug, name=name, status=status,
                                    number=number, suffix=suffix))
         raw_deps.append(_split_dep_refs(section))
+
+    if not phases:
+        raise ValueError(
+            f"No phases found in {roadmap_path} — {len(headings)} placeholder "
+            "heading(s) ([Name]); rename them to make them phases."
+        )
 
     # Second pass: resolve dependency references against the full phase list.
     for phase, refs in zip(phases, raw_deps):
@@ -268,6 +289,8 @@ def validate_identities(roadmap_text: str) -> list[str]:
         number = int(m.group(1))
         suffix = (m.group(2) or "").lower()
         name = m.group(3).strip()
+        if _is_placeholder(name):
+            continue        # no slug, no claim on its number
         label = f"Phase {number}{suffix}"
         if not name:
             problems.append(f"{label}: empty name")
@@ -311,6 +334,23 @@ def unparsed_phase_headings(roadmap_text: str) -> list[tuple[int, str]]:
         line_no = roadmap_text.count("\n", 0, m.start()) + 1
         unparsed.append((line_no, m.group(0).strip()))
     return unparsed
+
+
+def placeholder_phase_headings(roadmap_text: str) -> list[tuple[int, str]]:
+    """Every placeholder heading as `(line number, line)`, in document order.
+    A warning channel like `unparsed_phase_headings`: nothing here changes an
+    exit code."""
+    out: list[tuple[int, str]] = []
+    for m in _PHASE_HEADING_LENIENT_RE.finditer(roadmap_text):
+        if _is_placeholder(m.group(3)):
+            out.append((roadmap_text.count("\n", 0, m.start()) + 1, m.group(0).strip()))
+    return out
+
+
+def has_real_phase(roadmap_text: str) -> bool:
+    """Exactly when `parse_roadmap` returns rather than raises: some
+    strict-pattern heading is not a placeholder."""
+    return any(not _is_placeholder(m.group(3)) for m in _PHASE_HEADING_RE.finditer(roadmap_text))
 
 
 def dependency_graph(phases: list[RoadmapPhase]) -> dict[str, list[str]]:
@@ -671,9 +711,28 @@ def roadmap_command(args: list[str]) -> int:
         # are the likeliest cause, so they must be on screen before the error.
         # Printing them changes no exit code below.
         if roadmap_path.exists():
-            for line_no, line in unparsed_phase_headings(
-                    roadmap_path.read_text(encoding="utf-8")):
+            text = roadmap_path.read_text(encoding="utf-8")
+            for line_no, line in unparsed_phase_headings(text):
                 print(f"warn: unparsed phase heading (line {line_no}): {line}")
+            placeholders = placeholder_phase_headings(text)
+            for line_no, line in placeholders:
+                print(f"warn: placeholder phase heading (line {line_no}): {line} "
+                      "— rename it to make it a phase")
+            # Phase 63: with no real phase `graph_problems` raises and would
+            # drop the identity problems it had just computed, so they are
+            # decided here first. Success below rests on what the text *is*
+            # (placeholders, nothing else, no problems) — never on an except.
+            if not has_real_phase(text):
+                identity = validate_identities(text)
+                if identity:
+                    print(f"roadmap invalid ({len(identity)} problem(s)):")
+                    for pr in identity:
+                        print(f"  - {pr}")
+                    return 1
+                if placeholders:
+                    print(f"roadmap ok: 0 phase(s) — {len(placeholders)} placeholder "
+                          "heading(s) to rename")
+                    return 0
         try:
             phases, problems = graph_problems(roadmap_path)
         except (FileNotFoundError, ValueError) as e:

@@ -239,7 +239,7 @@ def test_setup_copies_shipped_files_without_rendering(project, monkeypatch, caps
     su.main(str(project), no_plugin=True, report_user_skills=False)
     data = su.get_data_dir()
     assert (project / "docs" / "workflows.md").read_bytes() == (data / "workflows.md").read_bytes()
-    assert (project / "docs" / "roadmap.md").read_bytes() == (data / "templates" / "roadmap.md").read_bytes()
+    assert (project / "docs" / "roadmap.md").read_bytes() == (data / "seeds" / "roadmap.md").read_bytes()
     assert not (project / "templates").exists()            # Phase 61: retired, never created
     output = capsys.readouterr().out
     assert "Using agent names from config" not in output

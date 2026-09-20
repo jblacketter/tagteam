@@ -9,7 +9,7 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 
 ## Phases
 ### Phase 63: Roadmap placeholders are not phases
-- **Status:** Planning — plan cycle opened 2026-09-20. Branch `phase/roadmap-placeholders-are-not-phases`. See `docs/phases/roadmap-placeholders-are-not-phases.md`.
+- **Status:** In review — plan approved round 3 (2026-09-20); impl cycle opened 2026-09-20. Branch `phase/roadmap-placeholders-are-not-phases`. See `docs/phases/roadmap-placeholders-are-not-phases.md`.
 - **Description:** The roadmap `tagteam setup` seeds fails `tagteam roadmap check` (`duplicate slug 'name'`, `name: depends on itself`): its three `### Phase N: [Name]` headings share one slug. 9 of 41 registered projects still carry it. A heading whose whole title is a bracketed placeholder stops being a phase — skipped by the parser and identity validation, reported on `roadmap check`'s warning channel, and a placeholder-only roadmap is `ok: 0 phase(s)` — so existing projects become valid unedited. Seeds move to `data/seeds/` so that `data/templates/` (Phase 61/62 retired-path provenance) can be frozen and pinned; the seed's dead `/phase` / `/plan` / `/status` commands are replaced and the shipped-docs audit learns them.
 - **Depends on:** Phase 62
 

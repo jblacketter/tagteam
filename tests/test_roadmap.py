@@ -1230,3 +1230,119 @@ class TestUnparsedHeadingWarnings:
 
         assert build_queue(roadmap) == ["api-gateway", "dashboard", "ci-integration"]
         assert roadmap_command(["ready"]) == 0
+
+
+# ---------------------------------------------------------------------------
+# Phase 63 — a heading whose whole title is a bracketed placeholder is not a
+# phase; the roadmap `tagteam setup` seeds is valid out of the box
+# ---------------------------------------------------------------------------
+
+from tagteam.roadmap import (  # noqa: E402
+    graph_problems, has_real_phase, placeholder_phase_headings)
+
+_DATA = Path(__file__).resolve().parents[1] / "tagteam" / "data"
+SEED = (_DATA / "seeds" / "roadmap.md").read_text(encoding="utf-8")
+OLD_SEED = (_DATA / "templates" / "roadmap.md").read_text(encoding="utf-8")     # what 3.14.1 projects have
+
+
+class TestPlaceholderPhases:
+    def _check(self, tmp_path, monkeypatch, capsys, text, sub=("check",)):
+        _write_roadmap(tmp_path, text)
+        monkeypatch.chdir(tmp_path)
+        capsys.readouterr()
+        code = roadmap_command(list(sub))
+        return code, capsys.readouterr().out
+
+    @pytest.mark.parametrize("seed", [SEED, OLD_SEED], ids=["seed", "pre-63-seed"])
+    def test_seeded_roadmap_is_valid_with_warnings(self, tmp_path, monkeypatch, capsys, seed):
+        code, out = self._check(tmp_path, monkeypatch, capsys, seed)
+        assert code == 0, out
+        assert out.count("warn: placeholder phase heading (line ") == 3
+        assert "### Phase 1: [Name] — rename it to make it a phase" in out
+        assert "roadmap ok: 0 phase(s) — 3 placeholder heading(s) to rename" in out
+        assert "roadmap invalid" not in out and "Error" not in out
+
+    def test_fresh_setup_passes_check(self, tmp_path, monkeypatch, capsys):
+        """The regression as the owner meets it: setup, then check."""
+        from tagteam import framework as fw, setup as su
+        monkeypatch.setenv("TAGTEAM_CLAUDE_BIN", "")
+        fw.apply(fw.build_plan(tmp_path, data_dir=su.get_data_dir()))
+        assert (tmp_path / "docs" / "roadmap.md").read_text(encoding="utf-8") == SEED
+        monkeypatch.chdir(tmp_path)
+        capsys.readouterr()
+        assert roadmap_command(["check"]) == 0
+        assert "roadmap ok: 0 phase(s)" in capsys.readouterr().out
+
+    def test_placeholder_between_real_phases_bounds_sections_and_is_no_phase(self, tmp_path, monkeypatch, capsys):
+        text = ("### Phase 1: Alpha\n- **Status:** Not Started\n"
+                "### Phase 2: [Name]\n- **Status:** Complete\n- **Depends on:** Phase 3\n"
+                "### Phase 3: Gamma\n- **Status:** Not Started\n")
+        path = _write_roadmap(tmp_path, text)
+        phases = parse_roadmap(path)
+        assert [(p.slug, p.status, p.depends_on) for p in phases] == [
+            ("alpha", "Not Started", []), ("gamma", "Not Started", [])]      # nothing bled into Alpha
+        code, out = self._check(tmp_path, monkeypatch, capsys, text)
+        assert code == 0 and "roadmap ok: 2 phase(s), 0 dependency edge(s)" in out
+        assert out.count("warn: placeholder phase heading") == 1 and "(line 3)" in out
+        code, out = self._check(tmp_path, monkeypatch, capsys, text, sub=("ready",))
+        assert code == 0 and "alpha" in out and "gamma" in out and "name" not in out.split()
+
+    def test_only_a_whole_bracketed_title_is_a_placeholder(self):
+        text = ("### Phase 1: []\n### Phase 2: [ ]\n### Phase 3: [First phase]\n"
+                "### Phase 4: Parser [v2]\n### Phase 5: [a] and [b]\n")
+        assert [l for _, l in placeholder_phase_headings(text)] == [
+            "### Phase 1: []", "### Phase 2: [ ]", "### Phase 3: [First phase]"]
+        assert has_real_phase(text) and validate_identities(text) == []
+
+    def test_real_titles_with_brackets_stay_phases(self, tmp_path):
+        path = _write_roadmap(tmp_path, "### Phase 4: Parser [v2]\n- **Status:** Not Started\n"
+                                        "### Phase 5: [a] and [b]\n- **Status:** Not Started\n")
+        assert [p.slug for p in parse_roadmap(path)] == ["parser-v2", "a-and-b"]
+
+    def test_real_phase_depending_on_a_placeholder_is_an_unknown_dependency(self, tmp_path, monkeypatch, capsys):
+        text = ("### Phase 1: Alpha\n- **Status:** Not Started\n- **Depends on:** Phase 2\n"
+                "### Phase 2: [Name]\n- **Status:** Not Started\n")
+        code, out = self._check(tmp_path, monkeypatch, capsys, text)
+        assert code == 1 and "unknown dependency 'Phase 2'" in out
+
+    def test_placeholders_claim_no_number_and_no_slug(self):
+        text = ("### Phase 1: Alpha\n### Phase 1: [Name]\n### Phase 2: [Name]\n### Phase 2: [Name]\n")
+        assert validate_identities(text) == []
+
+    def test_identity_problems_are_never_masked_by_placeholder_success(self, tmp_path, monkeypatch, capsys):
+        """Plan review: with no real phase `graph_problems` raises and would
+        drop the identity list; `check` must report it, not print ok."""
+        code, out = self._check(tmp_path, monkeypatch, capsys,
+                                "### Phase 1: [Name]\n- **Status:** Not Started\n### Phase 2:\n")
+        assert code == 1, out
+        assert "roadmap invalid (1 problem(s)):" in out and "Phase 2: empty name" in out
+        assert "roadmap ok" not in out and "warn: placeholder phase heading (line 1)" in out
+        code, out = self._check(tmp_path, monkeypatch, capsys,
+                                "### Phase 1: [Name]\n### Phase 2:\n### Phase 2:\n")
+        assert code == 1 and out.count("Phase 2: empty name") == 2
+        assert "duplicate phase number 2" in out and "roadmap ok" not in out
+
+    def test_no_headings_at_all_is_the_same_error_as_before(self, tmp_path, monkeypatch, capsys):
+        code, out = self._check(tmp_path, monkeypatch, capsys, "# Roadmap\n\nnothing yet\n")
+        assert code == 1 and "Error: No phases found in" in out
+        assert "Expected '### Phase N: <name>' headings." in out and "placeholder" not in out
+
+    def test_ready_queue_graph_on_the_seed_say_why_there_is_nothing(self, tmp_path, monkeypatch, capsys):
+        for sub in (("ready",), ("queue",), ("graph",)):
+            code, out = self._check(tmp_path, monkeypatch, capsys, SEED, sub=sub)
+            assert code == 1, (sub, out)
+            assert "3 placeholder heading(s) ([Name]); rename them to make them phases." in out
+
+    def test_callers_see_the_seed_exactly_as_a_roadmap_without_phases(self, tmp_path):
+        """launch.py / watcher.py / worktree.py catch ValueError today; the
+        seed must keep arriving as that, not as a new empty-list shape."""
+        from tagteam import launch
+        seeded = tmp_path / "seeded"; empty = tmp_path / "empty"
+        _write_roadmap(seeded, SEED); _write_roadmap(empty, "# Roadmap\n")
+        for root in (seeded, empty):
+            assert launch._actionable_phases(root) == []
+            assert launch._next_after(root, None) == (None, True)
+            with pytest.raises(ValueError, match="No phases found"):
+                graph_problems(root / "docs" / "roadmap.md")           # what the watcher catches
+            with pytest.raises(ValueError, match="No phases found"):
+                parse_roadmap(root / "docs" / "roadmap.md")
