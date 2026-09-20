@@ -1,0 +1,162 @@
+# Phase 63: Roadmap placeholders are not phases
+
+## Status
+- [ ] Planning
+- [ ] Implementation: branch `phase/roadmap-placeholders-are-not-phases`
+- [ ] Implementation Review
+- [ ] Complete
+
+## Summary
+The roadmap `tagteam setup` seeds fails `tagteam roadmap check`. Reproduced on
+3.14.1 in an empty directory (seed written by `framework.apply`, then the CLI):
+
+```
+roadmap invalid (2 problem(s)):
+  - duplicate slug 'name': Phase 1, Phase 2, Phase 3
+  - name: depends on itself
+```
+
+The seed (`tagteam/data/templates/roadmap.md`) has three headings
+`### Phase N: [Name]`. `_slugify("[Name]")` is `name` for all three, so
+`validate_identities()` reports a duplicate slug, and Phase 3's
+`- **Depends on:** Phase 2` resolves to slug `name` — its own.
+
+Every new project therefore starts with a roadmap tagteam itself calls
+invalid. It stays that way until the owner renames all three: 8 of the 41
+registered projects still carry the unedited seed and report exactly this
+(agent-gate, agent-ledger, jobs/demoapp, northstar/clearpath-cloud,
+screen_work, skill-forge, token-economy, token-mint); linkedin-articles, whose
+first cycle ran without touching the roadmap, reports both lines. Ordinary
+`/tagteam:handoff` cycles are unaffected; `roadmap ready` / `queue` / `graph`
+and full-roadmap mode are refused. Logged as issue 8 in
+`docs/tagteam-issues-release-and-venv-upgrade-2026-09-20.md`.
+
+The seed also ends with a "Getting Started" list naming `/phase`,
+`/plan create [phase]` and `/status` — commands that have not existed since
+the plugin (they predate even the `/handoff-*` family the Phase 49 audit looks
+for, which is why that audit never caught them).
+
+**Two ways to fix it, and why this plan takes the second.** (a) Give the seed
+three distinct placeholder titles. `check` passes — and `roadmap ready` then
+offers `first-phase-name` as a startable phase, and full-roadmap mode would
+open a plan cycle for it. It also fixes nothing in the 9 existing projects.
+(b) Say what is true: a heading whose whole title is a bracketed placeholder
+is not a phase yet. Existing projects become valid without anyone editing
+them, and the owner is told which lines to rename.
+
+## Scope
+**In:**
+
+1. **Placeholder headings are not phases** (`tagteam/roadmap.py`). A
+   placeholder is a phase heading whose name, stripped, matches `^\[[^\]]*\]$`
+   — the whole title is one bracketed token (`[Name]`, `[First phase]`). A
+   title that merely contains brackets (`Parser [v2]`) is an ordinary phase.
+   - `parse_roadmap()` does not return placeholders. Sections are still split
+     on **every** heading, so a placeholder's `Status` / `Depends on` lines
+     never bleed into the real phase above it.
+   - `validate_identities()` ignores them (no slug, no number claim).
+   - `parse_roadmap()`'s contract is otherwise unchanged: it still raises
+     `ValueError` when there is no real phase — `launch.py`, `watcher.py` and
+     `worktree.py` all catch that today, and an empty list would be a new
+     shape for them. The message gains the cause when placeholders exist:
+     `No phases found in … — 3 placeholder heading(s) ([Name]); rename them to
+     make them phases.`
+   - A real phase that depends on a placeholder (`Depends on: Phase 2` where
+     Phase 2 is `[Name]`) is an unknown dependency, as it would be for any
+     phase that does not exist. Unchanged behaviour, correct outcome.
+2. **`roadmap check` says so.** New `placeholder_phase_headings(text) ->
+   list[(line_no, line)]`, printed through Phase 60's warning channel:
+   `warn: placeholder phase heading (line 12): ### Phase 1: [Name] — rename it
+   to make it a phase`. Warnings change no exit code. When the roadmap has
+   placeholders and no real phase — the fresh seed — `check` prints the
+   warnings and `roadmap ok: 0 phase(s) — 3 placeholder heading(s) to rename`,
+   exit 0. `ready` / `queue` / `graph` on that roadmap keep exiting 1 with the
+   improved message: there is nothing to start.
+3. **Seeds get their own directory.** `SEED_FILES` reads
+   `data/templates/roadmap.md` and `data/templates/decision_log.md` — the same
+   files that since Phase 61/62 are the *retired-path provenance*: a project's
+   `templates/roadmap.md` is removed because it equals that package file. Edit
+   the seed in place and every not-yet-upgraded project's copy stops matching
+   and is kept as `custom`; the cleanup quietly breaks for other users. So:
+   - new `tagteam/data/seeds/roadmap.md` and `seeds/decision_log.md`
+     (`SEED_FILES` points there; `pyproject.toml` glob `data/seeds/*.md`);
+   - `data/templates/*` and `data/checklists/*` become frozen, with a test
+     that pins each to `git show v3.14.1:…` (skips without tags, like the
+     Phase 62 table test).
+4. **Fix the seed's dead commands** in `data/seeds/roadmap.md` only:
+   "Getting Started" becomes `/tagteam:handoff start [phase]`,
+   `/tagteam:handoff status`, `tagteam roadmap ready`, plus one line saying a
+   `[Name]` heading is a placeholder until renamed. The three `[Name]`
+   headings stay — with item 1 they are harmless and self-explanatory.
+   `seeds/decision_log.md` is byte-identical to today's.
+5. **The audit learns the older family.** `TestShippedDocsAudit` also rejects
+   `/phase`, `/plan create` and `/status` as commands in shipped `.md` files,
+   excluding the frozen `data/templates/` (which must keep its bytes) — with
+   the exclusion stated in the test, not silent.
+6. **Docs:** `CLAUDE.md` (seeds vs frozen templates; placeholders);
+   `tagteam/data/workflows.md` one sentence where the roadmap is described.
+   This repo's `docs/workflows.md` refreshed by `tagteam setup` as the last
+   implementation step.
+
+**Out:**
+- Editing any existing project's roadmap. Item 1 makes the 9 affected
+  projects valid as they are.
+- Line numbers in `unknown dependency` problems (issue 9) — same file,
+  different defect; its own small change.
+- `northstar-test-automation`'s duplicate phase numbers 7 and 8 — real
+  duplicates, the owner's to renumber.
+- Decoupling bench's checklist fallback from the frozen `data/checklists/`.
+  Nothing needs to change there yet.
+
+## Technical Approach
+- `_PLACEHOLDER_NAME_RE = re.compile(r"^\[[^\]]*\]$")`; `_is_placeholder(name)`.
+- `parse_roadmap()`: iterate all strict headings for section boundaries; skip
+  appending when `_is_placeholder(name)`; raise as today when `phases` is
+  empty, with the placeholder count in the message.
+- `validate_identities()`: `continue` on placeholder names, before the
+  number/slug bookkeeping.
+- `placeholder_phase_headings()`: lenient regex, so it sees what
+  `validate_identities` sees.
+- `roadmap_command("check")`: print placeholder warnings next to the unparsed
+  ones; if `graph_problems` raises `ValueError` **and** placeholders exist
+  **and** no non-placeholder strict heading exists → the `ok: 0 phase(s)` line,
+  return 0. Any other `ValueError` is reported as today.
+- `framework.SEED_FILES` → `seeds/…`. `_retired_sources()` untouched.
+
+## Files
+- `tagteam/roadmap.py`, `tagteam/framework.py`
+- `tagteam/data/seeds/roadmap.md`, `tagteam/data/seeds/decision_log.md`, `pyproject.toml`
+- `tests/test_roadmap*.py`, `tests/test_framework.py`, `tests/test_plugin.py`
+- `CLAUDE.md`, `tagteam/data/workflows.md`, `docs/workflows.md`, `docs/roadmap.md`
+
+## Success Criteria
+1. **The regression itself:** fresh directory → framework plan applied →
+   `roadmap_command(["check"])` returns 0, prints three
+   `warn: placeholder phase heading` lines and
+   `roadmap ok: 0 phase(s) — 3 placeholder heading(s) to rename`.
+2. The pre-Phase-63 seed bytes (what the 9 projects have) → same result: valid
+   without an edit.
+3. Two real phases + one `[Name]` placeholder carrying `Status` and
+   `Depends on` lines → 2 phases; the placeholder's lines attach to neither;
+   `check` ok with one warning; `ready` lists the real ones only.
+4. `### Phase 4: Parser [v2]` is a phase (slug `parser-v2`). `[ ]` and `[]`
+   are placeholders.
+5. Real phase depending on a placeholder by number → `unknown dependency`,
+   exit 1 (unchanged).
+6. Two `[Name]` placeholders sharing a phase number with a real phase → no
+   duplicate-number problem from the placeholders.
+7. Roadmap with no headings at all → the existing `No phases found` error,
+   wording unchanged; `ready` on the fresh seed → exit 1 with the
+   placeholder-count message.
+8. `launch._actionable_phases`, `launch._next_after` and the watcher's
+   roadmap read on a fresh seed behave exactly as on a roadmap with no phases
+   today (`[]`, `(None, True)`, one problem string) — asserted, not assumed.
+9. `data/templates/*` and `data/checklists/*` equal `git show v3.14.1:…`
+   (skip without tags); the Phase 61/62 retire tests pass unchanged.
+10. A fresh setup's `docs/roadmap.md` equals `data/seeds/roadmap.md`, names no
+    dead command, and the extended audit passes; a wheel contains
+    `data/seeds/*.md`.
+11. Real registry, read-only: `tagteam roadmap check` in the 9 affected
+    projects, before → after, pasted into the impl submission
+    (`northstar-test-automation` excluded — its problem is a different one).
+12. Gate: full suite green via `on_submit`.
