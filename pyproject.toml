@@ -48,6 +48,7 @@ tagteam = [
     "data/.claude/skills/*.md",
     "data/.claude/skills/**/*.md",
     "data/templates/*.md",
+    "data/seeds/*.md",
     "data/checklists/*.md",
     "data/*.md",
     "data/history/**/*.md",

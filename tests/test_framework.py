@@ -667,7 +667,7 @@ def test_fresh_setup_reports_directories_and_seeds(proj, capsys):
     assert code == 0 and "created  4 directories" in out and "created  CLAUDE.md" in out
     for rel in fw.SEED_DIRS:
         assert (proj / rel).is_dir()
-    assert (proj / "docs" / "roadmap.md").read_bytes() == (DATA / "templates" / "roadmap.md").read_bytes()
+    assert (proj / "docs" / "roadmap.md").read_bytes() == (DATA / "seeds" / "roadmap.md").read_bytes()
     code, out = run(proj, capsys=capsys)
     assert code == 0 and "director" not in out and "AGENTS.md" not in out
 
@@ -1142,12 +1142,9 @@ def _rendered_era(root: Path, lead: str, reviewer: str) -> None:
             text.replace("{{lead}}", lead).replace("{{reviewer}}", reviewer), encoding="utf-8")
 
 
-def _tagged_blob(tag: str, source_rel: str) -> bytes | None:
-    for pkg in ("tagteam", "ai_handoff"):             # the package was renamed along the way
-        r = subprocess.run(["git", "-C", str(REPO), "show", f"{tag}:{pkg}/data/{source_rel}"], capture_output=True)
-        if r.returncode == 0:
-            return r.stdout
-    return None
+from tests import _provenance as prov                  # noqa: E402
+
+_tagged_blob = prov.tagged_blob
 
 
 def test_history_table_is_what_git_history_says():
@@ -1157,7 +1154,7 @@ def test_history_table_is_what_git_history_says():
     tags = subprocess.run(["git", "-C", str(REPO), "tag", "--list", "v*"], capture_output=True, text=True)
     if tags.returncode != 0 or "v3.12.0" not in tags.stdout.split():
         pytest.skip("release tags not available in this checkout")
-    shipped = sorted(p.relative_to(HISTORY).as_posix() for p in HISTORY.rglob("*") if p.is_file())
+    shipped = [p.relative_to(HISTORY).as_posix() for p in prov.history_paths()]
     assert len(shipped) == 13 and [r for r in shipped if r.endswith(".sha256")] == ["v3.10.0/workflows.md.sha256"]
     for rel in shipped:
         tag, source_rel = rel.split("/", 1)
@@ -1308,3 +1305,34 @@ def test_prune_reports_a_directory_it_could_not_remove(proj, capsys):
     (proj / "templates" / "cycle.md").write_bytes((DATA / "templates" / "cycle.md").read_bytes())
     code, out = run(proj, capsys=capsys)
     assert code == 0 and "retired  templates/cycle.md" in out and "templates/ —" not in out
+
+
+# ---------------------------------------------------------------------------
+# Phase 63 — data/templates and data/checklists are frozen: they are the
+# byte-for-byte evidence that retires a project's old copies. Seeds live in
+# data/seeds/ so that editing a seed never touches them.
+# ---------------------------------------------------------------------------
+
+def test_retired_path_sources_are_frozen_at_the_tag():
+    if not prov.has_tag(prov.FROZEN_TAG):
+        pytest.skip(f"{prov.FROZEN_TAG} not available in this checkout")
+    for sub in ("templates", "checklists"):
+        assert sorted(p.name for p in (DATA / sub).glob("*.md")) == prov.tagged_listing(prov.FROZEN_TAG, sub), sub
+    for path in prov.frozen_paths():
+        rel = path.relative_to(DATA).as_posix()
+        assert path.read_bytes() == prov.tagged_blob(prov.FROZEN_TAG, rel), (
+            f"{rel} is frozen provenance (Phase 61/62); change data/seeds/ instead")
+    assert {p.relative_to(DATA).as_posix() for p in prov.frozen_paths()} == {s for _, _, s in fw._retired_sources(DATA)}
+
+
+def test_seeds_come_from_data_seeds_not_from_the_frozen_templates(proj):
+    assert [src for _, src in fw.SEED_FILES if src] == ["seeds/roadmap.md", "seeds/decision_log.md"]
+    assert (DATA / "seeds" / "decision_log.md").read_bytes() == (DATA / "templates" / "decision_log.md").read_bytes()
+    seed = (DATA / "seeds" / "roadmap.md").read_text(encoding="utf-8")
+    assert seed != (DATA / "templates" / "roadmap.md").read_text(encoding="utf-8")
+    for dead in ("`/phase`", "`/plan create", "`/status`"):
+        assert dead not in seed
+    assert "/tagteam:handoff start [phase]" in seed and "tagteam roadmap ready" in seed
+    fresh(proj)
+    assert (proj / "docs" / "roadmap.md").read_text(encoding="utf-8") == seed
+    assert (proj / "docs" / "decision_log.md").read_bytes() == (DATA / "seeds" / "decision_log.md").read_bytes()

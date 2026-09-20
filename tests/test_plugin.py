@@ -454,6 +454,43 @@ class TestShippedDocsAudit:
                     hits.append(f"{f.relative_to(REPO)}:{n}: {line.strip()[:100]}")
         assert not hits, "\n".join(hits)
 
+    # Phase 63: the family before /handoff-* — `/phase`, `/plan create`,
+    # `/status` — which the seeded roadmap still named. Exactly two shipped
+    # files keep them, both frozen provenance whose bytes retire a project's
+    # old templates/roadmap.md; each must be tag-pinned (tests/_provenance.py).
+    OLDER_FAMILY_ALLOWED = {
+        "tagteam/data/templates/roadmap.md",
+        "tagteam/data/history/v3.3.0/templates/roadmap.md",
+    }
+
+    @staticmethod
+    def _older_family_hits(files, root):
+        import re
+        pat = re.compile(r"`/(?:phase|plan|status)\b[^`]*`")
+        hits = []
+        for f in files:
+            for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+                if pat.search(line):
+                    hits.append((f.relative_to(root).as_posix(), n, line.strip()[:100]))
+        return hits
+
+    def test_no_older_command_family_outside_pinned_provenance(self, tmp_path):
+        from tests import _provenance as prov
+        hits = self._older_family_hits(list((REPO / "tagteam" / "data").rglob("*.md")), REPO)
+        assert {rel for rel, _, _ in hits} == self.OLDER_FAMILY_ALLOWED, hits      # exactly these, no others
+        assert self.OLDER_FAMILY_ALLOWED <= prov.pinned_relpaths()                   # exempt ⇒ pinned to a tag
+        # the scan itself rejects the same text anywhere else
+        stray = tmp_path / "tagteam" / "data" / "new.md"
+        stray.parent.mkdir(parents=True)
+        stray.write_text("1. Use `/plan create [phase]` to start planning\nsee /status/ page and `tagteam state`\n")
+        assert [(rel, n) for rel, n, _ in self._older_family_hits([stray], tmp_path)] == [("tagteam/data/new.md", 1)]
+
+    def test_handoff_family_audit_still_scans_the_exempt_files(self):
+        import re
+        pat = re.compile(r"/handoff-[a-z]+(?![\w-]*\.md)")
+        for rel in self.OLDER_FAMILY_ALLOWED:
+            assert (REPO / rel).is_file() and not pat.search((REPO / rel).read_text(encoding="utf-8")), rel
+
     def test_workflows_md_describes_the_current_surface(self):
         text = (REPO / "tagteam" / "data" / "workflows.md").read_text()
         for needle in ("/tagteam:handoff", "`/handoff`", "tagteam contract", "cycle add", "one-run", "gatekeeper"):

@@ -1,8 +1,8 @@
 # Phase 63: Roadmap placeholders are not phases
 
 ## Status
-- [ ] Planning
-- [ ] Implementation: branch `phase/roadmap-placeholders-are-not-phases`
+- [x] Planning: approved round 3 (2026-09-20) at `61f4a23`
+- [x] Implementation: branch `phase/roadmap-placeholders-are-not-phases`
 - [ ] Implementation Review
 - [ ] Complete
 
@@ -209,3 +209,13 @@ them, and the owner is told which lines to rename.
     projects, before → after, pasted into the impl submission
     (`northstar-test-automation` excluded — its problem is a different one).
 14. Gate: full suite green via `on_submit`.
+
+## Registry check (criterion 13) — read-only `tagteam roadmap check`, 2026-09-20
+| Project | 3.14.1 | this branch |
+|---|---|---|
+| agent-gate, agent-ledger, jobs/demoapp, northstar/clearpath-cloud, screen_work, skill-forge, token-economy, token-mint | `roadmap invalid` — duplicate slug 'name' | `roadmap ok: 0 phase(s) — 3 placeholder heading(s) to rename` |
+| linkedin-articles | `roadmap invalid` — duplicate slug 'name'; name: depends on itself | same `ok: 0 phase(s)` line |
+
+Across all 41 registered projects on this branch, one roadmap is still
+invalid: `northstar-test-automation` (duplicate phase numbers 7 and 8 — real
+duplicates, out of scope).

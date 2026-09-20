@@ -82,8 +82,10 @@ POINTER = ("# Project workflow\n\nRead `tagteam.yaml` for current roles, "
            "`docs/workflows.md` for onboarding, and run "
            "`tagteam contract` for the authoritative workflow.\n")
 # (project relpath, package source relative to data/ or None for POINTER)
-SEED_FILES = (("docs/roadmap.md", "templates/roadmap.md"),
-              ("docs/decision_log.md", "templates/decision_log.md"),
+# Phase 63: seeds have their own sources. data/templates/ is frozen — it is
+# the byte-for-byte evidence that lets a project's old templates/ be retired.
+SEED_FILES = (("docs/roadmap.md", "seeds/roadmap.md"),
+              ("docs/decision_log.md", "seeds/decision_log.md"),
               ("AGENTS.md", None), ("CLAUDE.md", None))
 
 UNSUPPORTED, ABSENT, CURRENT, FRAMEWORK, CUSTOM = (
@@ -317,9 +319,10 @@ def _sources(data_dir: Path) -> list[tuple[str, Path, str]]:
 
 def _retired_sources(data_dir: Path) -> list[tuple[str, Path, str]]:
     """Same triples for the paths tagteam used to install and no longer does.
-    The package files stay: two are seed sources, the checklists are bench's
-    fallback, and all of them are what lets a pre-manifest copy be recognised
-    as tagteam's bytes."""
+    The package files stay, frozen (pinned to the v3.14.1 tag by a test): the
+    checklists are bench's fallback, and all of them are what lets a
+    pre-manifest copy be recognised as tagteam's bytes. Seeds live in
+    data/seeds/ since Phase 63 so that editing one never touches these."""
     out: list[tuple[str, Path, str]] = []
     for f in sorted((data_dir / "templates").glob("*.md")):
         out.append((f"templates/{f.name}", f, f"templates/{f.name}"))

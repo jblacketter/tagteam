@@ -1,7 +1,7 @@
 {
-  "state": "in-progress",
-  "ready_for": "lead",
-  "round": 2,
+  "state": "approved",
+  "ready_for": null,
+  "round": 3,
   "phase": "roadmap-placeholders-are-not-phases",
   "type": "plan",
   "lead": "claude",
@@ -12,5 +12,14 @@
     "dirty_paths": [],
     "captured_at": "2026-09-20T23:37:34.114741+00:00",
     "source": "plan-init"
+  },
+  "impl_boundary": {
+    "sha": "61f4a23b212b6d1752d4e3f83d025bcc38892935",
+    "dirty": {
+      "docs/handoffs/roadmap-placeholders-are-not-phases_plan_rounds.jsonl": "03117cf904132c97145d209a78802cb780c4723d54ba914f76a97bcc96c10117",
+      "docs/handoffs/roadmap-placeholders-are-not-phases_plan_status.json": "4bb2e741b4bb77faf0a67b21dc3c1eac36db1895d17b9ec2ea893ca544af9b49"
+    },
+    "captured_at": "2026-09-20T23:41:33.736476+00:00",
+    "source": "plan-approve"
   }
 }

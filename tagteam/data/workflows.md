@@ -127,7 +127,7 @@ any other watcher running, saying so.
 | `handoff-state.json` | Whose turn, what command, current phase/type/round |
 | `docs/handoffs/<phase>_<type>_rounds.jsonl` + `_status.json` | The cycle record |
 | `docs/phases/<phase>.md` | The plan (the lead writes it; the reviewer reads it) |
-| `docs/roadmap.md` | The phase list and each phase's status |
+| `docs/roadmap.md` | The phase list and each phase's status. A heading still titled `[Name]` is a placeholder, not a phase — `tagteam roadmap check` lists the ones left to rename |
 | `docs/escalations/` | Decision briefs for escalated cycles |
 | `.tagteam/` | Watcher and headless runtime state (not for editing) |
 | `tagteam-manifest.json` | What `setup`/`upgrade` last wrote (path, sha256, version) — commit it |
