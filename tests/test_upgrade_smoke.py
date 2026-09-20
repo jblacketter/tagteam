@@ -239,9 +239,12 @@ def wheel_venv(tmp_path_factory) -> dict:
 
 
 def _old_project(root: Path) -> dict[str, bytes]:
-    """Old Claude-lead scaffolding: a rendered template, an untouched one
-    (package bytes — Phase 61 retires it), a customised checklist, a current
-    workflows.md, real history. Returns the bytes that must survive untouched."""
+    """Old Claude-lead scaffolding: a hand-written template (custom — it is
+    no release's rendering), an untouched one (package bytes — Phase 61
+    retires it), an exact ≤3.11.0 rendering with this project's names (Phase
+    62 retires it, which also proves data/history/ is in the wheel), a
+    customised checklist, a current workflows.md, real history. Returns the
+    bytes that must survive untouched."""
     from tagteam import setup as tsetup
     data = tsetup.get_data_dir()
     root.mkdir(parents=True)
@@ -249,6 +252,10 @@ def _old_project(root: Path) -> dict[str, bytes]:
     (root / "templates").mkdir()
     (root / "templates" / "phase_plan.md").write_text("# Phase\n\n## Roles\n- Lead: Claude\n- Reviewer: Codex\n", encoding="utf-8")
     (root / "templates" / "cycle.md").write_bytes((data / "templates" / "cycle.md").read_bytes())
+    era = (data / "history" / "v3.11.0" / "templates" / "feedback.md").read_text(encoding="utf-8")
+    assert "{{lead}}" in era or "{{reviewer}}" in era
+    (root / "templates" / "feedback.md").write_text(
+        era.replace("{{lead}}", "claude").replace("{{reviewer}}", "codex"), encoding="utf-8")
     (root / "docs" / "checklists").mkdir(parents=True)
     (root / "docs" / "checklists" / "code_review.md").write_bytes(
         (data / "checklists" / "code_review.md").read_bytes() + b"\n- [ ] our extra check\n")
@@ -288,6 +295,8 @@ def test_installed_wheel_migrates_old_project(wheel_venv, tmp_path, monkeypatch,
     assert "keep     templates/phase_plan.md — no longer managed; differs from the package" in out
     assert "keep     docs/checklists/code_review.md — no longer managed; differs from the package" in out
     assert "retire   templates/cycle.md — no longer installed; matches the package" in out
+    assert ("retire   templates/feedback.md — no longer installed; written by tagteam ≤3.11.0 "
+            "(rendered for the configured names)") in out
     assert "create   templates/" not in out and "create   docs/checklists/" not in out
     assert "would be written (preview" in out
 
@@ -297,6 +306,7 @@ def test_installed_wheel_migrates_old_project(wheel_venv, tmp_path, monkeypatch,
     assert rep["problems"] == []
     diff = rep["project_diff"]
     assert "+ tagteam-manifest.json" in diff and "- templates/cycle.md" in diff
+    assert "- templates/feedback.md" in diff
     assert not any(d.startswith(("+ templates/", "+ docs/checklists/")) for d in diff), diff
     assert not any(d.startswith("~ ") for d in diff), diff       # nothing existing was modified
     assert ("+ .claude/skills/handoff/SKILL.md" in diff) == (plugin == "absent")

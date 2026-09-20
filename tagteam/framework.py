@@ -26,6 +26,12 @@ bytes) goes only when git can restore it, else it is kept with its manifest
 entry so a later run can retire it. A modified copy is kept; ``--accept PATH``
 deletes it. A symlink or directory at a retired path is kept, never refused.
 
+Phase 62: ``data/history/<tag>/…`` holds the earlier sources of the framework
+files — a closed set of 13, by the last release that shipped each. A copy
+equal to one of them, verbatim or rendered for the configured / swapped names
+(``setup`` baked the names in until 3.12.0), is tagteam's and reconstructible.
+Exact bytes only; names are never inferred from the file.
+
 Recovery is git: an accepted overwrite or deletion needs the path tracked and
 clean so ``git checkout -- PATH`` restores it; ``--force`` lifts only that
 refusal. Every write and delete — including the project directory itself
@@ -39,6 +45,7 @@ migration, so the plan's ``migrate.py`` lives here as ``framework.py``.
 """
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -280,6 +287,7 @@ class Plan:
     root_shape: Shape = field(default_factory=lambda: Shape("dir"))          # preimage of root
     root_outcome: str = ""          # "" (existed) | created | refused: <why>
     pruned_dirs: list[str] = field(default_factory=list)   # retired dirs rmdir'd this run
+    unpruned_dirs: list[tuple[str, str]] = field(default_factory=list)   # (dir, why) rmdir failed
     applied: bool = False
 
     @property
@@ -317,6 +325,29 @@ def _retired_sources(data_dir: Path) -> list[tuple[str, Path, str]]:
     return out
 
 
+def _tag_key(tag: str) -> tuple[int, ...]:
+    return tuple(int(n) for n in tag.lstrip("v").split(".") if n.isdigit())
+
+
+def _history_sources(data_dir: Path, source_rel: str) -> list[tuple[str, bytes]]:
+    """(last tag that shipped it, bytes) for every earlier source of
+    ``source_rel`` under ``data/history/``, newest first. Anything missing or
+    unreadable yields less evidence, which only ever means ``custom``."""
+    out: list[tuple[str, bytes]] = []
+    try:
+        tags = [e.name for e in os.scandir(data_dir / "history") if e.is_dir(follow_symlinks=False)]
+    except OSError:
+        return out
+    for tag in sorted(tags, key=_tag_key, reverse=True):
+        f = data_dir / "history" / tag / source_rel
+        try:
+            if f.is_file() and not f.is_symlink():
+                out.append((tag, f.read_bytes()))
+        except OSError:
+            continue
+    return out
+
+
 def _render_variants(package: bytes, root: Path) -> list[tuple[str, bytes]]:
     """The package file rendered for the configured names and the swapped
     names — pre-manifest evidence that an older tagteam wrote the file.
@@ -332,7 +363,8 @@ def _render_variants(package: bytes, root: Path) -> list[tuple[str, bytes]]:
             ("swapped names", render_template(text, {"lead": reviewer, "reviewer": lead}).encode("utf-8"))]
 
 
-def _classify(item: Item, package: bytes, root: Path, known: dict[str, str]) -> None:
+def _classify(item: Item, package: bytes, root: Path, known: dict[str, str],
+              history: list[tuple[str, bytes]] | tuple = ()) -> None:
     s = item.shape
     if s.kind == "unsupported":
         item.cls, item.reason = UNSUPPORTED, f"unsupported filesystem shape ({s.detail})"
@@ -355,6 +387,17 @@ def _classify(item: Item, package: bytes, root: Path, known: dict[str, str]) -> 
             item.cls, item.reason = FRAMEWORK, f"matches the package rendered for the {label}"
             item.reconstructible = True
             return
+    # Phase 62: an earlier release's source, verbatim or as setup rendered it.
+    for tag, source in history:
+        era = f"written by tagteam ≤{tag.lstrip('v')}"
+        if sha == sha256_bytes(source):
+            item.cls, item.reason, item.reconstructible = FRAMEWORK, era, True
+            return
+        for label, variant in _render_variants(source, root):
+            if sha == sha256_bytes(variant):
+                item.cls, item.reason = FRAMEWORK, f"{era} (rendered for the {label})"
+                item.reconstructible = True
+                return
     if item.entry is not None:
         item.cls = CUSTOM
         item.reason = f"modified since tagteam {item.entry.get('tagteam', '?')} wrote it"
@@ -542,13 +585,13 @@ def build_plan(target: str | Path, *, data_dir: Path, no_plugin: bool = False,
         package = src.read_bytes()
         it = Item(rel, "file", source=src, source_rel=src_rel, package_sha=sha256_bytes(package),
                   shape=observe(root, rel), entry=entries.get(rel))
-        _classify(it, package, root, known)
+        _classify(it, package, root, known, _history_sources(data_dir, src_rel))
         items.append(it)
     for rel, src, src_rel in _retired_sources(data_dir):
         package = src.read_bytes()
         it = Item(rel, "retired", source=src, source_rel=src_rel, package_sha=sha256_bytes(package),
                   shape=observe(root, rel), entry=entries.get(rel))
-        _classify(it, package, root, known)
+        _classify(it, package, root, known, _history_sources(data_dir, src_rel))
         items.append(it)
     items += _skill_items(root, data_dir, vendor, entries, known)
     items += _legacy_items(root, accept_set)
@@ -748,7 +791,9 @@ def _handover(root: Path, item: Item) -> None:
 
 def _prune_retired_dirs(plan: Plan) -> None:
     """rmdir a retired directory this run emptied. Never recursive: anything
-    else in it (the owner's file, a kept custom copy) leaves it in place."""
+    else in it (the owner's file, a kept custom copy) leaves it in place —
+    silently, the keep lines already say what is there. Any other failure is
+    reported; it is not a refusal."""
     for d in RETIRED_DIRS:
         if not any(it.kind == "retired" and it.done and it.rel.startswith(d + "/")
                    for it in plan.items):
@@ -757,7 +802,9 @@ def _prune_retired_dirs(plan: Plan) -> None:
             continue
         try:
             os.rmdir(plan.root / d)
-        except OSError:
+        except OSError as e:
+            if e.errno not in (errno.ENOTEMPTY, errno.EEXIST):
+                plan.unpruned_dirs.append((d, e.__class__.__name__))
             continue
         plan.pruned_dirs.append(d)
 
@@ -977,6 +1024,8 @@ def format_report(plan: Plan) -> str:
         lines.append(text)
     for d in plan.pruned_dirs:
         lines.append(f"  removed  {d}/ — empty")
+    for d, why in plan.unpruned_dirs:
+        lines.append(f"  kept     {d}/ — directory left in place ({why})")
     if made_dirs:
         lines.append(f"  {'created' if plan.applied else 'create':<8} {made_dirs} director{'y' if made_dirs == 1 else 'ies'}")
     if current:
