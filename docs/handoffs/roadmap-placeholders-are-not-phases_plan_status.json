@@ -1,0 +1,16 @@
+{
+  "state": "in-progress",
+  "ready_for": "lead",
+  "round": 1,
+  "phase": "roadmap-placeholders-are-not-phases",
+  "type": "plan",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-20",
+  "baseline": {
+    "sha": "37189f2dbaf1d2f041b82f15841d0df39b394c96",
+    "dirty_paths": [],
+    "captured_at": "2026-09-20T23:37:34.114741+00:00",
+    "source": "plan-init"
+  }
+}
