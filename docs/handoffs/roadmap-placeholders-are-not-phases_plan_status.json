@@ -1,7 +1,7 @@
 {
   "state": "in-progress",
   "ready_for": "lead",
-  "round": 1,
+  "round": 2,
   "phase": "roadmap-placeholders-are-not-phases",
   "type": "plan",
   "lead": "claude",
