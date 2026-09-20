@@ -8,6 +8,11 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 **Workflow:** Lead / Reviewer with Human Arbiter
 
 ## Phases
+### Phase 64: Version from the source tree
+- **Status:** Planning — plan cycle opened 2026-09-20. Branch `phase/version-from-the-source-tree` (stacked on Phase 63's branch until PR #47 merges). See `docs/phases/version-from-the-source-tree.md`.
+- **Description:** `tagteam.__version__` comes from `importlib.metadata`, which an editable install writes once and never updates: on 2026-09-20 the arbiter's CLI ran 3.14.0 code while reporting 3.13.0 (a sweep would have stamped 41 manifests wrongly), this repo's `.venv` reported 3.12.0 (two environmental `upgrade_smoke` failures, twice misdiagnosed), rankr's link reported 0.5.0. `__version__` now prefers the `pyproject.toml` beside the package when it declares `name = "tagteam"` — true only for a source tree — and falls back to metadata exactly as before for every wheel install. Adds `tagteam --version` (version + the directory it was imported from).
+- **Depends on:** Phase 63
+
 ### Phase 63: Roadmap placeholders are not phases
 - **Status:** ✅ Complete — plan approved round 3, impl approved round 1 (2026-09-20); gate: 2,074 passed, 5 skipped at `c35e793`. Branch `phase/roadmap-placeholders-are-not-phases`; PR merge pending. See `docs/phases/roadmap-placeholders-are-not-phases.md`.
 - **Description:** The roadmap `tagteam setup` seeds fails `tagteam roadmap check` (`duplicate slug 'name'`, `name: depends on itself`): its three `### Phase N: [Name]` headings share one slug. 9 of 41 registered projects still carry it. A heading whose whole title is a bracketed placeholder stops being a phase — skipped by the parser and identity validation, reported on `roadmap check`'s warning channel, and a placeholder-only roadmap is `ok: 0 phase(s)` — so existing projects become valid unedited. Seeds move to `data/seeds/` so that `data/templates/` (Phase 61/62 retired-path provenance) can be frozen and pinned; the seed's dead `/phase` / `/plan` / `/status` commands are replaced and the shipped-docs audit learns them.
