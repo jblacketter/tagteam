@@ -814,6 +814,19 @@ class TestHeadline:
         assert capi.headline(_facts(status="done", turn=None, result="approved"),
                              {"status": "failed"})["state"] == "approved"
 
+    def test_a_delivered_turns_age_counts_from_the_dispatch_not_the_submission(self):
+        """Seen live: 'its turn was sent to its terminal · 7m', seconds after a 7½-minute pre-check."""
+        sent = {**_sent(), "ts": (datetime.now(timezone.utc) - timedelta(seconds=12)).isoformat()}
+        hl = capi.headline(_facts(dispatch=sent, owed_age=460.0))
+        assert hl["text"].endswith("its turn was sent to its terminal") and hl["age_of"] == "sent"
+        assert 11 <= hl["age_s"] <= 14 and hl["tone"] == "waiting"
+        off = capi.headline(_facts(running=False, dispatch=sent, owed_age=460.0))
+        assert off["state"] == "watcher-off" and off["age_of"] == "sent" and off["age_s"] < 15
+        # not delivered → the owed age, as before; and a long-held delivered turn still turns amber
+        assert capi.headline(_facts(owed_age=460.0))["age_of"] == "owed"
+        old = {**_sent(), "ts": (datetime.now(timezone.utc) - timedelta(seconds=1000)).isoformat()}
+        assert capi.headline(_facts(dispatch=old))["tone"] == "attention"
+
     def test_delivered_means_typed_into_a_terminal_for_this_seq(self):
         assert capi.turn_delivered(_facts(dispatch=_sent()))
         for ev in (_sent(mode="notify"), _sent(mode="headless"), _sent(seq=6), _sent(kind="turn"),
@@ -836,7 +849,8 @@ class TestHeadline:
             who = "Claude" if turn == "lead" else "Codex"
             assert hl["state"] not in ("idle", "approved", "aborted", "working", "launching"), (facts, hl)
             assert who in hl["text"] and hl["agent"] == who and hl["role"] == turn, (facts, hl)
-            assert hl["age_s"] is not None and hl["age_of"] in ("owed", "pause", "beat")
+            assert hl["age_of"] in ("owed", "pause", "beat", "sent")
+            assert hl["age_s"] is not None or hl["age_of"] == "sent"
         assert seen == {"paused", "watcher-off", "stalled", "watcher-stale", "starting", "waiting"}
 
     def test_the_text_never_carries_an_age(self):

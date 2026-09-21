@@ -257,15 +257,17 @@ def read(root: str | Path, n: int = 50, include_info: bool = True) -> list[dict]
     (seen live, Phase 68: 200 lines, not one of them the 00:22 `sent`)."""
     root = Path(root)
     n = max(1, int(n))
-
-    def keep(recs):
-        return recs if include_info else [r for r in recs if (r.get("kind") or "info") != "info"]
-    live = keep(_records(root, EVENTS_REL))
-    if len(live) < n:
-        live = keep(_records(root, ROTATED_REL)) + live
-    if not include_info:
-        live = _collapse(live)
-    return live[-n:]
+    live = _records(root, EVENTS_REL)
+    if include_info:
+        if len(live) < n:
+            live = _records(root, ROTATED_REL) + live
+        return live[-n:]
+    # Story mode: how much history is needed is only known AFTER filtering and
+    # folding (201 identical lines fold to one row; a run can straddle the
+    # rotation boundary), so both generations are read — the byte cap keeps
+    # that finite — then filtered, folded, and only then cut to n.
+    both = _records(root, ROTATED_REL) + live
+    return _collapse([r for r in both if (r.get("kind") or "info") != "info"])[-n:]
 
 
 def _collapse(recs: list[dict]) -> list[dict]:

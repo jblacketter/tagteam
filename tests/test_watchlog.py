@@ -136,6 +136,28 @@ class TestEventLog:
         # folding is a view: nothing on disk changes, and the full log is not folded
         assert sum(1 for e in watchlog.read(root, 10_000) if e["kind"] == "turn") == 49
 
+    def test_story_history_is_sized_after_folding_and_spans_the_rotation(self, root, monkeypatch):
+        """impl r1: whether to read `.1` was decided on the PRE-fold count — 201
+        identical live lines folded to one row and the older `sent` in `.1`
+        was never read."""
+        s = Sink(root, "iterm2", every_s=10)
+        s.event("   Sent to Codex", "sent", seq=1)
+        s.event(">> Codex's turn", "turn", seq=2); s.event(">> Codex's turn", "turn", seq=2)      # a run that will straddle
+        monkeypatch.setattr(watchlog, "MAX_BYTES", (root / watchlog.EVENTS_REL).stat().st_size - 1)
+        s.event(">> Codex's turn", "turn", seq=2)                                                 # rotates first
+        monkeypatch.setattr(watchlog, "MAX_BYTES", 512 * 1024)
+        for _ in range(200):
+            s.event(">> Codex's turn", "turn", seq=2)
+        assert (root / watchlog.ROTATED_REL).exists()
+        assert "Sent to Codex" not in (root / watchlog.EVENTS_REL).read_text()                    # only in `.1`
+        assert len(watchlog._records(root, watchlog.EVENTS_REL)) == 201                           # > n, all identical
+        story = watchlog.read(root, 200, include_info=False)
+        assert [(e["kind"], e.get("seq"), e.get("repeat")) for e in story] == [("sent", 1, None), ("turn", 2, 203)]
+        assert story[1]["ts"] < story[1]["last_ts"]                       # the run began in `.1` and ended in the live file
+        assert [e["kind"] for e in watchlog.read(root, 1, include_info=False)] == ["turn"]          # n is applied LAST
+        # the unfolded listing is unchanged: newest n raw lines, `.1` only when the live file is short
+        assert len(watchlog.read(root, 200)) == 200 and len(watchlog.read(root, 500)) == 204
+
     def test_a_different_seq_or_message_is_not_folded(self, root):
         s = Sink(root, "iterm2", every_s=10)
         s.event("x", "turn", seq=1); s.event("x", "turn", seq=2); s.event("y", "turn", seq=2); s.event("y", "sent", seq=2)

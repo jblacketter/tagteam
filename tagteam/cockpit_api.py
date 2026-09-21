@@ -279,6 +279,11 @@ def _type_word(t) -> str:
     return {"plan": "plan", "impl": "implementation"}.get(str(t or ""), str(t or ""))
 
 
+def _sent_age_s(facts: dict) -> float | None:
+    ev = ((facts.get("watcher") or {}).get("last_dispatch")) or {}
+    return _age_s(ev.get("ts")) if ev.get("ts") else None
+
+
 def turn_delivered(facts: dict) -> bool:
     """Was the owed turn typed into the agent's own session? Only a terminal
     watcher's `sent` says so: notify's `sent` is a notification and headless's
@@ -371,10 +376,15 @@ def headline(facts: dict, launch: dict | None = None) -> dict:
             text = (f"{head} — {agent} has its turn; further hand-offs are held" if delivered
                     else f"{head} — {agent}'s turn is held")
             return out("paused", "attention", text, paused.get("age_s"), "pause", role, agent)
+        # A delivered turn's age counts from the dispatch, not from the submission: the owed age
+        # includes the pre-check that ran in between (seen live: "sent to its terminal · 7m", seconds
+        # after a 7½-minute gate run).
+        sent_age = _sent_age_s(facts) if delivered else None
+        wait_age, wait_of = (sent_age, "sent") if sent_age is not None else (owed.get("age_s"), "owed")
         if not watcher.get("running"):
             text = (f"Waiting on {agent} — its turn was sent; the watcher has since stopped, so the next hand-off will not happen"
                     if delivered else f"Waiting on {agent} — the watcher is off, nothing will start its turn")
-            return out("watcher-off", "attention", text, owed.get("age_s"), "owed", role, agent)
+            return out("watcher-off", "attention", text, wait_age, wait_of, role, agent)
         mode = watcher.get("mode")
         if beat.get("state") == "stale":
             if delivered:
@@ -393,9 +403,8 @@ def headline(facts: dict, launch: dict | None = None) -> dict:
             text = f"Waiting on {agent} — a headless watcher is running but has not reported in"
         else:
             text = f"Waiting on {agent} — a watcher is running"
-        age = owed.get("age_s")
-        tone = "attention" if (age is not None and age > OWED_ATTENTION_S) else "waiting"
-        return out("waiting", tone, text, age, "owed", role, agent)
+        tone = "attention" if (wait_age is not None and wait_age > OWED_ATTENTION_S) else "waiting"
+        return out("waiting", tone, text, wait_age, wait_of, role, agent)
 
     what = ", ".join(x for x in (state.get("phase"), _type_word(state.get("type"))) if x)
     if status == "done":

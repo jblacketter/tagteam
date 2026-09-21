@@ -43,6 +43,24 @@ with a non-null matching `seq`; a pause after delivery reads "… has its turn;
 further hand-offs are held"; liveness `unknown` (no evidence) reads as plain
 working, never as `finishing`.
 
+**Impl review r1 — two history defects, both reproduced by the reviewer, both fixed.**
+(a) Story mode decided whether to read `.1` on the *pre-fold* count: 201
+identical live lines folded to one row and an older `sent` in `.1` was never
+read. It now reads both generations (the byte cap bounds that), filters,
+folds — including a run that straddles the rotation — and cuts to `n` last.
+(b) The drawer detected news by list **length** and kept a **pixel** offset,
+but the API returns a rolling 200-row window: at capacity the length never
+changes (no cue, ever), the same pixel becomes another event as old rows drop
+out, and a folded row can grow in place. It now compares content signatures,
+anchors the reader to the first visible *event* (+ offset into it) while that
+event is retained, and the "new events" cue is sticky until the reader reaches
+the bottom or clicks it — an unchanged refresh no longer clears it (the earlier
+test expected that; revised on purpose). 4 new regressions fail on the r1 code.
+Also fixed here, from the live sentence on this repo after the r1 submission
+("its turn was sent to its terminal · 7m", seconds after a 7½-minute pre-check):
+a *delivered* turn's age counts from the dispatch (`age_of: "sent"`), not from
+the submission.
+
 ### Criterion 7 — seen, not assumed (2026-09-21, `.playwright-mcp/p68-*.png`, git-ignored)
 | Shot | State, produced for real |
 |---|---|

@@ -230,7 +230,7 @@
   // ticking age, colours the bar, and fills the drawer. It must not work out
   // who has the ball for itself.
   var HEAD = null;                 // the headline being shown (age ticks locally between polls)
-  var DRAWER = { open: false, all: false, events: [], follow: true, timer: null };
+  var DRAWER = { open: false, all: false, events: [], sig: '', rendered: false, unread: false, follow: true, timer: null };
   var DRAWER_KEY = 'tagteam.cockpit.drawer';
   var KIND_FAMILY = { turn: 'dispatch', sent: 'dispatch', resumed: 'dispatch', advance: 'dispatch', start: 'dispatch', stop: 'dispatch',
     gate: 'check', panel: 'check', paused: 'hold', watchdog: 'hold', done: 'done',
@@ -308,27 +308,52 @@
     return row;
   }
   function atBottom(box) { return box.scrollHeight - box.scrollTop - box.clientHeight < 8; }
+  function evKey(ev) { return [ev.ts, ev.kind, ev.seq, ev.msg].join('|'); }                 // which event
+  function evSig(ev) { return evKey(ev) + '|' + (ev.repeat || 1) + '|' + (ev.last_ts || ''); } // …and its current content
+  function listSig(events) { return events.map(evSig).join('\n'); }
+  function topAnchor(box) {        // the first row the reader can see, and how far into it they are
+    var rows = box.children;
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      if (r.dataset && r.dataset.key && r.offsetTop + r.offsetHeight > box.scrollTop) return { key: r.dataset.key, delta: box.scrollTop - r.offsetTop };
+    }
+    return null;
+  }
   function renderDrawerRows(events) {
     var box = $('wd-rows');
-    var had = DRAWER.events.length;
-    var follow = had === 0 || atBottom(box);       // follow new rows only while already at the bottom
+    events = events || [];
+    var first = !DRAWER.rendered;
+    var follow = first || atBottom(box);            // follow new rows only while already at the bottom
+    // The API returns a rolling window: at capacity the LENGTH never changes, and a folded row can
+    // grow in place — so "is there something new" compares content, never counts.
+    var changed = !first && listSig(events) !== DRAWER.sig;
+    var anchor = follow ? null : topAnchor(box);
     var top = box.scrollTop;
-    DRAWER.events = events || [];
+    DRAWER.events = events; DRAWER.sig = listSig(events); DRAWER.rendered = true;
     while (box.firstChild) box.removeChild(box.firstChild);
-    var shown = 0;
-    DRAWER.events.forEach(function (ev) {
+    var shown = 0, anchorRow = null;
+    events.forEach(function (ev) {
       if (!DRAWER.all && (ev.kind || 'info') === 'info') return;
-      box.appendChild(drawerRow(ev)); shown += 1;
+      var row = drawerRow(ev); row.dataset.key = evKey(ev);
+      box.appendChild(row); shown += 1;
+      if (anchor && row.dataset.key === anchor.key) anchorRow = row;
     });
     if (!shown) {
-      box.appendChild(el('div', 'wd-empty', DRAWER.events.length
+      box.appendChild(el('div', 'wd-empty', events.length
         ? 'Only routine lines so far — tick "show everything" to see them.'
         : 'No watcher history yet — it is recorded once a watcher runs here (tagteam 3.14.5+).'));
     }
-    if (follow) { box.scrollTop = box.scrollHeight; $('wd-new').classList.add('hidden'); }
-    else { box.scrollTop = top; $('wd-new').classList.toggle('hidden', DRAWER.events.length <= had); }
+    if (follow) { box.scrollTop = box.scrollHeight; DRAWER.unread = false; }
+    else {
+      // keep the reader on the SAME EVENT (the oldest rows drop out of the window as new ones
+      // arrive, so the same pixel offset would be a different line); if it is gone, stay put
+      box.scrollTop = anchorRow ? anchorRow.offsetTop + anchor.delta : top;
+      if (changed) DRAWER.unread = true;            // stays until the reader follows or clicks
+    }
+    $('wd-new').classList.toggle('hidden', !DRAWER.unread);
     DRAWER.follow = follow;
   }
+  function drawerCaughtUp() { DRAWER.unread = false; $('wd-new').classList.add('hidden'); }
   function loadWatcherEvents() {
     if (!DRAWER.open) return Promise.resolve();   // nothing is fetched while the drawer is closed
     return getJSON('/api/watcher/events?n=200&chatter=' + (DRAWER.all ? '1' : '0')).then(function (r) {
@@ -353,8 +378,9 @@
     if (typeof fitLanes === 'function') fitLanes();
   }
   $('turn-bar').addEventListener('click', function () { setDrawer(!DRAWER.open); });
-  $('wd-all').addEventListener('change', function () { DRAWER.all = !!$('wd-all').checked; renderDrawerRows(DRAWER.events); loadWatcherEvents(); });
-  $('wd-new').addEventListener('click', function () { var box = $('wd-rows'); box.scrollTop = box.scrollHeight; $('wd-new').classList.add('hidden'); });
+  $('wd-all').addEventListener('change', function () { DRAWER.all = !!$('wd-all').checked; DRAWER.rendered = false; loadWatcherEvents(); });
+  $('wd-new').addEventListener('click', function () { var box = $('wd-rows'); box.scrollTop = box.scrollHeight; drawerCaughtUp(); });
+  $('wd-rows').addEventListener('scroll', function () { if (DRAWER.unread && atBottom($('wd-rows'))) drawerCaughtUp(); });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && DRAWER.open && !document.querySelector('.modal-overlay:not(.hidden)')) setDrawer(false); });
   // ---------- end Phase 68 ----------
 
