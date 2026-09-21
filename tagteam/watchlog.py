@@ -348,15 +348,19 @@ def beat_view(root: str | Path, watcher: dict | None = None, inflight: dict | No
 # CLI: `tagteam watch status` / `tagteam watch log` — reads, allowed under
 # TAGTEAM_READ_ONLY.
 
-def _ago(seconds: float | None) -> str:
+def _age(seconds: float | None) -> str:
     if seconds is None:
         return "?"
     s = int(seconds)
     if s < 90:
-        return f"{s}s ago"
+        return f"{s}s"
     if s < 5400:
-        return f"{s // 60}m ago"
-    return f"{s // 3600}h {s % 3600 // 60:02d}m ago"
+        return f"{s // 60}m"
+    return f"{s // 3600}h {s % 3600 // 60:02d}m"
+
+
+def _ago(seconds: float | None) -> str:
+    return "?" if seconds is None else _age(seconds) + " ago"
 
 
 def _local_hms(ts) -> str:
@@ -392,20 +396,25 @@ def format_event(rec: dict, width: int | None = None) -> str:
 
 
 def status_lines(root: str | Path) -> list[str]:
+    """`tagteam watch status`. Built from `cockpit_api.status_facts()` — reads
+    that never open the database — so it is safe on any project and says what
+    the cockpit's turn bar says (all but the cockpit-only `launching` row)."""
     from tagteam import headless
-    from tagteam.cockpit_api import watcher_status
+    from tagteam.cockpit_api import headline, status_facts
     root = Path(root)
-    inflight = headless.read_inflight(root)
-    ws = watcher_status(root, inflight)
+    facts = status_facts(root)
+    ws, inflight = facts["watcher"], facts["inflight"]
+    hl = headline(facts)
+    lines = ["now: " + hl["text"] + (f" · {_age(hl['age_s'])}" if hl.get("age_s") is not None else "")]
     if ws.get("running"):
         head = f"watcher: running (pid {ws.get('pid')}, mode {ws.get('mode') or '?'}"
         head += f", started {_local_hms(ws['started_at'])})" if ws.get("started_at") else ")"
     else:
         head = "watcher: not running" + (" (stale pidfile)" if ws.get("stale_pidfile") else "")
-    lines = [head, "last look: " + describe_beat(beat_view(root, ws, inflight), inflight)]
-    ev = last_event(root, DISPATCH_KINDS)
+    lines += [head, "last look: " + (ws.get("beat") or {}).get("text", describe_beat(beat_view(root, ws, inflight), inflight))]
+    ev = ws.get("last_dispatch")
     lines.append("last dispatch: " + (format_event(ev, width=100) if ev else "none recorded"))
-    info = headless.read_pause(root)
+    info = facts["paused"]
     lines.append("dispatch: " + ("not paused" if info is None
                                  else headless.describe_pause(info) + " — tagteam resume to release"))
     return lines
