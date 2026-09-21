@@ -31,6 +31,8 @@ There is no configured linter or formatter in `pyproject.toml`; `.ruff_cache/` e
 
 `pyproject.toml` is the version source of truth. The `Publish to PyPI` workflow (`.github/workflows/publish.yml`) triggers on `v*` tag pushes and **fails the build if the tag doesn't match `pyproject.toml`**. So a release is: bump version in `pyproject.toml` → commit → `git tag vX.Y.Z` → `git push --tags`. Do not push a tag without bumping first.
 
+Since Phase 64 `tagteam.__version__` reads the `pyproject.toml` beside the package when it declares `name = "tagteam"` (a source tree / editable install) and falls back to `importlib.metadata` otherwise (every wheel install). An editable install's dist-info is frozen at install time, so `uv tool list` / `pip list` may still show an old number after a bump — that is cosmetic now: what tagteam reports and stamps into manifests follows the tree. `tagteam --version` prints the version and the directory it was imported from.
+
 ## Architecture: how the pieces fit
 
 The CLI dispatches to subcommand modules from `tagteam/cli.py`. The interesting modules are:

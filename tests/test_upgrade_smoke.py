@@ -395,3 +395,23 @@ class TestStaleEggInfo:
         is the assertion that would have caught the original failure."""
         mod = _load_smoke_module()
         assert mod.stale_egg_info(REPO) == []
+
+
+def test_installed_wheel_version_comes_from_metadata_not_a_source_tree(wheel_venv):
+    """Phase 64: a wheel install has no pyproject.toml beside the package, so
+    `__version__` takes the fallback path — checked against the version in the
+    wheel's own filename and in pyproject.toml, not against another read of
+    `__version__`."""
+    import re
+    code = ("import json, tagteam, importlib.metadata as m; "
+            "print(json.dumps({'tree': tagteam._source_tree_version(), 'version': tagteam.__version__, "
+            "'metadata': m.version('tagteam'), 'file': tagteam.__file__}))")
+    out = json.loads(subprocess.run([wheel_venv["python"], "-I", "-c", code],
+                                    capture_output=True, text=True, check=True).stdout)
+    built = re.match(r"tagteam-([^-]+)-", Path(wheel_venv["wheel"]).name).group(1)
+    declared = re.search(r'^version[ \t]*=[ \t]*"([^"]+)"', (REPO / "pyproject.toml").read_text(), re.M).group(1)
+    assert out["tree"] is None                                   # no source tree → fallback taken
+    assert out["version"] == out["metadata"] == built == declared
+    assert str(REPO) not in out["file"]                          # imported from the venv, not the checkout
+    r = subprocess.run([wheel_venv["python"], "-I", "-m", "tagteam", "--version"], capture_output=True, text=True)
+    assert r.returncode == 0 and r.stdout.splitlines()[0] == f"tagteam {built}"

@@ -1,8 +1,8 @@
 # Phase 64: Version from the source tree
 
 ## Status
-- [ ] Planning
-- [ ] Implementation: branch `phase/version-from-the-source-tree` (stacked on `phase/roadmap-placeholders-are-not-phases` until PR #47 merges; to be rebased onto `main` then)
+- [x] Planning: approved round 1 (2026-09-20) at `61765be`
+- [x] Implementation: branch `phase/version-from-the-source-tree` (stacked on `phase/roadmap-placeholders-are-not-phases` until PR #47 merges; to be rebased onto `main` then)
 - [ ] Implementation Review
 - [ ] Complete
 
@@ -113,3 +113,27 @@ def _source_tree_version() -> str | None:
    `pyproject.toml` — reported in the impl submission with the uv tool's
    (stale or not) metadata version beside it.
 6. Gate: full suite green via `on_submit`.
+
+## Implementation notes (from the plan approval)
+- Version aliases are in the read-only routing as well as dispatch and help;
+  commands are lower-cased first, so `-V` is matched as `-v`. Tested with
+  `TAGTEAM_READ_ONLY=1` outside a project.
+- The reader is narrow on purpose: exactly one `[project]` table, exactly one
+  `name` and one `version` assignment, each a plain double-quoted string, name
+  `tagteam`. Tool-table versions, commented lines, duplicates, single quotes,
+  `dynamic`, an empty value, invalid UTF-8, a directory at the path and a NUL
+  in the path all fall back to metadata; path resolution is inside the same
+  `try`.
+- The wheel test compares `__version__` with the version in the wheel's
+  filename and in `pyproject.toml`, and asserts `_source_tree_version()` is
+  `None` there — the fallback path, not a second read of the same value.
+- The name check is a layout guard, not a proof: an unusual `--target` install
+  beside a same-named `pyproject.toml` would be believed. Accepted as scoped.
+
+## Criterion 5 — the arbiter's CLI, read-only, from `/tmp` (2026-09-20)
+`tagteam --version` → `tagteam 3.14.1` / `/Users/…/projects/tagteam/tagteam`;
+`tagteam state` → `Framework: package 3.14.1`; `pyproject.toml` → `3.14.1`.
+The uv tool's own metadata also reads 3.14.1 today (it was re-installed after
+the 3.14.1 bump), so the live case shows agreement, not the repair; the repair
+is what `test_this_checkout_reports_what_pyproject_declares_whatever_the_metadata_says`
+proves with metadata forced to `0.0.1`.
