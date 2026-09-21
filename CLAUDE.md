@@ -31,7 +31,7 @@ There is no configured linter or formatter in `pyproject.toml`; `.ruff_cache/` e
 
 `pyproject.toml` is the version source of truth. The `Publish to PyPI` workflow (`.github/workflows/publish.yml`) triggers on `v*` tag pushes and **fails the build if the tag doesn't match `pyproject.toml`**. So a release is: bump version in `pyproject.toml` → commit → `git tag vX.Y.Z` → `git push --tags`. Do not push a tag without bumping first.
 
-Since Phase 64 `tagteam.__version__` reads the `pyproject.toml` beside the package when it declares `name = "tagteam"` (a source tree / editable install) and falls back to `importlib.metadata` otherwise (every wheel install). An editable install's dist-info is frozen at install time, so `uv tool list` / `pip list` may still show an old number after a bump — that is cosmetic now: what tagteam reports and stamps into manifests follows the tree. `tagteam --version` prints the version and the directory it was imported from.
+Since Phase 64 `tagteam.__version__` reads the `pyproject.toml` beside the package when it declares `name = "tagteam"` (a source tree / editable install) and falls back to `importlib.metadata` otherwise (every wheel install). An editable install's dist-info is frozen at install time, so `uv tool list` / `pip list` may still show an old number after a bump — that is cosmetic now: what tagteam reports and stamps into manifests follows the tree. `tagteam --version` prints the version and the directory it was imported from. `tagteam/installs.py` (Phase 65, no other tagteam imports — `diagnostics` and `framework` both use it) reports a tagteam installed in a project's own `.venv`/`venv`; `doctor` warns and `tagteam state` adds a clause when its version differs from the running one.
 
 ## Architecture: how the pieces fit
 
@@ -52,6 +52,7 @@ The handoff workflow itself is defined in `tagteam/data/.claude/skills/handoff/S
 
 - `tagteam/data/` is shipped as package data (see `[tool.setuptools.package-data]`). Adding new template/skill/checklist files requires the matching glob in `pyproject.toml` or they won't reach installed users.
 - The CLI prints copious user-facing prose; treat it as part of the UX, not noise. `HANDOFF_EXPLAINER`, `GETTING_STARTED`, and the `_print_priming_box` boxed banner in `cli.py` are intentional.
+- Since Phase 65 the full suite leaves the checkout clean: the wheel-build fixture in `tests/test_upgrade_smoke.py` builds from a copy of the tree and asserts it created no `build/` / `tagteam.egg-info/`. A manifest's top-level `tagteam` value is "the version that last changed this manifest" (`_same_manifest()` ignores it, like `written_at`), so a release that changes no framework file rewrites no project's manifest; provenance is per file.
 - Tests are plain pytest, no fixtures package, no conftest tricks. New modules should get a sibling `tests/test_<module>.py`.
 - Templates use simple `{variable}` substitution via `templates.py:render_template` — not Jinja.
 

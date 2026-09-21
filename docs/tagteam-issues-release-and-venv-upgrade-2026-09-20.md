@@ -31,7 +31,7 @@ here is scheduled.
 
 ## Issues
 
-### 1. A project venv's tagteam silently shadows the uv tool
+### 1. A project venv's tagteam silently shadows the uv tool — FIXED in Phase 65 (reported by `doctor` / `state`)
 Six venvs under `~/projects` carried tagteam 0.5.0 – 3.13.0 while the CLI on
 PATH was current. Nothing reports this; it was found with
 `find … -name "tagteam-*.dist-info"`. None of the five upgraded projects
@@ -57,7 +57,7 @@ prefer the source tree's version when the import is editable.
 — the venv predates the repo rename. `.venv/bin/python -m pip` works.
 *Suggestion:* recreate the venv once.
 
-### 4. The suite leaves `build/` and `tagteam.egg-info/` in the checkout
+### 4. The suite leaves `build/` and `tagteam.egg-info/` in the checkout — FIXED in Phase 65
 Every full run (the wheel build in `tests/test_upgrade_smoke.py`), and every
 `pip install -e` / `uv tool install --editable`, drops them. They are
 git-ignored, but a stale `egg-info` is the documented cause of misleading
@@ -65,7 +65,7 @@ git-ignored, but a stale `egg-info` is the documented cause of misleading
 *Suggestion:* build the test wheel from a copy of the tree, or remove the two
 directories in the fixture's teardown.
 
-### 5. Every version bump rewrites every project's manifest
+### 5. Every version bump rewrites every project's manifest — FIXED in Phase 65
 The sweep rewrote `tagteam-manifest.json` in all 41 projects although in
 later runs only the top-level `"tagteam"` version changed (`_same_manifest()`
 ignores `written_at` but not the version). Each release therefore dirties every
@@ -131,7 +131,7 @@ change — needs a cycle.
 - `northstar-test-automation`: `duplicate phase number 7` and `8` — two phases
   share each number. Not touched (arbiter: leave that project for now).
 
-### 10. Flaky under load: `test_start_watcher_reports_refusal_as_already_running`
+### 10. Flaky under load: `test_start_watcher_reports_refusal_as_already_running` — DIAGNOSABLE since Phase 65 (cause still unknown)
 2026-09-20, Phase 64 impl round 2 gate: 1 failed / 2,111 passed —
 `tests/test_watcher_lock.py:376`, `assert _wait(lambda: not _lock_free(project))`:
 the externally spawned `tagteam watch --mode notify` had not taken the project

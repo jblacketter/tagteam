@@ -189,7 +189,9 @@ included) is created the same checked way; `--preview` on one reports what a
 fresh setup would create and creates nothing — nor does `tagteam upgrade
 --preview` touch the project registry. A second run changes nothing. `tagteam state`
 shows the package version, the manifest version and the plugin status side by
-side — a package update does not move the other two.
+side — a package update does not move the other two. The manifest's version is
+the tagteam that last *changed* the manifest: an upgrade that changes no
+framework file rewrites nothing, so it can stay behind the package.
 
 ## Choosing and changing roles
 
@@ -228,6 +230,15 @@ and rules agree with the new assignment — run `tagteam doctor` after a switch.
 no service, and prints no configured value, command argument or secret. It is
 safe for a read-only helper (`TAGTEAM_READ_ONLY=1`).
 
+- **Other tagteam installs.** A tagteam installed in the project's own
+  `.venv` or `venv` runs instead of the one on your PATH for anything launched
+  through that venv (`.venv/bin/tagteam`, `python -m tagteam`, a watcher
+  started from it). Doctor lists each copy it finds; one whose version differs
+  from the running tagteam is a `warn`, and `tagteam state` adds
+  `· .venv: tagteam X (differs from the running Y)` to its `Framework:` line.
+  An editable link is listed, not judged. Look-only: nothing is imported or
+  run, and nothing is read through a symlink. Upgrade or remove the copy —
+  tagteam never does it for you.
 - **Legacy workflow findings.** Project skills (`.claude/skills/`), commands
   (`.claude/commands/`), `AGENTS.md` and `CLAUDE.md` that use retired command
   syntax (the retired pre-plugin `handoff-*` slash commands) or name a fixed role holder ("Claude is

@@ -240,7 +240,10 @@ def _manifest_bytes(m: dict) -> bytes:
 def _same_manifest(a: dict | None, b: dict | None) -> bool:
     if a is None or b is None:
         return a is b
-    strip = lambda m: {k: v for k, v in m.items() if k != "written_at"}   # noqa: E731
+    # Phase 65: the top-level stamp is "the version that last changed this
+    # manifest", like written_at beside it — a release that changes no entry
+    # rewrites nothing. Provenance lives in the per-file entries, compared here.
+    strip = lambda m: {k: v for k, v in m.items() if k not in ("written_at", "tagteam")}   # noqa: E731
     return strip(a) == strip(b)
 
 
@@ -959,8 +962,9 @@ def _version_text(m: dict | None, state: str, plugin: PluginStatus) -> str:
 def version_line(root: Path, plugin: PluginStatus | None = None) -> str:
     """``package X · manifest Y (written D) · plugin: …`` — three things a
     package update does not synchronise."""
+    from tagteam.installs import mismatch_clause
     m, state = read_manifest(Path(root))
-    return _version_text(m, state, plugin or plugin_status(root))
+    return _version_text(m, state, plugin or plugin_status(root)) + mismatch_clause(root)
 
 
 def _accept_hint(plan: Plan, it: Item) -> str:

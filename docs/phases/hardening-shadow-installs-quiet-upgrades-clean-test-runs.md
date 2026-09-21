@@ -1,8 +1,8 @@
 # Phase 65: Hardening: shadow installs, quiet upgrades, clean test runs
 
 ## Status
-- [ ] Planning
-- [ ] Implementation: branch `phase/hardening-shadow-installs-quiet-upgrades-clean-test-runs`
+- [x] Planning: approved round 1 (2026-09-20) at `79de8a1`
+- [x] Implementation: branch `phase/hardening-shadow-installs-quiet-upgrades-clean-test-runs`
 - [ ] Implementation Review
 - [ ] Complete
 
@@ -145,3 +145,34 @@ handoff contract.
    (proved with a child that exits immediately); passing tests unchanged in
    behaviour and timing.
 7. Gate: full suite green via `on_submit`.
+
+## Implementation notes
+- **Deviation from the Technical Approach, smaller than planned:** shadow
+  installs are **not** appended to `Report.findings`. That list is the
+  "Legacy workflow findings" section and feeds `setup`'s one-line legacy
+  summary (`legacy_findings()` / `summary_line()`); a venv copy is neither. They
+  live in `Report.installs`, print under their own `Other tagteam installs`
+  heading, and `Report.counts["warn"]` adds the `differs` rows — so the
+  `findings: N warn` line and `--json` `counts` include them as planned.
+- The observer is its own module, `tagteam/installs.py`, importing nothing
+  from tagteam but `__version__` — no cycle between `diagnostics` and
+  `framework` (plan-approval note).
+- Plan-approval notes as built: every level (`lib`, `python*`,
+  `site-packages`, the dist-info, `METADATA`) is lstat-checked before it is
+  listed or read, with tests for a symlink at each; duplicate / missing /
+  body-only / blank `Version:` → `unknown`, never a mismatch; wording is
+  "different code", never "older" (a newer copy is reported the same way); the
+  manifest stamp is documented as "the version that last changed this
+  manifest"; the no-new-artifacts assertion sits in a `finally` so it runs on
+  a failed or skipped build; the child dump is bounded (TERM → 5 s → KILL →
+  5 s, `communicate(timeout=5)`) and says whether the child had already
+  exited, was terminated, or had to be killed.
+
+## Real check (criterion 3) — read-only, 2026-09-20, running 3.14.2
+| Project | `doctor` | `state` Framework clause |
+|---|---|---|
+| northstar-test-automation | `warn .venv/lib/python3.12/site-packages/tagteam-3.12.0.dist-info — tagteam 3.12.0; running 3.14.2 …` | `· .venv: tagteam 3.12.0 (differs from the running 3.14.2)` |
+| bugalizer, superdash | same line for their `tagteam-3.14.1.dist-info` | `· .venv: tagteam 3.14.1 (differs …)` |
+
+A patch-level difference is reported too. That is deliberate: the check says
+"different code", it does not rank versions.

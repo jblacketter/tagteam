@@ -53,6 +53,49 @@ def _start_watch(root: Path, *args, **env) -> subprocess.Popen:
                             start_new_session=True)
 
 
+def _child_output(proc: subprocess.Popen, limit: int = 4000) -> str:
+    """What a spawned watcher said, for a failure message. Bounded in time:
+    a child still running is terminated, then killed, and a pipe that will
+    not close is abandoned — a diagnostic must never become a hung gate."""
+    if proc.poll() is not None:
+        how = f"had already exited with code {proc.returncode}"
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except OSError:
+            pass
+        try:
+            proc.wait(5)
+            how = f"was still running; terminated for the dump (exit {proc.returncode})"
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except OSError:
+                pass
+            try:
+                proc.wait(5)
+            except subprocess.TimeoutExpired:
+                pass
+            how = "was still running and ignored SIGTERM; killed for the dump"
+    try:
+        out, _ = proc.communicate(timeout=5)
+        text = (out or b"").decode("utf-8", errors="replace")
+    except (subprocess.TimeoutExpired, ValueError, OSError) as e:
+        text = f"<output not readable: {e.__class__.__name__}>"
+    return f"child pid {proc.pid} {how}; output:\n{text[-limit:] or '<none>'}"
+
+
+def _wait_child(proc: subprocess.Popen, pred, timeout=20.0, step=0.1):
+    """`_wait`, for a condition a spawned watcher is expected to bring about.
+    Same timeout, same result on success; on failure the assertion carries the
+    child's exit status and output (issue 10: a flake that could not explain
+    itself because nothing read the pipe)."""
+    v = _wait(pred, timeout=timeout, step=step)
+    if not v:
+        raise AssertionError(f"condition not met within {timeout}s — {_child_output(proc)}")
+    return v
+
+
 def _reap(*ps):
     for p in ps:
         if p is not None and p.poll() is None:
@@ -87,7 +130,7 @@ class TestOneWatcherPerProject:
     def test_second_watcher_refused_other_project_starts(self, project, tmp_path, monkeypatch, capsys):
         first = _start_watch(project, "--mode", "notify", "--pidfile")
         try:
-            rec = _wait(lambda: W.read_pidfile(project))
+            rec = _wait_child(first, lambda: W.read_pidfile(project))
             assert rec and rec["pid"] == first.pid
             nobuild = _NoBuild()
             monkeypatch.setattr(W, "_build_processor", nobuild)
@@ -145,7 +188,7 @@ class TestOneWatcherPerProject:
     def test_kill_9_releases_the_lock(self, project):
         first = _start_watch(project, "--mode", "notify", "--pidfile")
         try:
-            assert _wait(lambda: W.read_pidfile(project))
+            assert _wait_child(first, lambda: W.read_pidfile(project))
             assert not _lock_free(project)
             os.kill(first.pid, signal.SIGKILL)
             first.wait(10)
@@ -167,7 +210,7 @@ class TestSigterm:
     def test_sigterm_removes_pidfile_and_frees_lock(self, project):
         w = _start_watch(project, "--mode", "notify", "--pidfile")
         try:
-            assert _wait(lambda: W.read_pidfile(project))
+            assert _wait_child(w, lambda: W.read_pidfile(project))
             os.kill(w.pid, signal.SIGTERM)
             assert w.wait(15) == 0
             # Poll mode logs "Watcher stopped."; the watchdog event loop (installed in CI via
@@ -243,7 +286,7 @@ class TestWatcherOwner:
     def test_external_and_already_running_watchers_untouched(self, project):
         external = _start_watch(project, "--mode", "notify", "--pidfile")
         try:
-            assert _wait(lambda: W.read_pidfile(project))
+            assert _wait_child(external, lambda: W.read_pidfile(project))
             owner = L.WatcherOwner()
             res = L.start_watcher(project, mode="notify", owner=owner)
             assert res.get("already") and owner.children() == []
@@ -373,7 +416,7 @@ class TestServeProcessExit:
 def test_start_watcher_reports_refusal_as_already_running(project):
     external = _start_watch(project, "--mode", "notify")    # no pidfile: only the scan and the lock see it
     try:
-        assert _wait(lambda: not _lock_free(project))
+        assert _wait_child(external, lambda: not _lock_free(project))
         real = capi.watcher_status
         try:
             capi.watcher_status = lambda *a, **k: {"running": False}   # the pre-spawn check misses it
@@ -413,3 +456,55 @@ def test_activity_items_on_schema_without_target_columns(tmp_path):
     items = capi._activity_from_db(raw, 10)
     raw.close()
     assert [(i["phase"], i["type"], i["round"]) for i in items] == [("p", "plan", 2)]
+
+
+# ---------------------------------------------------------------------------
+# Phase 65 — a wait on a spawned watcher explains itself when it fails
+
+def test_wait_child_reports_a_child_that_already_exited(tmp_path):
+    child = subprocess.Popen([sys.executable, "-c", "import sys; print('boom: no project here'); sys.exit(3)"],
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
+    child.wait(10)
+    with pytest.raises(AssertionError) as e:
+        _wait_child(child, lambda: False, timeout=0.3)
+    msg = str(e.value)
+    assert "condition not met within 0.3s" in msg
+    assert "had already exited with code 3" in msg and "boom: no project here" in msg
+
+
+def test_wait_child_terminates_and_reports_a_child_still_running(tmp_path):
+    code = "import sys, time; print('started, waiting', flush=True); time.sleep(120)"
+    child = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             start_new_session=True)
+    try:
+        t0 = time.monotonic()
+        with pytest.raises(AssertionError) as e:
+            _wait_child(child, lambda: False, timeout=0.5)
+        assert time.monotonic() - t0 < 15                       # bounded: never a hung gate
+        msg = str(e.value)
+        assert "was still running; terminated for the dump" in msg and "started, waiting" in msg
+        assert child.poll() is not None
+    finally:
+        _reap(child)
+
+
+def test_wait_child_kills_a_child_that_ignores_sigterm(tmp_path):
+    code = ("import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+            "print('ignoring TERM', flush=True); time.sleep(120)")
+    child = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             start_new_session=True)
+    try:
+        assert child.stdout.readline().strip() == b"ignoring TERM"     # handler installed before we signal
+        with pytest.raises(AssertionError) as e:
+            _wait_child(child, lambda: False, timeout=0.3)
+        assert "ignored SIGTERM; killed for the dump" in str(e.value) and child.poll() is not None
+    finally:
+        _reap(child)
+
+
+def test_wait_child_is_wait_on_success():
+    child = subprocess.Popen([sys.executable, "-c", "pass"], stdout=subprocess.PIPE, start_new_session=True)
+    try:
+        assert _wait_child(child, lambda: "value", timeout=1) == "value"
+    finally:
+        _reap(child)

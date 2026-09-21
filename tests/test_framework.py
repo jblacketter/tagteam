@@ -1336,3 +1336,26 @@ def test_seeds_come_from_data_seeds_not_from_the_frozen_templates(proj):
     fresh(proj)
     assert (proj / "docs" / "roadmap.md").read_text(encoding="utf-8") == seed
     assert (proj / "docs" / "decision_log.md").read_bytes() == (DATA / "seeds" / "decision_log.md").read_bytes()
+
+
+# ---------------------------------------------------------------------------
+# Phase 65 — a release that changes no framework file rewrites no manifest
+# ---------------------------------------------------------------------------
+
+def test_version_bump_alone_does_not_rewrite_the_manifest(proj, monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(fw, "package_version", lambda: "1.0.0")
+    fresh(proj)
+    raw = (proj / fw.MANIFEST_NAME).read_bytes()
+    monkeypatch.setattr(fw, "package_version", lambda: "2.0.0")
+    code, out = run(proj, capsys=capsys)
+    assert code == 0 and "Manifest: tagteam-manifest.json unchanged" in out
+    assert (proj / fw.MANIFEST_NAME).read_bytes() == raw                 # not even the stamp
+    code, out = run(proj, preview=True, capsys=capsys)
+    assert "unchanged (preview — nothing written)" in out
+    # a real change still rewrites, and then the stamp and that entry move
+    replace_source(monkeypatch, tmp_path, "docs/workflows.md", b"workflows v2\n")
+    code, out = run(proj, capsys=capsys)
+    assert code == 0 and "Manifest: tagteam-manifest.json written" in out
+    m = manifest(proj)
+    assert m["tagteam"] == "2.0.0" and m["files"]["docs/workflows.md"]["tagteam"] == "2.0.0"
+    assert m["files"][SKILL]["tagteam"] == "1.0.0"                       # untouched entry keeps its provenance

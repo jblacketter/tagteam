@@ -585,10 +585,12 @@ class Report:
     findings: list = field(default_factory=list)
     user_level: list = field(default_factory=list)
     notes: list = field(default_factory=list)
+    installs: list = field(default_factory=list)      # Phase 65: tagteam copies in the project's own venvs
 
     @property
     def counts(self) -> dict:
-        return {"warn": sum(f["severity"] == "warn" for f in self.findings),
+        return {"warn": sum(f["severity"] == "warn" for f in self.findings)
+                + sum(i["state"] == "differs" for i in self.installs),
                 "info": sum(f["severity"] == "info" for f in self.findings)}
 
     def to_json(self) -> dict:
@@ -648,7 +650,9 @@ def build_report(target: str | Path) -> Report:
     findings, notes = scan_legacy(root, roles, _managed(fw) | {SKILL_REL})
     if config_note:
         notes.insert(0, config_note)
+    from tagteam.installs import observe_installs
     return Report(
+        installs=observe_installs(root),
         root=str(root), roles=roles, roles_configured=bool(roles),
         contract={"shell": {"entry": "tagteam contract", "state": "found"}, "plugin": plugin,
                   "vendored_skill": skill},
@@ -702,6 +706,11 @@ def format_report(rep: Report) -> str:
     for i in fw["items"]:
         if i["action"] not in ("current", "none"):
             L.append(f"    {i['action']:<8} {i['path']} — {i['reason']}")
+    if rep.installs:
+        from tagteam.installs import describe
+        L += ["", "Other tagteam installs"]
+        for i in rep.installs:
+            L.append(f"  {'warn' if i['state'] == 'differs' else 'note':<5} {describe(i, fw['package'])}")
     L += ["", "Instruction sources"]
     for i in rep.instructions:
         extra = f", {i['size']} bytes" if i["state"] == "found" else (f" ({i['detail']})" if i["detail"] else "")
