@@ -42,8 +42,13 @@ the top. Each phase is engine + CLI first, cockpit surface second. tagteam stays
 - **Depends on:** Phase 68
 
 ### Phase 68: Cockpit turn bar, watcher drawer, terminal-like lanes
-- **Status:** Not started
+- **Status:** Not started — scope sharpened by the 2026-09-20 live trial (findings in `docs/phases/headless-watcher-hands-an-approved-plan-to-the-lead.md`): both lanes become one terminal-style stream per turn scoped to the current cycle, gate runs move out of the reviewer lane, and the notify-mode fallback says why headless is unavailable.
 - **Description:** The Now strip is seven chips of equal weight and the watcher chip says only running / stopped — not whose turn it is, not what it last did. Replace it with one dominant status sentence ("Codex is reviewing · round 2 · 4m", "Waiting on you", "Stalled: claude is owed a turn, last dispatch 22m ago") that is also the link to the watcher: selecting it expands a drawer with the watcher's history from Phase 67. Lanes read as the two terminals they replace: live output of the running turn, active lane highlighted, idle lane dimmed. The lead lane keeps the only composer (arbiter, 2026-09-20: the reviewer side needs activity and status, not input — may change later).
+- **Depends on:** Phase 68a
+
+### Phase 68a: Headless watcher hands an approved plan to the lead
+- **Status:** In progress — plan cycle opened 2026-09-20. See `docs/phases/headless-watcher-hands-an-approved-plan-to-the-lead.md`.
+- **Description:** Found by running a real cycle through the cockpit (2026-09-20, scratch project, headless): when a plan is approved the watcher logs `Sending completion notice to claude...` and, in headless mode, sends nothing — `_handle_done` has branches for tab, tmux and notify modes only. In iTerm2 that notice is what makes the lead implement; headless, the loop stops and the cockpit waits for a Start click. In single-phase mode a headless watcher now does what full-roadmap mode already does at that point: it makes the `start <phase> impl` turn the lead's owed turn, which the engine already knows how to run and verify. Also fixes a Phase 67 defect the same trial exposed: the heartbeat is written only before a tick, so `watch status` reads STALE for up to one poll interval after every long turn.
 - **Depends on:** Phase 67
 
 ### Phase 67: Watcher event log and heartbeat
