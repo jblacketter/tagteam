@@ -638,7 +638,10 @@ class TestSourceGuards:
     def test_lead_panel_keeps_lines_and_names_the_cycle_turn(self):
         js = (WEB / "cockpit.js").read_text(encoding="utf-8")
         lead_block = js[js.index("Phase 37: Lead panel"):js.index("Live connection: SSE with polling fallback")]
-        assert "details" in lead_block and "activity (" in lead_block          # retained lines disclosure
+        # Phase 68b (changed on purpose): a chat turn is a terminal BLOCK — its lines are kept, capped and
+        # rendered into a keyed stream node; the <details>"activity (N lines)" disclosure is gone
+        assert "details" not in lead_block and "chatLinesInto" in lead_block and "appendChatLine" in lead_block
+        assert "BLOCK_CAP" in lead_block and "leadLines(cid, t.n).length].join" not in lead_block   # the signature no longer counts lines
         assert "streaming " in lead_block and "watch it" in lead_block
         assert "innerHTML" not in lead_block.replace("innerHTML = ''", "").replace("innerHTML=''", "")
         # Phase 45: messages are keyed rows in the lead lane, never a wiped transcript
@@ -840,7 +843,7 @@ var rl = $('reviewer-timeline'), ll = $('lead-timeline');
  item('turn:lead-r2', 'lead', 'cycle', 'finished', '2026-01-01T00:10:00+00:00', 2),
  item('turn:rev-r1', 'reviewer', 'cycle', 'finished', '2026-01-01T00:05:00+00:00', 1),
  item('turn:lead-r1', 'lead', 'cycle', 'finished', '2026-01-01T00:00:00+00:00', 1)].forEach(function (it) {
-  upsertRow(ACT, it); if (inReviewerLane(it)) upsertRow(RLANE, it); if (inLeadLane(it)) upsertRow(LLANE, it);
+  upsertRow(ACT, it); if (inReviewerLane(it)) upsertRow(RLANE, it); if (inLeadLane(it)) upsertRow(LLANE, it); if (inChecks(it)) upsertRow(CHECKS, it);
 });
 var revOrder = rl.children.map(function (r) { return r.dataset.id; });
 var leadOrder = ll.children.map(function (r) { return r.dataset.id; });
@@ -851,7 +854,8 @@ applyRounds('feat_impl', [{ round: 1, entries: [{ role: 'reviewer', action: 'REQ
                           { round: 2, entries: [{ role: 'reviewer', action: 'APPROVE', content: 'Approved.' }] }]);
 var v1 = RLANE.rows['turn:rev-r1'].verdictEl.textContent;
 var v2running = RLANE.rows['turn:rev-r2'].verdictEl.textContent;   // still running: no verdict yet
-var gateV = RLANE.rows['turn:gate-r2'].verdictEl.textContent;
+var gateV = CHECKS.rows['turn:gate-r2'].verdictEl.textContent; renderChecks();
+var chips = $('checks-chips').children.map(function (c) { return c.className + ' | ' + c.textContent; });
 // the review ends → same node, verdict word, lines intact, still at the foot
 upsertRow(RLANE, item('turn:rev-r2', 'reviewer', 'cycle', 'finished', '2026-01-01T00:20:00+00:00', 2));
 var v2 = RLANE.rows['turn:rev-r2'].verdictEl.textContent;
@@ -859,14 +863,17 @@ toggleActText(RLANE.rows['turn:rev-r1']);
 var RESULT = { revOrder: revOrder, leadOrder: leadOrder, v1: v1, v2running: v2running, gateV: gateV, v2: v2,
                sameNode: RLANE.rows['turn:rev-r2'].row === runningNode, lines: RLANE.rows['turn:rev-r2'].lines,
                foot: rl.children[rl.children.length - 1].dataset.id, text: RLANE.rows['turn:rev-r1'].textEl.textContent,
+               chips: chips, stripHidden: $('lane-checks').classList.contains('hidden'), gateInRev: !!RLANE.rows['turn:gate-r2'],
                actCount: Object.keys(ACT.rows).length, revCount: Object.keys(RLANE.rows).length, leadCount: Object.keys(LLANE.rows).length };
 """)
-        assert res["revOrder"] == ["turn:rev-r1", "turn:gate-r2", "turn:rev-r2"]      # ascending; pre-check before its review
+        # Phase 68b (changed on purpose): the pre-check is not the reviewer's — it lives in the checks strip
+        assert res["revOrder"] == ["turn:rev-r1", "turn:rev-r2"] and res["gateInRev"] is False
+        assert res["chips"] == ["check-chip ok | pre-check r2 — passed · 1s"] and res["stripHidden"] is False
         assert res["leadOrder"] == ["turn:lead-r1", "turn:lead-r2"]                    # only the lead's turns, ascending
         assert res["v1"] == "changes requested" and res["v2running"] == "" and res["gateV"] == "passed"
         assert res["v2"] == "approved" and res["sameNode"] is True and res["lines"] == ["[codex] reading the diff"]
         assert res["foot"] == "turn:rev-r2" and res["text"] == "Please fix the postal code case."
-        assert (res["actCount"], res["revCount"], res["leadCount"]) == (5, 3, 2)      # role split: nothing crosses lanes
+        assert (res["actCount"], res["revCount"], res["leadCount"]) == (5, 2, 2)      # role split: nothing crosses lanes
 
     def test_lead_lane_merges_chat_and_turns_in_time_without_wiping(self):
         res = _run_activity_harness(r"""
@@ -886,7 +893,10 @@ leadLines('c-1', 2).push('[claude] reading the roadmap');
 LEAD.conv.turns[1] = { n: 2, ts: '2026-01-01T00:30:00+00:00', user_text: '/handoff start x', status: 'ok', reply: 'Cycle opened.', finished_at: '2026-01-01T00:31:00+00:00' };
 renderLeadTimeline();
 var sameRow = LEAD.msgRows['msg:c-1:2'].row === row2;
-var hasDetails = !!row2.children[1] && row2.children[1].children.some(function (c) { return c.tagName === 'details'; });
+var rec2 = LEAD.msgRows['msg:c-1:2']; var boxNode = rec2.box;
+var hasDetails = { open: !rec2.folded, stream: rec2.box.children.map(function (c) { return c.textContent; }), prompt: rec2.promptEl.textContent, close: rec2.closeEl.textContent,
+                   earlierFolded: LEAD.msgRows['msg:c-1:1'].folded && LEAD.msgRows['msg:c-1:1'].box.children.length === 0 };
+renderLeadTimeline(); hasDetails.sameStreamNode = LEAD.msgRows['msg:c-1:2'].box === boxNode && boxNode.children.length === 1;
 var order2 = ll.children.map(function (r) { return r.dataset.id; });
 // switching conversation removes the other's messages, keeps the lead's cards
 LEAD.conv = { id: 'c-2', turns: [ { n: 1, ts: '2026-01-01T00:40:00+00:00', user_text: 'hi', status: 'ok', reply: 'hello', finished_at: '2026-01-01T00:41:00+00:00' } ] };
@@ -895,13 +905,20 @@ var order3 = ll.children.map(function (r) { return r.dataset.id; });
 var RESULT = { order: order, sameRow: sameRow, hasDetails: hasDetails, order2: order2, order3: order3, kids: ll.children.length };
 """)
         assert res["order"] == ["msg:c-1:1", "turn:lead-r1", "msg:c-1:2"]     # merged in time: message · card · message
-        assert res["sameRow"] is True and res["hasDetails"] is True         # patched, not rebuilt; kept lines under a disclosure
+        # Phase 68b (changed on purpose): a chat turn is a block — newest open with its kept lines in ONE keyed
+        # stream node that a re-render does not rebuild; the earlier one is folded and holds no stream DOM
+        assert res["sameRow"] is True
+        assert res["hasDetails"] == {"open": True, "stream": ["[claude] reading the roadmap"], "prompt": "you ▸ /handoff start x",
+                                     "close": "Claude ▸ Cycle opened.", "earlierFolded": True, "sameStreamNode": True}
         assert res["order2"] == ["msg:c-1:1", "turn:lead-r1", "msg:c-1:2"]
         assert res["order3"] == ["turn:lead-r1", "msg:c-2:1"] and res["kids"] == 2
 
-    def test_lead_lane_prompt_stays_with_cards_but_no_messages(self):
-        """No conversation yet + the lead's cycle cards → the cards show AND the
-        "No messages yet …" prompt stays (it speaks to the chat, not the lane)."""
+    def test_lead_lane_prompt_yields_to_the_leads_turns(self):
+        """Phase 68b (reversed on purpose — was "…prompt_stays_with_cards…"): the
+        lane is a terminal first. With the lead's turn blocks in it, the two-line
+        "No messages yet …" prompt took the stream's room (seen live: three lines of
+        output left); it shows only while the lane is empty. The status line under
+        the lane still says a first message starts a chat."""
         res = _run_activity_harness(r"""
 NOW = { agents: { lead: 'Claude', reviewer: 'Codex' } };
 LEAD.cfg = { ok: true, agent: 'Claude' };
@@ -921,8 +938,8 @@ var promptAfterMsg = !$('lead-empty').classList.contains('hidden');
 var RESULT = { promptNoConv: promptNoConv, promptWithCard: promptWithCard, cards: cards, promptEmptyConv: promptEmptyConv, promptAfterMsg: promptAfterMsg, kids: $('lead-timeline').children.length };
 """)
         assert res["promptNoConv"] is True
-        assert res["promptWithCard"] is True and res["cards"] == 1
-        assert res["promptEmptyConv"] is True
+        assert res["promptWithCard"] is False and res["cards"] == 1
+        assert res["promptEmptyConv"] is False            # the lead's turn block is still in the lane: same rule
         assert res["promptAfterMsg"] is False and res["kids"] == 2
 
 

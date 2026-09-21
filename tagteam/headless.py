@@ -513,7 +513,8 @@ def _render_claude(ev: dict) -> str | None:
         return (f"[claude] result {ev.get('subtype')} turns={ev.get('num_turns')} "
                 f"in={usage.get('input_tokens')} out={usage.get('output_tokens')} "
                 f"cache_read={usage.get('cache_read_input_tokens')} "
-                f"cost=${ev.get('total_cost_usd')} "
+                # no dollar figure: turns run on a subscription, and the cockpit's lanes now show this
+                # line in full view (Phase 68b). Tokens, turns and time are the honest units.
                 f"duration_ms={ev.get('duration_ms')}")
     return None
 

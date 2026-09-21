@@ -78,22 +78,33 @@
   <!-- WATCH: everything else, tabbed -->
   <section class="zone watch" id="watch" aria-label="Watch">
     <!-- Phase 45: LANES — one pane per agent, in the order the loop runs.
-         Left: <lead> — lead: the chat (messages, picker, composer at the foot)
-         merged in time with the lead's cycle-turn cards. Right: <reviewer> —
-         reviewer: each round's pre-check → review → verdict, streaming in
-         place. The token between them says whose turn it is; the working
+         Phase 68b: each lane reads as the terminal tab it replaces — a turn is one
+         BLOCK (a header line + the turn's live output, monospace); the newest is open,
+         earlier ones of this cycle fold to their header; the lane is the one scroller.
+         Left: <lead> — its cycle turns and chat turns, composer at the foot. Right:
+         <reviewer> — its reviews. The token between them says whose turn it is; the working
          lane pulses. Timelines are keyed and patched, newest at the foot,
          never rebuilt. -->
+    <!-- Phase 68b: pre-checks and review panels are the machinery's, not the reviewer's — under the
+         reviewer's name a BOUNCED read as the reviewer's verdict. This cycle's runs, as chips; a chip
+         opens that run's log underneath. Hidden while the cycle has none. -->
+    <div class="lane-checks hidden" id="lane-checks" aria-label="Pre-checks">
+      <span class="lc-label">checks</span>
+      <div class="lc-chips" id="checks-chips"></div>
+      <div class="timeline lc-log hidden" id="checks-log"></div>
+    </div>
     <div class="lanes" id="lanes" aria-label="Lanes">
       <section class="lane lead" id="lane-lead" aria-label="Lead">
         <div class="lane-head">
           <div class="lane-name" id="lane-lead-name">Lead</div>
           <div class="lane-state" id="lane-lead-state">—</div>
           <span class="spacer"></span>
+          <button type="button" class="link-btn hidden" id="btn-lead-last" aria-pressed="false" title="turns from earlier cycles">Show last session</button>
           <select id="lead-select" title="conversation"></select>
           <button class="btn btn-small" id="btn-lead-new" title="start a fresh conversation (new agent session)">New</button>
         </div>
         <div class="timeline" id="lead-timeline" aria-live="polite"></div>
+        <button type="button" class="lane-new hidden" id="lead-new">new output ↓</button>
         <div class="empty small hidden" id="lead-empty">No messages yet. Brainstorm, plan, or ask the lead to start a phase.</div>
         <div class="lead-status muted small" id="lead-status">Loading…</div>
         <form class="lead-form" id="lead-form">
@@ -114,6 +125,7 @@
           <button type="button" class="link-btn hidden" id="btn-reviewer-last" aria-pressed="false" title="rows from earlier cycles">Show last session</button>
         </div>
         <div class="timeline" id="reviewer-timeline" aria-live="polite"></div>
+        <button type="button" class="lane-new hidden" id="reviewer-new">new output ↓</button>
         <div class="empty small hidden" id="reviewer-empty">No reviews yet.</div>
       </section>
     </div>

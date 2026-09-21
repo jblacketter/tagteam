@@ -338,6 +338,42 @@ table.u th { color: var(--text-dim); font-weight: 500; }
 .timeline .act-head .tag.role, .timeline .act-head .agent { display: none; }   /* the lane header says who */
 .timeline .act-head { padding: 5px 8px; gap: 6px; }
 .timeline .act-lines { margin-left: 8px; }
+/* Phase 68b: a turn is a terminal block. In a lane the block's stream has NO box of its own — no inner
+   max-height, no inner scrollbar: the lane (.timeline) is the one scroller, like a terminal. */
+.lanes .timeline .act-lines, .lane-checks .timeline .act-lines { max-height: none; overflow: visible; margin: 0; border: 0; border-top: 1px solid var(--line);
+  border-radius: 0 0 6px 6px; background: var(--bg); color: var(--text); padding: 8px 10px; line-height: 1.5; }
+.lanes .timeline .act-row, .lane-checks .timeline .act-row { flex: 0 0 auto; }
+.timeline .act-row.open > .act-head { background: var(--bg-3); border-radius: 6px 6px 0 0; }
+.timeline .act-row.s-running.open { border-color: var(--accent); }
+.bl-prompt { padding: 6px 10px 4px; font-family: var(--mono); font-size: 12.5px; color: var(--lead); white-space: pre-wrap; word-break: break-word; }
+.bl-close { padding: 8px 10px; border-top: 1px solid var(--line); font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+.bl-close.fail { color: var(--warn); }
+.bl-close.hidden { display: none; }
+.bl-note { color: var(--warn); font-family: var(--sans); font-size: 11.5px; padding-bottom: 6px; user-select: text; word-break: break-all; }
+.lane { position: relative; }
+.lane-new { position: absolute; right: 16px; bottom: 12px; z-index: 2; font-size: 11.5px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--accent);
+  background: var(--bg-3); color: var(--accent); cursor: pointer; }
+.lane.lead .lane-new { bottom: 118px; }          /* above the composer */
+/* Phase 68b: the lane is a terminal first. The composer is one line until it is used (seen live: with
+   three rows and its hint it left the lead's output three lines). */
+.lane.lead .lead-form textarea { min-height: 0; height: 2.4em; transition: height .12s ease; resize: none; }
+.lane.lead .lead-form textarea:focus, .lane.lead .lead-form textarea:not(:placeholder-shown) { height: 6.2em; }
+.lane.lead .lead-form #lead-hint { display: none; }
+.lane.lead .lead-form:focus-within #lead-hint { display: inline; }
+.lane-new.hidden { display: none; }
+.lane.trouble { border-color: var(--warn); }
+.lane.trouble .lane-state { color: var(--warn); }
+.lane-checks { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px 0; background: var(--bg-2); }
+.lane-checks.hidden { display: none; }
+.lc-label { font-size: 11.5px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: var(--muted); }
+.lc-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.check-chip { font: inherit; font-size: 12px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg-3); color: var(--text-dim); cursor: pointer; }
+.check-chip:hover, .check-chip:focus-visible, .check-chip.open { border-color: var(--accent); color: var(--text); outline: none; }
+.check-chip.ok { border-color: var(--ok); }
+.check-chip.warn { border-color: var(--warn); color: var(--warn); }
+.check-chip.running { border-color: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+.lc-log { flex: 1 1 100%; max-height: 22em; padding: 0 0 8px; }
+.lc-log.hidden { display: none; }
 .timeline .act-detail { padding-left: 8px; }
 .timeline .act-text { margin-left: 8px; }
 .timeline .act-row:last-child { border-bottom: 1px solid var(--line); }

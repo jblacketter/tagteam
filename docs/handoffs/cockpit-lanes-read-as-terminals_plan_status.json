@@ -1,7 +1,7 @@
 {
-  "state": "in-progress",
-  "ready_for": "lead",
-  "round": 1,
+  "state": "approved",
+  "ready_for": null,
+  "round": 2,
   "phase": "cockpit-lanes-read-as-terminals",
   "type": "plan",
   "lead": "claude",
@@ -12,5 +12,14 @@
     "dirty_paths": [],
     "captured_at": "2026-09-21T14:19:54.676553+00:00",
     "source": "plan-init"
+  },
+  "impl_boundary": {
+    "sha": "1988723a99f6c86087f56c0946a0227ffdb2633c",
+    "dirty": {
+      "docs/handoffs/cockpit-lanes-read-as-terminals_plan_rounds.jsonl": "f67cf83821f945643a5cf4c31b6835c616e7863d8551375ef8ee891490d7a3cf",
+      "docs/handoffs/cockpit-lanes-read-as-terminals_plan_status.json": "ce7189faa82f2ee0d5f41e9de0df12aa6630da6e5a15254d4efaf85d2de46508"
+    },
+    "captured_at": "2026-09-21T14:28:49.119466+00:00",
+    "source": "plan-approve"
   }
 }
