@@ -52,7 +52,10 @@ commands (`.venv/bin/python -m pip install -e . --no-deps`,
 `uv tool install --force --editable <repo>`), or `package_version()` could
 prefer the source tree's version when the import is editable.
 
-### 3. This repo's `.venv/bin/pip` has a dead shebang
+### 3. This repo's `.venv/bin/pip` has a dead shebang — FIXED 2026-09-20 (environment, no code)
+Repaired in place rather than recreated, because the repo's watcher was running from that venv: `python3 -m venv .venv` over the existing one (rewrites `activate*` and `pyvenv.cfg`), then `python -m pip install --force-reinstall --no-deps pip pytest pygments` to regenerate the console scripts. No `ai-handoff` reference remains under `.venv/bin`. Side effect to know about: pytest is unpinned and is now 9.1.1; the previous version was not recorded.
+
+Original note:
 `.venv/bin/pip: bad interpreter: /Users/…/projects/ai-handoff/.venv/bin/python3`
 — the venv predates the repo rename. `.venv/bin/python -m pip` works.
 *Suggestion:* recreate the venv once.
