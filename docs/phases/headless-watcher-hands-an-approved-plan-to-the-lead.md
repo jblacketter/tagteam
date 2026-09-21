@@ -1,8 +1,8 @@
 # Phase 68a: Headless watcher hands an approved plan to the lead
 
 ## Status
-- [ ] Planning
-- [ ] Implementation: branch `phase/headless-watcher-hands-an-approved-plan-to-the-lead`
+- [x] Planning: approved round 1 (2026-09-20) at `3a54c92`
+- [x] Implementation: branch `phase/headless-watcher-hands-an-approved-plan-to-the-lead`
 - [ ] Implementation Review
 - [ ] Complete
 

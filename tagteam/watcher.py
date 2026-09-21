@@ -316,6 +316,41 @@ def send_terminal_command(
                             max_retries=max_retries, retry_delay=retry_delay)
 
 
+def _advance_plan_to_impl(state: dict, project_dir: str = ".") -> dict | None:
+    """Plan approved → make `start <phase> impl` the lead's owed turn.
+
+    One transition, two callers: full-roadmap mode (`_try_roadmap_advance`)
+    and, since Phase 68a, a headless watcher in single-phase mode
+    (`_StateProcessor._handle_done`). Returns the new state, or None when a
+    staleness guard says the lead is already past this point.
+    """
+    # STALENESS GUARD: If the state has already moved to type=impl,
+    # the lead already started the impl cycle — skip this transition.
+    fresh = read_state(project_dir)
+    if fresh and fresh.get("type") == "impl":
+        _log("   SKIP: plan→impl advance already happened (type is impl)")
+        return None
+    if fresh and fresh.get("status") == "ready" and fresh.get("turn") == "reviewer":
+        _log("   SKIP: lead already submitted for review")
+        return None
+
+    phase = state.get("phase", "?")
+    seq = state.get("seq", 0)
+    updates = {
+        "turn": "lead",
+        "status": "ready",
+        "result": None,
+        "command": f"{handoff_command(project_dir)} start {phase} impl",
+    }
+    new_state = update_state(updates, project_dir, expected_seq=seq)
+    if new_state is None:
+        _log("   SKIP: state changed since approval detected (seq mismatch)")
+        return None
+    _log(f"   AUTO-ADVANCE: plan approved → lead implements"
+         f" (phase: {phase})", kind="advance")
+    return new_state
+
+
 def _try_roadmap_advance(state: dict, project_dir: str = ".") -> dict | None:
     """Attempt to auto-advance to the next phase in full-roadmap mode.
 
@@ -344,32 +379,7 @@ def _try_roadmap_advance(state: dict, project_dir: str = ".") -> dict | None:
     completed = roadmap.get("completed", [])
 
     if current_type == "plan":
-        # Plan approved → hand to lead to implement.
-        # STALENESS GUARD: If the state has already moved to type=impl,
-        # the lead already started the impl cycle — skip this transition.
-        fresh = read_state(project_dir)
-        if fresh and fresh.get("type") == "impl":
-            _log("   SKIP: plan→impl advance already happened (type is impl)")
-            return None
-        if fresh and fresh.get("status") == "ready" and fresh.get("turn") == "reviewer":
-            _log("   SKIP: lead already submitted for review")
-            return None
-
-        phase = state.get("phase", "?")
-        seq = state.get("seq", 0)
-        updates = {
-            "turn": "lead",
-            "status": "ready",
-            "result": None,
-            "command": f"{handoff_command(project_dir)} start {phase} impl",
-        }
-        new_state = update_state(updates, project_dir, expected_seq=seq)
-        if new_state is None:
-            _log("   SKIP: state changed since approval detected (seq mismatch)")
-            return None
-        _log(f"   AUTO-ADVANCE: plan approved → lead implements"
-             f" (phase: {phase})", kind="advance")
-        return new_state
+        return _advance_plan_to_impl(state, project_dir)
 
     if current_type == "impl":
         # Impl approved → advance to next phase or complete.
@@ -619,6 +629,16 @@ def _beat(state: dict | None) -> None:
     sink = _SINK
     if sink is not None:
         sink.beat(state)
+
+
+def _beat_after_tick(project_dir: str) -> None:
+    """Phase 68a: a tick can block for a whole headless turn, a gate or a
+    panel; without a beat on return, `watch status` reads STALE until the next
+    iteration. Re-read the state (the tick may have moved it) only when a
+    beat is actually due — a short tick costs nothing."""
+    sink = _SINK
+    if sink is not None and sink.due():
+        sink.beat(read_state(project_dir))
 
 
 def _state_ctx(state: dict | None) -> dict:
@@ -1087,6 +1107,22 @@ class _StateProcessor:
             self.idle_since = time.time()
             return
 
+        # Phase 68a: a tab watcher types "the plan is approved: implement it
+        # now" into the lead's terminal (below). Headless has no terminal, so
+        # the loop used to stop here until a human clicked Start. Make it the
+        # lead's owed turn instead — the transition full-roadmap mode applies
+        # at this point. Single-phase ONLY: a full-roadmap run that declined to
+        # advance (stale state, missing roadmap metadata) must not be retried
+        # through this door.
+        if (self.mode == "headless" and state.get("type") == "plan" and result == "approved"
+                and state.get("run_mode", "single-phase") == "single-phase"):
+            _log(f"** Cycle complete: {result}", kind="done", **_state_ctx(state))
+            notify_macos("Tagteam", f"Cycle complete: {result}")
+            if _advance_plan_to_impl(state, self.project_dir):
+                self.last_processed_at = None
+                self.idle_since = time.time()
+            return
+
         done_msg = STANDARD_TURN_COMMAND
         if state.get("type") == "plan" and result == "approved":
             done_msg += (
@@ -1101,7 +1137,8 @@ class _StateProcessor:
             _log(f"** Cycle complete: {result}", kind="done", **_state_ctx(state))
             notify_macos("Tagteam", f"Cycle complete: {result}")
 
-        _log(f"   Sending completion notice to {self.lead_name}...")
+        if self.mode != "headless":   # headless has no terminal to send to — say nothing it does not do
+            _log(f"   Sending completion notice to {self.lead_name}...")
         if self.mode in TAB_BACKENDS:
             self._send_tab(self.lead_session_id, done_msg)
         elif self.mode == "tmux":
@@ -1813,6 +1850,7 @@ def _run_poll_loop(processor: "_StateProcessor",
             _beat(state)
             if state is not None:
                 processor.tick(state)
+                _beat_after_tick(project_dir)
             time.sleep(interval)
     except KeyboardInterrupt:
         _log("Watcher stopped.", kind="stop")
@@ -1840,6 +1878,7 @@ def _run_event_loop(processor: "_StateProcessor", project_dir: str) -> bool:
         _beat(state)
         if state is not None:
             processor.tick(state)
+            _beat_after_tick(project_dir)
 
     try:
         watcher_events.watch_with_events(state_path, on_change)

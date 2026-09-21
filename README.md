@@ -194,6 +194,8 @@ tagteam watch --mode headless          # never auto-detected; explicit opt-in on
 tagteam tail                           # follow the in-flight turn like CI logs
 ```
 
+**A phase runs through by itself.** When the reviewer approves a plan, the headless watcher makes `start <phase> impl` the lead's next turn — the same hand-off a terminal watcher types into the lead's tab — so the lead implements and submits without a click. It stops when the implementation is approved (single-phase mode) and notifies you. To read an approved plan before it is implemented, `tagteam pause` first; `tagteam resume` releases the held turn. A watcher started *after* the approval does not pick it up — use the cockpit's Start card or run the command yourself.
+
 **When something goes wrong** (a turn times out, exits nonzero, exits without writing its round, or the CLI cannot start), the watcher pauses dispatch, writes `.tagteam/headless-paused.json` with the reason and log path, and notifies you. It never retries silently. Per-role options (`provider`, `executable`, `args`, `timeout_minutes`) live under `agents.<role>.headless` in `tagteam.yaml`; opt-in retries re-run a turn only when it provably did nothing. Details, defaults and the validation rules: [headless mode](docs/how-tagteam-works.md#headless).
 
 **Arbiter controls (any watcher mode):**

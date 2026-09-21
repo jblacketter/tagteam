@@ -323,6 +323,55 @@ class TestHeartbeatLoops:
         assert b["ident"] == procs.identity(os.getpid()) and b["mode"] == "iterm2"
         assert _events(root)[-1]["kind"] == "stop"
 
+    @pytest.mark.parametrize("loop", ["poll", "event"])
+    def test_a_long_tick_leaves_a_beat_from_after_it_with_the_state_it_produced(self, sink, root, monkeypatch, loop):
+        """Phase 68a: the beat was written only BEFORE tick(), so after a 33 s
+        headless turn `watch status` read STALE until the next iteration."""
+        from tagteam import watcher_events
+        clock = {"t": 1000.0}
+        monkeypatch.setattr(watchlog.time, "monotonic", lambda: clock["t"])
+        states = iter([_state(5, status="ready", turn="reviewer"), _state(6, status="done", turn=None)])
+        monkeypatch.setattr(watcher, "read_state", lambda _d: next(states))
+        p = _processor("notify", project_dir=str(root))
+        seen = {}
+
+        def long_tick(state):
+            seen["before"] = watchlog.read_beat(root)
+            clock["t"] += 33.0                          # the turn ran, and moved the state
+
+        monkeypatch.setattr(p, "tick", long_tick)
+        if loop == "poll":
+            def stop(_s):
+                raise KeyboardInterrupt
+            monkeypatch.setattr(watcher.time, "sleep", stop)
+            watcher._run_poll_loop(p, str(root), 10)
+        else:
+            monkeypatch.setattr(watcher_events, "watch_with_events", lambda _p, on_change: on_change())
+            watcher._run_event_loop(p, str(root))
+        after = watchlog.read_beat(root)
+        assert (seen["before"]["seq"], seen["before"]["turn"]) == (5, "reviewer")
+        assert (after["seq"], after["status"], after["turn"]) == (6, "done", None)
+        assert after["ts"] > seen["before"]["ts"]
+
+    def test_a_short_tick_writes_no_second_beat_and_rereads_nothing(self, sink, root, monkeypatch):
+        reads = []
+
+        def read_state(_d):
+            reads.append(1)
+            return _state(5, status="working")
+        monkeypatch.setattr(watcher, "read_state", read_state)
+        p = _processor("notify", project_dir=str(root))
+        monkeypatch.setattr(p, "tick", lambda _s: None)
+
+        def stop(_s):
+            raise KeyboardInterrupt
+        monkeypatch.setattr(watcher.time, "sleep", stop)
+        writes = []
+        real = sink._write_beat
+        monkeypatch.setattr(sink, "_write_beat", lambda data: writes.append(1) or real(data))
+        watcher._run_poll_loop(p, str(root), 10)
+        assert len(writes) == 1 and len(reads) == 1
+
     def test_event_loop_beats_on_change(self, sink, root, monkeypatch):
         from tagteam import watcher_events
         monkeypatch.setattr(watcher, "read_state", lambda _d: _state(9))

@@ -456,3 +456,185 @@ def test_start_delivery_is_text_and_preserves_state_command(tmp_path, command):
     assert not send.call_args.args[1].startswith("/")
     assert command in send.call_args.args[1]
     assert state["command"] == command
+
+
+# --- Phase 68a: a headless watcher hands an approved plan to the lead ---
+#
+# A tab watcher types "the plan is approved: implement it now" into the lead's
+# terminal. Headless had no branch for that, so a single-phase run stopped
+# until a human clicked Start in the cockpit.
+
+import json
+
+from tagteam import state as state_mod
+from tagteam import watcher as watcher_mod
+
+
+class _Engine:
+    """Stands in for HeadlessEngine: records the turns it is asked to run."""
+    slot_busy = None
+
+    def __init__(self):
+        self.ran = []
+
+    def run_owed_turn(self, state):
+        self.ran.append(dict(state))
+
+
+def _on_disk(tmp_path, monkeypatch, **fields):
+    """A real handoff-state.json in cwd, as `update_state` needs one."""
+    monkeypatch.setattr(state_mod, "_cached_project_root", None, raising=False)
+    base = {"phase": "p1", "type": "plan", "round": 1, "status": "ready", "turn": "reviewer",
+            "command": "/handoff", "run_mode": "single-phase"}
+    base.update(fields)
+    state_mod.write_state(base, str(tmp_path))
+    return state_mod.read_state(str(tmp_path))
+
+
+def _approve_plan(tmp_path, **fields):
+    new = state_mod.update_state({"status": "done", "turn": None, "result": "approved", **fields}, str(tmp_path))
+    assert new is not None
+    return new
+
+
+def _headless(tmp_path, **kw):
+    eng = _Engine()
+    p = _make_processor("headless", project_dir=str(tmp_path), **kw)
+    p.engine = eng
+    return p, eng
+
+
+def _logged(capsys):
+    return capsys.readouterr().out
+
+
+def test_headless_plan_approval_becomes_the_leads_owed_turn(tmp_path, monkeypatch, capsys):
+    seen = _on_disk(tmp_path, monkeypatch)
+    p, eng = _headless(tmp_path)
+    with patch("tagteam.watcher.notify_macos") as notify:
+        p.tick(seen)                                   # a state this watcher has witnessed (the reviewer's turn)
+        assert [t["turn"] for t in eng.ran] == ["reviewer"]
+        p.tick(_approve_plan(tmp_path))
+        after = state_mod.read_state(str(tmp_path))
+        assert (after["turn"], after["status"], after["result"], after["type"]) == ("lead", "ready", None, "plan")
+        assert after["command"].endswith(" start p1 impl") and after["run_mode"] == "single-phase"
+        assert len(eng.ran) == 1                       # the transition only; the next tick runs it
+        p.tick(after)
+    assert [(t["turn"], t["command"]) for t in eng.ran][-1] == ("lead", after["command"])
+    out = _logged(capsys)
+    assert out.count("AUTO-ADVANCE: plan approved → lead implements (phase: p1)") == 1
+    assert "Sending completion notice" not in out and "** Cycle complete: approved" in out
+    assert any("complete" in c[0][1].lower() for c in notify.call_args_list)
+
+
+def test_headless_first_tick_on_an_already_approved_plan_does_nothing(tmp_path, monkeypatch, capsys):
+    """A restarted watcher did not witness the approval: same rule as a tab
+    watcher, which sends no notice for it. The cockpit's Start card remains."""
+    _on_disk(tmp_path, monkeypatch)
+    done = _approve_plan(tmp_path)
+    p, eng = _headless(tmp_path)
+    with patch("tagteam.watcher.notify_macos"):
+        p.tick(done)
+        p.tick(done)
+    assert eng.ran == [] and state_mod.read_state(str(tmp_path))["status"] == "done"
+    assert "AUTO-ADVANCE" not in _logged(capsys)
+
+
+@pytest.mark.parametrize("fields, why", [
+    ({"type": "impl"}, "impl approval ends a single-phase run"),
+    ({"result": "rejected"}, "not approved"),
+    ({"run_mode": "full-roadmap"}, "full-roadmap declined to advance (no roadmap metadata): not retried here"),
+    ({"run_mode": "full-roadmap", "roadmap": {"queue": ["p1"], "current_index": 0, "completed": []},
+      "_stale": True}, "full-roadmap declined on a staleness guard: not retried here"),
+])
+def test_headless_does_not_advance(tmp_path, monkeypatch, capsys, fields, why):
+    fields = dict(fields)
+    stale = fields.pop("_stale", False)
+    seen = _on_disk(tmp_path, monkeypatch, **{k: v for k, v in fields.items() if k in ("run_mode", "roadmap", "type")})
+    p, eng = _headless(tmp_path)
+    with patch("tagteam.watcher.notify_macos"):
+        p.tick(seen)
+        done = _approve_plan(tmp_path, **{k: v for k, v in fields.items() if k == "result"})
+        if stale:       # the lead is already past this point by the time the watcher looks
+            with patch("tagteam.watcher.read_state", return_value={**done, "status": "ready", "turn": "reviewer"}):
+                p.tick(done)
+        else:
+            p.tick(done)
+    after = state_mod.read_state(str(tmp_path))
+    assert after["status"] == "done" and after["seq"] == done["seq"], why
+    assert len(eng.ran) == 1, why
+    assert "Sending completion notice" not in _logged(capsys)      # headless never claims a send
+
+
+@pytest.mark.parametrize("fresh, line", [
+    ({"type": "impl"}, "SKIP: plan→impl advance already happened"),
+    ({"status": "ready", "turn": "reviewer"}, "SKIP: lead already submitted for review"),
+])
+def test_headless_advance_staleness_guards(tmp_path, monkeypatch, capsys, fresh, line):
+    seen = _on_disk(tmp_path, monkeypatch)
+    p, eng = _headless(tmp_path)
+    with patch("tagteam.watcher.notify_macos"):
+        p.tick(seen)
+        done = _approve_plan(tmp_path)
+        with patch("tagteam.watcher.read_state", return_value={**done, **fresh}):
+            p.tick(done)
+    assert state_mod.read_state(str(tmp_path))["seq"] == done["seq"] and line in _logged(capsys)
+
+
+def test_headless_advance_loses_a_seq_race_quietly(tmp_path, monkeypatch, capsys):
+    seen = _on_disk(tmp_path, monkeypatch)
+    p, eng = _headless(tmp_path)
+    with patch("tagteam.watcher.notify_macos"):
+        p.tick(seen)
+        done = _approve_plan(tmp_path)
+        state_mod.update_state({"round": 2}, str(tmp_path))          # somebody else wrote first
+        p.tick(done)
+    after = state_mod.read_state(str(tmp_path))
+    assert after["status"] == "done" and "SKIP: state changed since approval detected" in _logged(capsys)
+
+
+def test_headless_advanced_turn_is_held_by_a_pause_and_dispatched_once_on_resume(tmp_path, monkeypatch):
+    seen = _on_disk(tmp_path, monkeypatch)
+    p, eng = _headless(tmp_path)
+    with patch("tagteam.watcher.notify_macos"):
+        p.tick(seen)
+        p.tick(_approve_plan(tmp_path))
+        owed = state_mod.read_state(str(tmp_path))
+        with patch.object(p, "_pause_info", return_value={"reason": "reading the plan first", "by": "arbiter"}):
+            p.tick(owed); p.tick(owed)
+        assert len(eng.ran) == 1                       # still only the reviewer's turn
+        p.tick(owed); p.tick(owed)
+    assert [t["turn"] for t in eng.ran] == ["reviewer", "lead"]
+
+
+@pytest.mark.parametrize("mode", ["iterm2", "tmux", "notify"])
+def test_terminal_watchers_keep_their_completion_notice(tmp_path, monkeypatch, capsys, mode):
+    """Unchanged: they type (or notify) the 'implement it now' message and leave the state alone."""
+    seen = _on_disk(tmp_path, monkeypatch)
+    p = _make_processor(mode, project_dir=str(tmp_path))
+    with patch("tagteam.watcher.notify_macos"), patch("tagteam.watcher.send_iterm_command", return_value=True) as tab, \
+         patch("tagteam.watcher.send_tmux_keys", return_value=True) as tmux, \
+         patch.object(p, "_maybe_gate", return_value=True), patch.object(p, "_maybe_panel", return_value=True):
+        p.tick(seen)
+        done = _approve_plan(tmp_path)
+        p.tick(done)
+    assert state_mod.read_state(str(tmp_path))["seq"] == done["seq"]
+    out = _logged(capsys)
+    assert "Sending completion notice to Claude..." in out and "AUTO-ADVANCE" not in out
+    sent = {"iterm2": tab, "tmux": tmux}.get(mode)
+    if sent is not None:
+        assert "The plan for p1 is approved: implement it now" in sent.call_args_list[-1][0][1]
+
+
+def test_full_roadmap_plan_advance_still_goes_through_the_shared_transition(tmp_path, monkeypatch, capsys):
+    seen = _on_disk(tmp_path, monkeypatch, run_mode="full-roadmap",
+                    roadmap={"queue": ["p1", "p2"], "current_index": 0, "completed": []})
+    p, eng = _headless(tmp_path)
+    with patch("tagteam.watcher.notify_macos"):
+        p.tick(seen)
+        p.tick(_approve_plan(tmp_path))
+    after = state_mod.read_state(str(tmp_path))
+    assert (after["turn"], after["status"], after["run_mode"]) == ("lead", "ready", "full-roadmap")
+    assert after["command"].endswith(" start p1 impl")
+    out = _logged(capsys)
+    assert out.count("AUTO-ADVANCE: plan approved → lead implements") == 1 and "** Cycle complete" not in out
