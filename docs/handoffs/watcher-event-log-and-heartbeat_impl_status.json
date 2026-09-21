@@ -1,7 +1,7 @@
 {
-  "state": "in-progress",
-  "ready_for": "lead",
-  "round": 3,
+  "state": "approved",
+  "ready_for": null,
+  "round": 4,
   "phase": "watcher-event-log-and-heartbeat",
   "type": "impl",
   "lead": "claude",
