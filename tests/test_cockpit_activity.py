@@ -1030,9 +1030,15 @@ fmtAge = function (s) { return s + 's'; };
 function texts(node) { return node.children.map(function (c) { return c.textContent; }); }
 function rows() { return $('wd-rows').children.map(function (r) { return r.className + ' | ' + (r.children.length ? texts(r).join(' | ') : r.textContent); }); }
 var DONE = null;   // a test that needs to wait sets DONE to a promise
-// layout, like a browser's: every row is 100px tall, stacked in order
-Object.defineProperty(Node.prototype, 'offsetTop', { get: function () { return this.parentNode ? this.parentNode.children.indexOf(this) * 100 : 0; } });
-Object.defineProperty(Node.prototype, 'offsetHeight', { get: function () { return 100; } });
+// A toy layout: every row is 100px tall, stacked in order, in a scroll box that sits 57px down the
+// page with a 1px border — so a row's page position is NOT its position in the box. (The real
+// layout — offsetParent, wrapped rows — is exercised in Chromium: TestDrawerScrollInARealBrowser.)
+Node.prototype.getBoundingClientRect = function () {
+  var p = this.parentNode;
+  if (p && p.id === 'wd-rows') { var i = p.children.indexOf(this); return { top: 57 + 1 + i * 100 - p.scrollTop, height: 100 }; }
+  return { top: 57, height: this.clientHeight || 0 };
+};
+Object.defineProperty(Node.prototype, 'offsetTop', { get: function () { throw new Error('offsetTop is relative to the offsetParent, not the scroll box — use rowTopIn()'); } });
 """
 
 
@@ -1133,7 +1139,7 @@ class TestTurnBarAndDrawer:
         assert "show everything" in r["onlyInfo"][0]
 
     _SCROLL_SETUP = r"""
-          var box = $('wd-rows'); box.clientHeight = 300;
+          var box = $('wd-rows'); box.clientHeight = 300; box.clientTop = 1;
           Object.defineProperty(box, 'scrollHeight', { get: function () { return box.children.length * 100; } });
           function ev(i, extra) { var e = { ts: 't' + i, kind: 'sent', seq: i, msg: 'e' + i }; for (var k in (extra || {})) e[k] = extra[k]; return e; }
           function range(a, b) { var o = []; for (var i = a; i < b; i++) o.push(ev(i)); return o; }
@@ -1217,3 +1223,119 @@ class TestTurnBarAndDrawer:
         assert on["note"] == "Agents are running in their terminals (iterm2). The lanes show only turns the cockpit runs itself."
         assert on["body"].startswith("From then on each waiting turn runs by itself")
         assert r["headless"] == {"note": "", "noteHidden": True, "btn": "Stop the watcher", "btnHidden": False}
+
+
+# ---------------------------------------------------------------------------
+# Phase 68 (impl r2) — the drawer's scroll anchor in a REAL layout engine.
+# The node stub cannot know that a row's offsetParent is `.wd-history`, not the
+# scroll box; headless Chromium with the shipped CSS and markup can.
+# ---------------------------------------------------------------------------
+
+def _find_chromium() -> str | None:
+    import glob
+    import shutil
+    env = os.environ.get("TAGTEAM_TEST_CHROME")
+    if env:
+        return env if Path(env).exists() else None
+    home = Path.home()
+    cands = sorted(glob.glob(str(home / "Library/Caches/ms-playwright/chromium_headless_shell-*/*/chrome-headless-shell")),
+                   reverse=True)
+    cands += sorted(glob.glob(str(home / ".cache/ms-playwright/chromium_headless_shell-*/*/chrome-headless-shell")),
+                    reverse=True)
+    cands += ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+              "/Applications/Chromium.app/Contents/MacOS/Chromium"]
+    for c in cands:
+        if Path(c).exists():
+            return c
+    for name in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome-headless-shell"):
+        found = shutil.which(name)
+        if found:
+            return found
+    return None
+
+
+_BROWSER_SHIMS = r"""
+function $(id) { return document.getElementById(id); }
+function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function fmtAge(s) { return s + 's'; }
+function fmtTime(ts) { return String(ts || ''); }
+function getJSON() { return Promise.resolve({ ok: false }); }
+function lastTurnText(lt) { return 'last: x'; }
+function fitLanes() {}
+function act() {}
+var START = null, NOW = {};
+"""
+
+
+def _run_in_chromium(scenario_js: str) -> dict:
+    import re
+    import subprocess
+    import tempfile
+    chrome = _find_chromium()
+    if not chrome:
+        pytest.skip("no Chromium/Chrome found (set TAGTEAM_TEST_CHROME) — the real-layout drawer test needs one")
+    html = (WEB / "cockpit.html").read_text(encoding="utf-8")
+    css = (WEB / "cockpit.css").read_text(encoding="utf-8")
+    js = (WEB / "cockpit.js").read_text(encoding="utf-8")
+    header = html[html.index('<header class="now" id="now">'):html.index("</header>") + len("</header>")]
+    header = header.replace('class="watcher-drawer hidden"', 'class="watcher-drawer"')       # the shipped markup, drawer open
+    block = js[js.index("// ---------- Phase 68: Turn bar + watcher drawer"):js.index("// ---------- end Phase 68")]
+    page = ("<!DOCTYPE html><html><head><meta charset='utf-8'><style>" + css + "</style></head><body>" + header
+            + "<pre id='RESULT'></pre><script>" + _BROWSER_SHIMS + block + "\n" + scenario_js
+            + "\ndocument.getElementById('RESULT').textContent = JSON.stringify(RESULT);</script></body></html>")
+    with tempfile.TemporaryDirectory() as d:
+        f = Path(d) / "drawer.html"
+        f.write_text(page, encoding="utf-8")
+        r = subprocess.run([chrome, "--headless", "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
+                            "--window-size=1200,900", f"--user-data-dir={d}/profile", "--dump-dom", f.as_uri()],
+                           capture_output=True, text=True, timeout=90)
+    assert r.returncode == 0, r.stderr[-2000:]
+    m = re.search(r"<pre id=\"RESULT\">(.*?)</pre>", r.stdout, re.S)
+    assert m and m.group(1).strip(), "the page produced no RESULT — a script error? " + r.stderr[-1500:]
+    import html as _html
+    return json.loads(_html.unescape(m.group(1)))
+
+
+class TestDrawerScrollInARealBrowser:
+    def test_the_reader_stays_on_the_same_event_when_the_oldest_row_drops_out(self):
+        r = _run_in_chromium(r"""
+          var box = $('wd-rows');
+          // variable heights: every third message wraps over several lines in the real column width
+          function ev(i) { var long = (i % 3 === 1) ? ' ' + new Array(40).join('a very long watcher message that wraps ') : '';
+                           return { ts: 't' + i, kind: 'sent', seq: i, msg: 'event ' + i + long }; }
+          function range(a, b) { var o = []; for (var i = a; i < b; i++) o.push(ev(i)); return o; }
+          // measured independently of the code under test
+          function firstVisible() {
+            var edge = box.getBoundingClientRect().top + box.clientTop;
+            for (var i = 0; i < box.children.length; i++) {
+              var rc = box.children[i].getBoundingClientRect();
+              if (rc.bottom > edge + 0.5) return { seq: +box.children[i].dataset.key.split('|')[2], into: Math.round(edge - rc.top) };
+            }
+          }
+          renderDrawerRows(range(0, 200));
+          var row0 = box.children[0], row1 = box.children[1];
+          var h0 = row0.getBoundingClientRect().height, h1 = row1.getBoundingClientRect().height;
+          box.scrollTop = Math.round(h0 + 30);                    // 30px into event 1 (a wrapped, tall row)
+          var before = firstVisible();
+          var trap = { offsetParentIsTheBox: row0.offsetParent === box, offsetParentClass: row0.offsetParent && row0.offsetParent.className,
+                       offsetTopOfRow0: row0.offsetTop };
+          var anchor = topAnchor(box);
+          renderDrawerRows(range(1, 201));                        // event 0 drops out, event 200 arrives
+          var after = firstVisible();
+          renderDrawerRows(range(1, 201));                        // an unchanged refresh must not move the reader either
+          var RESULT = { h0: Math.round(h0), h1: Math.round(h1), before: before, after: after, again: firstVisible(),
+                         anchor: { seq: +anchor.key.split('|')[2], delta: Math.round(anchor.delta) }, padTop: parseFloat(getComputedStyle(box).paddingTop),
+                         trap: trap, rows: box.children.length, scrollTop: Math.round(box.scrollTop),
+                         cue: !$('wd-new').classList.contains('hidden') };
+        """)
+        # the trap is real under the shipped CSS: rows are positioned against `.wd-history`, not the scroll box
+        assert r["trap"]["offsetParentIsTheBox"] is False and "wd-history" in r["trap"]["offsetParentClass"]
+        assert r["trap"]["offsetTopOfRow0"] > 0
+        assert r["h1"] > r["h0"] * 2                                     # the rows really do wrap to different heights
+        into = 30 - round(r["padTop"])                                    # the box's own padding sits above row 0
+        assert r["before"] == {"seq": 1, "into": into} and into > 0
+        assert r["anchor"] == {"seq": 1, "delta": into}                   # the code under test sees what the reader sees
+        assert r["after"] == {"seq": 1, "into": into}                     # same event, same offset into it
+        assert r["again"] == r["after"] and r["rows"] == 200
+        assert r["scrollTop"] == 30                                       # event 0's height is gone from above the reader
+        assert r["cue"] is True
