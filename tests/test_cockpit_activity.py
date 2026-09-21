@@ -1030,6 +1030,9 @@ fmtAge = function (s) { return s + 's'; };
 function texts(node) { return node.children.map(function (c) { return c.textContent; }); }
 function rows() { return $('wd-rows').children.map(function (r) { return r.className + ' | ' + (r.children.length ? texts(r).join(' | ') : r.textContent); }); }
 var DONE = null;   // a test that needs to wait sets DONE to a promise
+// layout, like a browser's: every row is 100px tall, stacked in order
+Object.defineProperty(Node.prototype, 'offsetTop', { get: function () { return this.parentNode ? this.parentNode.children.indexOf(this) * 100 : 0; } });
+Object.defineProperty(Node.prototype, 'offsetHeight', { get: function () { return 100; } });
 """
 
 
@@ -1129,24 +1132,61 @@ class TestTurnBarAndDrawer:
         assert "No watcher history yet" in r["none"][0] and "3.14.5" in r["none"][0]
         assert "show everything" in r["onlyInfo"][0]
 
-    def test_drawer_follows_new_rows_only_while_at_the_bottom(self):
-        r = _run_p68(r"""
-          var box = $('wd-rows'); box.clientHeight = 100;
-          // like a browser: the box grows as rows are appended (100px a row)
+    _SCROLL_SETUP = r"""
+          var box = $('wd-rows'); box.clientHeight = 300;
           Object.defineProperty(box, 'scrollHeight', { get: function () { return box.children.length * 100; } });
-          function ev(i) { return { ts: '', kind: 'sent', msg: 'e' + i }; }
-          renderDrawerRows([ev(1), ev(2)]);
-          renderDrawerRows([ev(1), ev(2), ev(3)]);                                    // was at the bottom → follows
-          var followed = { top: box.scrollTop, cue: $('wd-new').classList.contains('hidden') };
-          box.scrollTop = 40;                                                         // the arbiter scrolls back
-          renderDrawerRows([ev(1), ev(2), ev(3), ev(4)]);
-          var held = { top: box.scrollTop, cueHidden: $('wd-new').classList.contains('hidden') };
-          renderDrawerRows([ev(1), ev(2), ev(3), ev(4)]);                             // nothing new → no cue
-          var RESULT = { followed: followed, held: held, quiet: $('wd-new').classList.contains('hidden') };
+          function ev(i, extra) { var e = { ts: 't' + i, kind: 'sent', seq: i, msg: 'e' + i }; for (var k in (extra || {})) e[k] = extra[k]; return e; }
+          function range(a, b) { var o = []; for (var i = a; i < b; i++) o.push(ev(i)); return o; }
+          function cue() { return !$('wd-new').classList.contains('hidden'); }
+          function topRow() { var a = topAnchor(box); return a ? a.key.split('|')[3] + '+' + a.delta : null; }
+    """
+
+    def test_drawer_follows_new_rows_only_while_at_the_bottom(self):
+        r = _run_p68(self._SCROLL_SETUP + r"""
+          renderDrawerRows(range(0, 5));
+          renderDrawerRows(range(0, 6));                                   // was at the bottom → follows
+          var followed = { top: box.scrollTop, cue: cue() };
+          box.scrollTop = 140;                                             // the arbiter scrolls back: row e1, 40px in
+          renderDrawerRows(range(0, 7));
+          var RESULT = { followed: followed, held: { top: box.scrollTop, row: topRow(), cue: cue() } };
         """)
-        assert r["followed"] == {"top": 300, "cue": True}
-        assert r["held"] == {"top": 40, "cueHidden": False}
-        assert r["quiet"] is True
+        assert r["followed"] == {"top": 600, "cue": False}
+        assert r["held"] == {"top": 140, "row": "e1+40", "cue": True}
+
+    def test_a_full_window_still_shows_news_and_keeps_the_reader_on_the_same_event(self):
+        """impl r1: the API returns a rolling 200-row window. At capacity the
+        length never changes, and the same pixel offset becomes another event."""
+        r = _run_p68(self._SCROLL_SETUP + r"""
+          renderDrawerRows(range(0, 200));
+          box.scrollTop = 5040;                                            // reading e50, 40px in
+          renderDrawerRows(range(1, 201));                                 // e0 dropped out, e200 arrived: same length
+          var rolled = { len: box.children.length, top: box.scrollTop, row: topRow(), cue: cue() };
+          renderDrawerRows(range(60, 260));                                // the reader's event is gone from the window
+          var gone = { top: box.scrollTop, cue: cue() };
+          var RESULT = { rolled: rolled, gone: gone };
+        """)
+        assert r["rolled"] == {"len": 200, "top": 4940, "row": "e50+40", "cue": True}   # one row up, same event
+        assert r["gone"] == {"top": 4940, "cue": True}                                  # stays put rather than jumping
+
+    def test_the_unread_cue_is_sticky_until_the_reader_catches_up(self):
+        r = _run_p68(self._SCROLL_SETUP + r"""
+          renderDrawerRows(range(0, 10)); box.scrollTop = 100;
+          var quiet = (renderDrawerRows(range(0, 10)), cue());             // an identical refresh is not news
+          renderDrawerRows(range(0, 11));
+          var news = cue();
+          renderDrawerRows(range(0, 11)); renderDrawerRows(range(0, 11));  // …and further unchanged refreshes keep the cue
+          var kept = cue();
+          // a folded row growing in place is news too, with no change in length
+          drawerCaughtUp();
+          var folded = range(0, 11); folded[10] = ev(10, { repeat: 2, last_ts: 't10b' });
+          renderDrawerRows(folded);
+          var grew = { cue: cue(), len: box.children.length, row: topRow() };
+          box.scrollTop = box.scrollHeight;                                // the reader scrolls to the bottom
+          renderDrawerRows(folded);
+          var RESULT = { quiet: quiet, news: news, kept: kept, grew: grew, caughtUp: cue(), unread: DRAWER.unread };
+        """)
+        assert r == {"quiet": False, "news": True, "kept": True, "grew": {"cue": True, "len": 11, "row": "e1+0"},
+                     "caughtUp": False, "unread": False}
 
     def test_facts_and_the_reason_the_page_cannot_run_turns(self):
         r = _run_p68(r"""

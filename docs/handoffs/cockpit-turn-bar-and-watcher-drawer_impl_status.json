@@ -1,0 +1,25 @@
+{
+  "state": "in-progress",
+  "ready_for": "lead",
+  "round": 1,
+  "phase": "cockpit-turn-bar-and-watcher-drawer",
+  "type": "impl",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-21",
+  "baseline": {
+    "sha": "20d14acc94a832fdbe7f3ab8994c1d0a1c524878",
+    "dirty_paths": [],
+    "captured_at": "2026-09-21T07:19:09.765780+00:00",
+    "source": "copied-from-plan"
+  },
+  "impl_boundary": {
+    "sha": "a7dae2b75da24f52cd6e3d7206baff716047fb25",
+    "dirty": {
+      "docs/handoffs/cockpit-turn-bar-and-watcher-drawer_plan_rounds.jsonl": "36f5bdb2e657c89278d779fa00433b72bbf5de303493edf124f57d387fc89b8e",
+      "docs/handoffs/cockpit-turn-bar-and-watcher-drawer_plan_status.json": "09fae0ba8cde0a79e35e418f6b748ff2c77381c4a48274daadfcfb483c16b4da"
+    },
+    "captured_at": "2026-09-21T07:23:21.867822+00:00",
+    "source": "copied-from-plan"
+  }
+}
