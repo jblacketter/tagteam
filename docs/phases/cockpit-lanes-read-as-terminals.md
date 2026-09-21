@@ -107,6 +107,22 @@ nothing. **Criterion 4 is therefore PARTIAL:** a panel lens chip opens its log;
 a pre-check chip cannot — showing the gate's report there needs a server change
 and is deferred, not done.
 
+**Impl review r2 — the no-turn-log fix guarded one path.** The line was added in
+`openBlock`'s slow path only; on the next activity refresh an already-open running
+gate took the fast path (`attachActStream`), and the flat all-activity list its
+own, and both requested `/api/activity/log/<gate stem>/events` again. The guard
+now sits at the two boundaries that ask the server about a turn log —
+`attachActStream` and `fillActLinesFromRecord` — so no caller can get past it
+(`noGateLog`: exactly one line, once). Regression: a running gate in CHECKS (chip
+open) and in ACT through repeated refreshes and its finish → no EventSource, no
+tail fetch, one line in each; fails on the r2 code with exactly that request.
+**Verified in the page** (scratch project 6, gate = `sleep 75`): chip opened
+while the pre-check ran and left open through its finish — the browser's network
+record shows 70 requests, all 200, eleven `/api/activity` refreshes and **zero**
+`/api/activity/log/…` or `/api/tail` requests; `p68b-10-…png` shows the one
+line. (A first attempt to count requests from the scratch server's output was my
+mistake — that server logs none; the browser's record is the evidence.)
+
 **Chat retention differs from the plan's wording:** a folded chat block drops
 its stream DOM but its lines stay in memory (capped at 2,000 per turn) rather
 than being re-read, because a conversation's stream can only be replayed whole;
@@ -130,8 +146,7 @@ reopening renders the kept lines once.
 **Not seen:** the "new output ↓" cue used by hand; a chip for a bounced run; a
 panel lens chip opening a real log; `turn-lost`; the watcher-stale (delivered)
 card; a block past 2,000 lines; the arbiter re-opening a folded block in the
-page. The pre-check "no turn log" line was written after the last browser
-session and is verified by test only.
+page. 
 
 ## Summary
 The arbiter, 2026-09-20: the cockpit "should emulate the terminals to a certain
