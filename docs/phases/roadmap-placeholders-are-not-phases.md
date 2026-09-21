@@ -4,7 +4,7 @@
 - [x] Planning: approved round 3 (2026-09-20) at `61f4a23`
 - [x] Implementation: branch `phase/roadmap-placeholders-are-not-phases`
 - [x] Implementation Review: approved round 1 (2026-09-20) at `c35e793`; gate 2,074 passed, 5 skipped
-- [ ] Complete: PR open, merge pending
+- [x] Complete: PR #47 merged 2026-09-20 (rebase; impl is `745cf0e` on main).
 
 ## Closeout
 ```
