@@ -130,3 +130,18 @@ change — needs a cycle.
   dependency but not the line; a line number would have saved a grep.
 - `northstar-test-automation`: `duplicate phase number 7` and `8` — two phases
   share each number. Not touched (arbiter: leave that project for now).
+
+### 10. Flaky under load: `test_start_watcher_reports_refusal_as_already_running`
+2026-09-20, Phase 64 impl round 2 gate: 1 failed / 2,111 passed —
+`tests/test_watcher_lock.py:376`, `assert _wait(lambda: not _lock_free(project))`:
+the externally spawned `tagteam watch --mode notify` had not taken the project
+lock after the 20 s wait. The round's diff touched only `tagteam/__init__.py`
+and `tests/test_version.py`. Not reproduced: the test passed 6/6 alone (0.5 s
+each) and the whole file passed 16/16 immediately afterwards; the same test had
+passed in the four earlier full-suite gate runs that day. Load average at the
+time was ~5.5 (the reviewer agent and the repo's own watcher were running).
+Classified as timing, **cause not established** — the spawned watcher's output
+is not captured, so there is nothing to read after the fact.
+*Suggestion:* have `_start_watch` keep the child's stdout/stderr and print it
+when the wait fails, so the next occurrence says whether the child was slow,
+refused, or crashed.
