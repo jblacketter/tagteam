@@ -58,6 +58,11 @@ def test_no_pyproject_beside_the_package_means_installed_metadata(tmp_path, meta
     GOOD.replace('version = "7.8.9"', '# version = "7.8.9"'),                     # commented out
     GOOD.replace('version = "7.8.9"', 'version = "7.8.9"\nversion = "7.9.0"'),    # ambiguous
     GOOD.replace('name = "tagteam"', 'name = "tagteam"\nname = "other"'),
+    GOOD.replace('version = "7.8.9"', 'version = "7.8.9"\n version = "9.9.9"'),     # indented duplicate (review r1)
+    GOOD.replace('version = "7.8.9"', 'version = "7.8.9"\n\tversion = "9.9.9"'),
+    GOOD.replace('name = "tagteam"', 'name = "tagteam"\n  name = "other"'),
+    GOOD.replace('version = "7.8.9"', 'version = "7.8.9"\n"version" = "9.9.9"'),    # quoted spelling of the same key
+    GOOD.replace('version = "7.8.9"', '  version = "7.8.9"'),                        # indented only: not the release shape
     GOOD.replace('version = "7.8.9"', "version = '7.8.9'"),                       # not the shape release.py writes
     GOOD.replace('version = "7.8.9"', 'version = ""'),
     GOOD.replace('version = "7.8.9"', 'dynamic = ["version"]'),
@@ -66,12 +71,23 @@ def test_no_pyproject_beside_the_package_means_installed_metadata(tmp_path, meta
     '[tool.x]\nname = "tagteam"\nversion = "9.9.9"\n',                            # only a tool table
     "",
     b"\xff\xfe[project]\nname = \"tagteam\"\nversion = \"7.8.9\"\n",              # invalid UTF-8
-], ids=["foreign-name", "no-version", "commented", "dup-version", "dup-name", "single-quoted",
+], ids=["foreign-name", "no-version", "commented", "dup-version", "dup-name",
+        "indented-dup-version", "tab-indented-dup-version", "indented-dup-name", "quoted-key-dup-version",
+        "indented-only", "single-quoted",
         "empty", "dynamic", "no-table", "two-tables", "tool-table-only", "blank", "bad-utf8"])
 def test_any_doubt_falls_back_to_metadata_without_raising(tmp_path, metadata, pyproject):
     pkg = _tree(tmp_path, pyproject)
     assert tagteam._source_tree_version(pkg) is None
     assert tagteam._resolve_version(pkg) == "0.0.1"
+
+
+@pytest.mark.parametrize("header", ["[project] # package metadata", "[project]\t#x", "[project]   ", "[project] # a [bracket] in it"])
+def test_commented_project_header_still_wins_over_stale_metadata(tmp_path, metadata, header):
+    """Review r1: under DOTALL the header comment swallowed the whole table,
+    which silently restored the stale-metadata behaviour."""
+    text = f'{header}\nname = "tagteam"\nversion = "7.8.9"\n\n[tool.x]\nversion = "0.0.0"\nname = "nope"\n'
+    pkg = _tree(tmp_path, text)
+    assert tagteam._source_tree_version(pkg) == "7.8.9" and tagteam._resolve_version(pkg) == "7.8.9"
 
 
 def test_tool_table_version_is_never_picked_up(tmp_path, metadata):

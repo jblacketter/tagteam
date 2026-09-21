@@ -18,12 +18,18 @@ from pathlib import Path as _Path
 # installed metadata, exactly as before. No wheel install has a
 # pyproject.toml beside the package; the name check guards the odd layout
 # where some other project's file sits there.
-_PROJECT_TABLE_RE = _re.compile(r"^\[project\][ \t]*(?:#.*)?$(.*?)(?=^[ \t]*\[|\Z)", _re.M | _re.S)
+# The header's comment is bounded to its own line (`[^\n]*`): under DOTALL a
+# bare `.*` would run to the end of the file and leave an empty table.
+_PROJECT_TABLE_RE = _re.compile(r"^\[project\][ \t]*(?:#[^\n]*)?$(.*?)(?=^[ \t]*\[|\Z)", _re.M | _re.S)
 
 
 def _one_string(table: str, key: str) -> "str | None":
-    found = _re.findall(rf'^{key}[ \t]*=[ \t]*"([^"\\\n]*)"[ \t]*(?:#.*)?$', table, _re.M)
-    any_assignment = _re.findall(rf"^{key}[ \t]*=", table, _re.M)
+    # The value is read only from the shape release.py writes: the bare key at
+    # column zero. Ambiguity is counted more widely — an indented or quoted
+    # spelling of the same key is still a second assignment, and any second
+    # assignment means "not sure".
+    found = _re.findall(rf'^{key}[ \t]*=[ \t]*"([^"\\\n]*)"[ \t]*(?:#[^\n]*)?$', table, _re.M)
+    any_assignment = _re.findall(rf"""^[ \t]*["']?{key}["']?[ \t]*=""", table, _re.M)
     return found[0] if len(found) == 1 and len(any_assignment) == 1 and found[0] else None
 
 
