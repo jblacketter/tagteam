@@ -41,7 +41,7 @@ by hand at some point and forgotten.
 could report a `tagteam` found in `<project>/.venv` whose version differs from
 the running one. Read-only, one line.
 
-### 2. Editable installs keep the version they were installed at
+### 2. Editable installs keep the version they were installed at — FIXED in Phase 64
 Seen three times today: the uv tool ran 3.14.0 code while reporting 3.13.0 —
 the 3.14.0 preview sweep printed `package 3.13.0`, and a real sweep would have
 stamped 41 manifests with the wrong version; this repo's `.venv` reported
@@ -84,8 +84,8 @@ from today's upgrade, and already had uncommitted `templates/*` edits from an
 earlier sweep before today.
 
 ### 7. Small things
-- `tagteam --version` → `Unknown command: --version`; the version is only
-  visible via `tagteam state` or `uv tool list`.
+- ~~`tagteam --version` → `Unknown command: --version`; the version is only
+  visible via `tagteam state` or `uv tool list`.~~ Fixed in Phase 64.
 - `scripts/upgrade_smoke.py --expect-version X` always fails against the
   editable checkout ("not under the interpreter prefix") — by design, it is for
   a wheel venv, but the release recipe does not say so.

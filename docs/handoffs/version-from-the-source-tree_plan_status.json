@@ -1,0 +1,25 @@
+{
+  "state": "approved",
+  "ready_for": null,
+  "round": 1,
+  "phase": "version-from-the-source-tree",
+  "type": "plan",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-20",
+  "baseline": {
+    "sha": "61765be4700f3d92adf7ff84f318ca05abb48f70",
+    "dirty_paths": [],
+    "captured_at": "2026-09-20T23:56:23.226523+00:00",
+    "source": "plan-init"
+  },
+  "impl_boundary": {
+    "sha": "61765be4700f3d92adf7ff84f318ca05abb48f70",
+    "dirty": {
+      "docs/handoffs/version-from-the-source-tree_plan_rounds.jsonl": "a35398e07c52bfc7ce6692a55b5c3d5e59eda21d45673d706627805f0895e102",
+      "docs/handoffs/version-from-the-source-tree_plan_status.json": "6c98f4fded05c1e85b026858d33e88e693233830a4676828a24eed82eda110f6"
+    },
+    "captured_at": "2026-09-20T23:57:33.136851+00:00",
+    "source": "plan-approve"
+  }
+}

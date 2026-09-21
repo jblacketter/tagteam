@@ -421,6 +421,7 @@ Commands:
   tui           Launch the Handoff Saloon terminal UI
   migrate       Migrate legacy projects to use tagteam.yaml
   upgrade       Migrate every registered project to the installed package (--preview)
+  --version     Version, and the directory this tagteam was imported from (-V, version)
   doctor [dir]  Read-only report: legacy workflow findings, per-role executables, contract
                 entry points, instruction sources, tool config names (--json)
 
@@ -457,6 +458,8 @@ Reviewer panel (opt-in: `panel: {enabled: true}`; 2–3 lens reviews merged into
 # default until it is classified here; `tests/test_readonly.py` pins that
 # every dispatched command is classified.
 _HELP = {"-h", "--help", "help"}
+# Phase 64. Commands are lower-cased before they are looked at, so `-V` is `-v`.
+_VERSION = {"--version", "-v", "version"}
 
 
 def _no_flag(*flags: str):
@@ -492,8 +495,8 @@ READ_ONLY_REFUSED = ("quickstart", "init", "setup", "migrate", "watch", "pause",
 
 def read_only_refusal(argv: list[str]) -> str | None:
     """Detail line when `argv` (command + rest) is not a read invocation."""
-    if not argv or argv[0].lower() in _HELP:
-        return None          # top-level `tagteam --help` prints and exits
+    if not argv or argv[0].lower() in _HELP | _VERSION:
+        return None          # top-level `tagteam --help` / `--version` print and exit
     command, rest = argv[0].lower(), argv[1:]
     # No command-level help exception: not every subcommand consumes `--help`
     # (e.g. `setup --help` would take it as the target directory). Help for a
@@ -670,6 +673,11 @@ def _dispatch() -> int:
         return doctor_command(sys.argv[2:])
     if command in ["-h", "--help", "help"]:
         print(HELP_TEXT)
+        return 0
+    if command in _VERSION:
+        import tagteam
+        print(f"tagteam {tagteam.__version__}")
+        print(f"  {Path(tagteam.__file__).resolve().parent}")     # which copy is this
         return 0
 
     print(f"Unknown command: {command}")
