@@ -61,6 +61,20 @@ Also fixed here, from the live sentence on this repo after the r1 submission
 a *delivered* turn's age counts from the dispatch (`age_of: "sent"`), not from
 the submission.
 
+**Impl review r2 — the scroll anchor measured from the wrong origin.** `topAnchor` compared
+`row.offsetTop` with `box.scrollTop`; under the shipped CSS a row's offsetParent is `.wd-history`
+(`position: relative`), not the scroll box, so the offset included the heading and the box's border and
+padding — the reader was anchored to the wrong event. The node stub assumed rows start at the scroll box
+and could not see it; I had disclosed that the scrolling was verified under that stub only, and that is
+where it was wrong. Positions are now taken in the scroll container's own coordinates from bounding
+rectangles (`rowTopIn`). The stub's `offsetTop` now throws, and a **real-layout regression** runs the
+unchanged Phase 68 slice in headless Chromium with the shipped CSS and the shipped header markup
+(`TestDrawerScrollInARealBrowser`; no new dependency — `--dump-dom` on a Chromium found in the Playwright
+cache, a Chrome install or `TAGTEAM_TEST_CHROME`, skipped when there is none): wrapped rows of different
+heights, the heading above the box, 30 px into event 1, event 0 drops out → still event 1, same offset,
+`scrollTop` 30, cue shown. It asserts the trap itself (`offsetParent` is `.wd-history`) and fails on the r2
+code (`anchor {seq: 0, delta: 15}`).
+
 ### Criterion 7 — seen, not assumed (2026-09-21, `.playwright-mcp/p68-*.png`, git-ignored)
 | Shot | State, produced for real |
 |---|---|

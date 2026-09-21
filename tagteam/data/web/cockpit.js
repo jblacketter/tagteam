@@ -311,11 +311,21 @@
   function evKey(ev) { return [ev.ts, ev.kind, ev.seq, ev.msg].join('|'); }                 // which event
   function evSig(ev) { return evKey(ev) + '|' + (ev.repeat || 1) + '|' + (ev.last_ts || ''); } // …and its current content
   function listSig(events) { return events.map(evSig).join('\n'); }
+  // A row's top measured in the SCROLL CONTAINER's own coordinates (the same origin as scrollTop).
+  // Not `row.offsetTop`: that is relative to the offsetParent, which under the shipped CSS is
+  // `.wd-history` (position: relative), not the scroll box — so it includes the heading above the
+  // box and the box's border and padding (impl r2, reproduced in headless Chromium: the reader was
+  // anchored to the wrong event). Bounding rectangles are origin-independent.
+  function rowTopIn(box, row) {
+    return row.getBoundingClientRect().top - box.getBoundingClientRect().top - (box.clientTop || 0) + box.scrollTop;
+  }
   function topAnchor(box) {        // the first row the reader can see, and how far into it they are
     var rows = box.children;
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i];
-      if (r.dataset && r.dataset.key && r.offsetTop + r.offsetHeight > box.scrollTop) return { key: r.dataset.key, delta: box.scrollTop - r.offsetTop };
+      if (!(r.dataset && r.dataset.key)) continue;
+      var top = rowTopIn(box, r);
+      if (top + r.getBoundingClientRect().height > box.scrollTop + 0.5) return { key: r.dataset.key, delta: box.scrollTop - top };
     }
     return null;
   }
@@ -347,7 +357,7 @@
     else {
       // keep the reader on the SAME EVENT (the oldest rows drop out of the window as new ones
       // arrive, so the same pixel offset would be a different line); if it is gone, stay put
-      box.scrollTop = anchorRow ? anchorRow.offsetTop + anchor.delta : top;
+      box.scrollTop = anchorRow ? rowTopIn(box, anchorRow) + anchor.delta : top;
       if (changed) DRAWER.unread = true;            // stays until the reader follows or clicks
     }
     $('wd-new').classList.toggle('hidden', !DRAWER.unread);
