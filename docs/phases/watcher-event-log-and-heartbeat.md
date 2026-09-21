@@ -38,20 +38,71 @@ readable — by the CLI now, by the cockpit in Phase 68. **No UI in this phase.*
      `{"ts": <UTC ISO-8601>, "pid": int, "mode": str, "kind": str, "msg": str}`
      plus, when the caller knows them, `phase`, `type`, `round`, `turn`, `seq`.
      `msg` is capped at 500 characters.
-   - `append(root, record)` — one `os.write` of one line on an `O_APPEND`
-     descriptor (whole-line atomicity for records this small); best-effort:
-     any `OSError` is swallowed. **The log must never be able to stop or slow
-     a dispatch.**
-   - Bounded: when the file exceeds 512 KB, `append` rotates it to
-     `watcher-events.jsonl.1` (replacing any previous `.1`) before writing.
-     At most ~1 MB per project, no configuration.
+   - **Guarded writes** (plan review r1, point 1). Every write path uses the
+     discipline `safe_read` uses for reads, in one private helper
+     `_open_regular(root, rel, flags)`: the parent chain (`.tagteam`) is
+     checked with `safe_read._dir_chain` — a symlinked or non-directory parent
+     refuses; the leaf is opened `O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC` and
+     `fstat`-verified `S_ISREG` before a byte is written (a FIFO, device,
+     socket or symlink at the path → refuse, close, no write, no block).
+     `.tagteam/` is never created for this purpose.
+   - `append(root, record)` — `_open_regular(..., O_WRONLY|O_APPEND|O_CREAT)`
+     then one `os.write` of one line. Best-effort: refusal or any `OSError`
+     returns `False` and is otherwise silent.
+   - Bounded: when the live file exceeds 512 KB, `append` rotates first —
+     `os.replace(live, live + ".1")`. `os.replace` renames the directory entry
+     and never follows a symlink at either name, so a link planted at `.1` is
+     replaced, not written through; the size check uses the `fstat` of the
+     verified descriptor, not a path `stat`. At most ~1 MB per project.
+   - Heartbeat temp file: `watcher-beat.json.<pid>.tmp` opened
+     `O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW` (a pre-existing name — file, link or
+     FIFO — is unlinked once and retried; failure → no beat), then
+     `os.replace` onto `watcher-beat.json`.
+   - **The guarantee, stated honestly:** logging is synchronous, bounded and
+     best-effort — no open can block, no write goes through a link, every
+     failure is swallowed, and each record is one small write to a regular
+     file. It is *not* a promise that filesystem I/O can never delay a
+     dispatch (a stalled disk delays the watcher's own state reads first).
+     Asynchronous logging is not planned.
+   - **Serialized within the process** (point 2). In event mode
+     `watch_with_events` calls `on_change` from the watchdog observer thread
+     *and* from the main startup / heartbeat loop, so two threads can log and
+     beat at once. A `Sink` object owns one `threading.Lock` held around
+     (size check + rotation + append) and around (throttle check + temp write +
+     replace). `O_APPEND` alone does not serialize rotation. The lock covers
+     only this new logging state — the processor's control flow is untouched.
    - `read(root, n=50)` → the newest `n` records, oldest first, reading `.1`
      only when the live file has fewer than `n`. Malformed lines are skipped,
      not fatal. Reads go through `safe_read.read_bounded` (Phase 65) so a
      symlinked or FIFO-swapped path cannot hang a reader.
    - Heartbeat: `.tagteam/watcher-beat.json`
-     `{"pid", "mode", "ts", "every_s", "seq", "status", "turn"}`, written atomically
-     (temp file + `os.replace`), throttled to once per 5 s. `read_beat(root)`.
+     `{"pid", "ident", "mode", "started_at", "ts", "every_s", "seq", "status",
+     "turn"}` — `ident` is `procs.identity(pid)`, the same creation identity
+     the pidfile records — throttled to once per 5 s. `read_beat(root)` returns
+     the record or `None` for a missing, malformed, non-object or non-regular
+     file.
+   - `beat_view(root, watcher, inflight, now)` → the one reader contract the
+     CLI and the API share (point 3):
+     `{"state", "age_s", "every_s", "stale_after_s"}` with `state` one of
+     - `none` — no readable beat;
+     - `previous` — the beat's `pid` is not alive, or its `ident` differs from
+       the live process's identity, or (when a watcher is known running) its
+       `pid` differs from `watcher["pid"]`. An identity that cannot be read
+       (`procs.identity` → `None`) does not by itself make a beat `previous`
+       — the same rule `watcher_status()` applies to the pidfile. A beat that survived an unclean
+       exit is therefore never shown as a new watcher's last look; `age_s` is
+       still given so the UI can say "previous watcher, 3h ago";
+     - `fresh` — belongs to the running watcher and `age_s ≤ stale_after_s`,
+       where `stale_after_s = 3 × every_s` from the beat itself (so
+       `--interval 60` is judged against 180 s, event mode against 90 s;
+       a missing / non-positive `every_s` falls back to 30);
+     - `in-turn` — older than that, but the loop is legitimately blocked:
+       the in-flight record is a **cycle** turn (`kind` absent or `cycle`),
+       its `watcher_pid` (and `watcher_ident` when recorded) match the beat's
+       watcher, and its runner `pid` is alive. A conversational or briefer
+       in-flight, a leftover record whose runner is dead, or one owned by a
+       different watcher does **not** exempt;
+     - `stale` — older than `stale_after_s` with no such exemption.
 2. **`tagteam/watcher.py`**
    - `_log(msg, kind="info", **ctx)` keeps printing exactly what it prints
      today and additionally hands the record to a module-level sink. The sink
@@ -77,12 +128,23 @@ readable — by the CLI now, by the cockpit in Phase 68. **No UI in this phase.*
      A headless turn blocks the loop inside `engine.run_owed_turn()`, so the
      beat goes quiet for the length of the turn — by design; readers treat a
      stale beat as a problem **only when no turn is in flight**.
-   - `remove_pidfile()`'s caller also removes the beat file on clean exit. The
-     event log is never deleted by the watcher: history outlives the process.
+   - Beat cleanup is tied to the sink, not the pidfile: the `finally` in
+     `_watch_locked()` that removes the sink also removes the beat — but only
+     a beat whose `pid` is this process — whether or not `keep_pidfile` is
+     true. The event log is never deleted by the watcher: history outlives
+     the process.
+   - The comments that state the 3.0-arc rule (the pidfile block's "Otherwise
+     `tagteam watch` writes nothing new", `WatcherLock`'s "a bare
+     `tagteam watch` must write no new file there") are updated to name the
+     exception the reviewer approved: since Phase 67 every watcher writes the
+     event log and beat into an **existing** `.tagteam/`; the pidfile stays
+     opt-in and the lock stays outside the project.
 3. **CLI** — `tagteam watch status` and `tagteam watch log [-n N] [--json]`.
    - `status` prints: running / not (pid, mode, started — from the existing
-     `cockpit_api.watcher_status`), `last look: 4s ago` (or `never` /
-     `stale: 6m ago, no turn in flight`), the newest `turn` / `sent` /
+     `cockpit_api.watcher_status`), a `last look:` line rendered from
+     `beat_view` (`4s ago` · `never` · `previous watcher, 3h ago` ·
+     `2m ago — blocked in claude's turn` · `STALE: 6m ago, expected every 10s,
+     no turn in flight`), the newest `turn` / `sent` /
      `send-failed` / `paused` event as `last dispatch: …`, and the existing
      `dispatch:` paused line. Exit 0 always; it is a report, not a check.
    - `log` prints the newest N events (default 30) as
@@ -94,16 +156,17 @@ readable — by the CLI now, by the cockpit in Phase 68. **No UI in this phase.*
      untouched.
 4. **API** (read-only, cockpit mode; no token, like every other GET)
    - `GET /api/watcher/events?n=50` → `{"events": [...]}` (n clamped 1–500).
-   - `now_payload()["watcher"]` gains `beat_age_s` (float or null) and
-     `last_event` (the newest non-`info` record or null). Existing keys
-     unchanged.
+   - `now_payload()["watcher"]` gains `beat` (the `beat_view` dict above — the
+     derived `state` plus `age_s` / `every_s` / `stale_after_s`, so no
+     consumer re-derives staleness) and `last_event` (the newest non-`info`
+     record or null). Existing keys unchanged.
 5. **Docs** — `CLAUDE.md` (watcher paragraph), `README.md` and `HELP_TEXT`
    (the two subcommands), `tagteam/data/workflows.md` + `docs/workflows.md`
    only if they list watcher commands (checked during implementation).
 
 **Out**
 - Any cockpit HTML / JS / CSS — Phase 68.
-- A "stalled" verdict. This phase exposes the facts (`beat_age_s`, in-flight,
+- A "stalled" verdict. This phase exposes the facts (`beat.state`, in-flight,
   last dispatch); Phase 68 decides the sentence shown to the arbiter.
 - Surfacing busy-terminal detection beyond the lines `_log` already emits.
 - The per-user OS lock (`~/.tagteam/watchers/<hash>.lock`) in the API.
@@ -111,29 +174,19 @@ readable — by the CLI now, by the cockpit in Phase 68. **No UI in this phase.*
   `/api/watcher/status` and `/api/watcher/logs`.
 - Reading or migrating the existing `.tagteam/watcher-*.log` text files.
 
-## Decision for the reviewer and arbiter: who writes the log
-`watcher.json` is opt-in (`pidfile_enabled()`: `--pidfile`, or
-`serve.theme: cockpit`) because of a 3.0-arc rule: with the flag off,
-`tagteam watch` writes nothing new into the project. The event log and beat
-meet the same rule head-on. Options:
-
-- **A (recommended): every watcher writes them, no flag.** The CLI is half
-  the point — `tagteam watch log` after an iTerm2 tab has closed — and iTerm2
-  watchers are started without `--pidfile`. `.tagteam/` has been tagteam's
-  runtime directory in every project since Phase 28 (the DB, `turns/`,
-  `gates/`), so this adds two bounded files to a directory tagteam already
-  owns; nothing appears at the project's top level. tagteam does not write a
-  project's `.gitignore`: where `.tagteam/` is ignored the files are invisible,
-  where it is not they sit under the `?? .tagteam/` entry the DB already causes. The 3.0 rule was
-  a parity guarantee for that arc's rollout, six minor releases ago.
-  If `.tagteam/` does not exist the watcher does not create it for this
-  purpose (append is best-effort and simply fails).
-- **B: same gate as the pidfile.** Zero behaviour change for a bare
-  `tagteam watch`, but the arbiter's normal iTerm2 workflow would record
-  nothing and `tagteam watch log` would be empty exactly where it is wanted.
-
-The plan below assumes A. Under B only the sink-installation condition
-changes.
+## Decided in plan review (round 1): every watcher writes the log
+`watcher.json` is opt-in (`pidfile_enabled()`) under a 3.0-arc rule — with the
+flag off, `tagteam watch` writes nothing new into the project. The reviewer
+approved the exception as a scoped product choice, no arbiter ruling needed:
+**every watcher records the event log and beat when `.tagteam/` already
+exists**; the pidfile opt-in is unchanged. Reasons: the CLI is half the point
+(`tagteam watch log` after an iTerm2 tab has closed) and iTerm2 watchers run
+without `--pidfile`; `.tagteam/` has been tagteam's runtime directory since
+Phase 28 (the DB, `turns/`, `gates/`). tagteam does not write a project's
+`.gitignore`: where `.tagteam/` is ignored the files are invisible, where it is
+not they sit under the `?? .tagteam/` entry the DB already causes. The
+rejected alternative gated both files like the pidfile, which would have
+recorded nothing in the arbiter's normal workflow.
 
 ## Technical approach
 - **Why tap `_log` instead of adding event calls:** the narration already
@@ -149,12 +202,15 @@ changes.
   stale-pidfile logic trust; rewriting it every few seconds would put a race
   under that logic. **Why not the event log:** a beat every poll would evict
   the real history from a bounded file.
-- **Concurrency:** one watcher per project is already guaranteed by the
-  Phase 58 lock, so there is one writer; readers tolerate a torn last line.
+- **Concurrency:** the Phase 58 lock guarantees one watcher *process* per
+  project, not one thread — hence the `Sink` lock above. Readers tolerate a
+  torn last line.
 - In this repo `.tagteam/*` is git-ignored; the implementation confirms both
   files are outside scope-diff and the gate's fingerprint (a test, not an
   assumption) so a running watcher cannot change a submission's scope.
-- Windows: `O_APPEND` and `os.replace` are portable; no new platform branch.
+- Windows: `O_NOFOLLOW` / `O_NONBLOCK` are taken with `getattr(os, …, 0)` as
+  `safe_read` does; FIFOs do not exist there and the `fstat` regular-file
+  check still applies. The FIFO tests skip on `win32`, as Phase 65's do.
 
 ## Files
 - New: `tagteam/watchlog.py`, `tests/test_watchlog.py`
@@ -170,20 +226,37 @@ changes.
    sequence is asserted exactly, each carrying `phase` / `round` / `turn`.
 2. With no sink installed, `_log` output is identical to today's
    (existing watcher tests pass unchanged).
-3. `append` swallows an unwritable directory and a full disk (`OSError`
-   injected) — the processor's dispatch still happens; asserted.
+3. Writer safety, deterministic (no timing): with a FIFO at the event-log
+   path, at the beat path and at the beat temp name, and with a symlink at
+   each of those and at `.tagteam` itself, a scripted dispatch still happens,
+   the call returns without blocking (the test would hang otherwise — run
+   under a hard alarm), and the link's target is byte-identical afterwards.
+   Injected `OSError` on open / write / replace is swallowed the same way.
 4. Rotation: writing past 512 KB leaves a live file and one `.1`, never more;
    `read(n)` spans both and returns oldest-first; a malformed line is skipped.
 5. `read` on a symlink or FIFO at the log path returns no events and does not
    block (deterministic swap tests, as in Phase 65).
 6. The poll loop and the event loop both refresh the beat; the beat is
    throttled (two iterations inside 5 s → one write); clean exit removes it
-   and leaves the event log.
+   — with `keep_pidfile` false as well as true — leaves the event log, and
+   does not remove a beat owned by another pid.
+6a. Concurrent callers: N threads logging through one `Sink` across a
+   rotation boundary produce only whole, parseable lines, exactly one `.1`,
+   and no lost record beyond the rotated-out file; two threads beating inside
+   the throttle window produce one write.
+6b. `beat_view` table test: no beat · malformed / non-object beat · beat from
+   a dead pid · beat whose pid is alive but whose `ident` differs · beat from
+   a pid other than the running watcher · fresh at `--interval 60` (150 s old
+   → `fresh`) and stale at the default (40 s old, `every_s` 10 → `stale`) ·
+   stale + live matching cycle in-flight → `in-turn` · stale + in-flight with
+   a dead runner, with `kind: conversation`, or with another watcher's pid →
+   `stale`.
 7. `tagteam watch status` and `tagteam watch log` run under
    `TAGTEAM_READ_ONLY=1`; `tagteam watch` and `tagteam watch --mode notify`
    are still refused; every existing `watch` option still parses.
 8. `GET /api/watcher/events` returns the records; `/api/now`'s `watcher`
-   block has `beat_age_s` and `last_event` and keeps its existing keys.
+   block has `beat` (the `beat_view` dict) and `last_event` and keeps its
+   existing keys.
 9. Full suite green via the gate; checkout clean afterwards.
 10. Manual, on this repo: run the iTerm2 watcher through one real handoff
     round and confirm `tagteam watch log` matches what the watcher tab showed.
