@@ -4,8 +4,8 @@
 - [x] Planning: approved round 2 (2026-09-20) at `dcf4f2e`
 - [x] Implementation: branch `phase/watcher-event-log-and-heartbeat`
 - [x] Implementation Review: approved round 4 (2026-09-20) at `b0ee363`; gate 2,202 passed, 5 skipped
-- [ ] Complete: PR open; merge is the arbiter's
-- [ ] **Criterion 10 on this repo — NOT DONE.** The iTerm2 watcher running here predates the change. After the merge: restart the watcher tab, run one real handoff round, compare `tagteam watch log` with the tab. The reviewer's approval explicitly does not cover this.
+- [x] Complete: PR #51 merged 2026-09-20 (rebase).
+- [ ] **Criterion 10 on this repo — PARTLY DONE.** 2026-09-20 23:15 PDT, after the merge and a watcher restart: `watch status` → `running (pid 35417, mode iterm2)`, `last look: 9s ago`; `watch log` holds the nine start-up lines (`start`, sessions OK, poll trigger, `Current state: done`). No turn has been dispatched since, so the dispatch kinds are still unobserved here. Original note: The iTerm2 watcher running here predates the change. After the merge: restart the watcher tab, run one real handoff round, compare `tagteam watch log` with the tab. The reviewer's approval explicitly does not cover this.
 
 ## Closeout
 ```

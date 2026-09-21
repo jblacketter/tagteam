@@ -47,7 +47,7 @@ the top. Each phase is engine + CLI first, cockpit surface second. tagteam stays
 - **Depends on:** Phase 67
 
 ### Phase 67: Watcher event log and heartbeat
-- **Status:** ✅ Approved — plan approved round 2, impl approved round 4 (2026-09-20); gate: 2,202 passed, 5 skipped at `b0ee363`. PR open, merge pending. One manual check outstanding (a real iTerm2 round on this repo after the watcher tab is restarted). See `docs/phases/watcher-event-log-and-heartbeat.md`.
+- **Status:** ✅ Approved — plan approved round 2, impl approved round 4 (2026-09-20); gate: 2,202 passed, 5 skipped at `b0ee363`. PR #51 merged 2026-09-20 (rebase). After the merge the arbiter restarted the iTerm2 watcher: `tagteam watch status` shows it running with a fresh heartbeat and `watch log` holds its start-up lines; the remaining manual check — a real dispatched round compared against the tab — happens on the next cycle. See `docs/phases/watcher-event-log-and-heartbeat.md`.
 - **Description:** The watcher narrates everything it does (116 `_log()` calls: whose turn, sent / failed, paused, resumed, watchdog re-send, gate, panel, done) to its own stdout and nowhere else — visible in an iTerm2 tab, invisible to the cockpit and lost when the tab closes. Nothing records when it last looked at the state. Add a bounded per-project event log and a heartbeat, written by every watcher mode, with `tagteam watch status` / `tagteam watch log` and two read endpoints. No UI.
 
 ### Phase 66: Roadmap dependency problems name their line
