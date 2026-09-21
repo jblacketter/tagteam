@@ -1348,7 +1348,7 @@
     var nodes = list.querySelectorAll ? list.querySelectorAll('.bl') : [];
     for (var i = 0; i < nodes.length; i++) {
       var top = rowTopIn(list, nodes[i]);
-      if (top + nodes[i].getBoundingClientRect().height > list.scrollTop + 0.5) return { node: nodes[i], delta: list.scrollTop - top };
+      if (top + nodes[i].getBoundingClientRect().height > list.scrollTop + 0.5) return { node: nodes[i], delta: Math.round(list.scrollTop - top) };
     }
     return null;
   }
@@ -1359,7 +1359,7 @@
     var anchor = follow ? null : firstVisibleLine(list);
     change();
     if (follow) { list.scrollTop = list.scrollHeight; setLaneUnread(list, false); return; }
-    if (anchor && anchor.node.parentNode) list.scrollTop = rowTopIn(list, anchor.node) + anchor.delta;
+    if (anchor && anchor.node.parentNode) list.scrollTop = Math.round(rowTopIn(list, anchor.node) + anchor.delta);
     else { var rest = fallbackNode && fallbackNode(); if (rest) list.scrollTop = rowTopIn(list, rest); }   // the anchored line was trimmed: rest on the oldest kept line
     setLaneUnread(list, true);
   }
@@ -1385,7 +1385,7 @@
     var put = function () {
       rec.lines.push(text);
       rec.box.appendChild(lineNode(text));
-      if (rec.lines.length > BLOCK_CAP) {
+      while (rec.lines.length > BLOCK_CAP) {
         rec.lines.shift();
         var first = firstLineOf(rec); if (first) rec.box.removeChild(first);
         blockNote(rec, false);
@@ -1627,12 +1627,14 @@
   }
   function appendChatLine(cid, n, text) {
     var kept = leadLines(cid, n); kept.push(text);
-    var trimmed = kept.length > BLOCK_CAP; if (trimmed) { kept.shift(); LEAD.trimmed[cid + ':' + n] = true; }
+    var dropped = 0; while (kept.length > BLOCK_CAP) { kept.shift(); dropped++; }
+    var trimmed = dropped > 0; if (trimmed) LEAD.trimmed[cid + ':' + n] = true;
     var rec = LEAD.msgRows['msg:' + cid + ':' + n];
     if (!rec || rec.folded) return;                  // kept in memory (capped); no DOM while folded
     holdingPlace($('lead-timeline'), function () {
       rec.box.appendChild(lineNode(text));
-      if (trimmed) { var first = chatFirstLine(rec); if (first) rec.box.removeChild(first); chatNote(rec); }
+      for (var i = 0; i < dropped; i++) { var first = chatFirstLine(rec); if (first) rec.box.removeChild(first); }
+      if (trimmed) chatNote(rec);
     }, function () { return chatFirstLine(rec); });
   }
   function buildMsgRow(rec) {

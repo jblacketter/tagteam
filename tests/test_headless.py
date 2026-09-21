@@ -474,6 +474,11 @@ class TestParsers:
         text = "\n".join(r for r in rendered if r)
         assert "session 492b9dec" in text and "→ Bash: echo probe-ok" in text
         assert "[claude] result success" in text
+        # Phase 68b: no API-dollar figure in the rendered log (the lanes show it in full view; turns run on a
+        # subscription). The fixture's result event does carry one — it must not reach the text.
+        assert any("total_cost_usd" in l for l in c_lines)
+        assert "cost=" not in text and "$" not in text.split("[claude] result success", 1)[1].splitlines()[0]
+        assert "duration_ms=" in text and "cache_read=" in text
         x_lines = (FIXTURES / "codex_stream.jsonl").read_text().splitlines()
         text = "\n".join(r for r in (h.render_event("codex", l) for l in x_lines) if r)
         assert "$ /bin/zsh -lc" in text and "exit 0: probe-ok" in text
