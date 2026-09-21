@@ -160,7 +160,15 @@ is not captured, so there is nothing to read after the fact.
 when the wait fails, so the next occurrence says whether the child was slow,
 refused, or crashed.
 
-### 11. Flaky under heavy load: `test_wait_child_terminates_and_reports_a_child_still_running` — OPEN (cause not established)
+### 11. Flaky under heavy load: `test_wait_child_terminates_and_reports_a_child_still_running` — FIXED in Phase 68c (mechanism demonstrated; not proven to be the one that fired)
+**Follow-up, same day.** Mechanism demonstrated by replaying the test's steps: a child that has not printed
+when it is terminated leaves an empty dump (0.5 s budget, calm machine → text 15/15; a starved child → empty
+15/15). The `killpg`/`setsid` race was ruled out (0/30). Fix: the child writes a marker file after its flush
+and the test starts the clock only then — not a `readline()`, which swallows the very text the helper must
+find (tried first; failed deterministically). Against a slow-starting child: old flow 0/3, new flow 3/3.
+See `docs/phases/wait-child-test-waits-for-its-child.md`. Still unexplained: the ~5 s solo runs.
+
+Original report:
 2026-09-21, the 3.14.7 release-tree suite: run 1 → 1 failed / 2,274 passed (this test); run 2, minutes later,
 same tree → 2,275 passed. Load average during run 1 was ~48 (1-minute), ~15 at the start of run 2. The test
 exercises `_wait_child` / `_child_output` — helpers inside `tests/test_watcher_lock.py` — and no product code;
