@@ -35,6 +35,15 @@
   `CLAUDE.md` carry the two commands.
 - `tagteam watch status` truncates the `last dispatch` message to 100
   characters (a participant-mismatch refusal is ~330); `watch log` never does.
+- **Impl review r3, two fixes.** `last_event()` searched only the newest 400
+  records, so 401 lines of chatter hid a dispatch still on disk: it now walks
+  the live file, then `.1`, bounded by the files' byte cap. The event loop
+  recorded no `stop` on the path a real Ctrl-C / SIGTERM takes
+  (`watch_with_events` swallows the interrupt and returns normally): the
+  clean-exit line moved after the call, so both loops print and record
+  exactly one `Watcher stopped.`; an event-loop *failure* stays `error` and
+  falls back to polling. Event mode previously exited silently (Phase 58a),
+  so that line is new on stdout there.
 - Criterion 10 was done against a real watcher *process* in a scratch project
   (`tagteam watch --mode notify --poll --interval 2`: `watch status` showed
   `running (pid …)`, `last look: 2s ago`, the `refused` dispatch; after SIGTERM

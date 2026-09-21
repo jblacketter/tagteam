@@ -97,6 +97,25 @@ class TestEventLog:
         assert watchlog.last_event(root)["kind"] == "gate"
         assert watchlog.last_event(root, watchlog.DISPATCH_KINDS)["kind"] == "sent"
 
+    def test_last_event_is_not_hidden_by_chatter_or_rotation(self, root, monkeypatch):
+        """impl r3: a 400-record window lost a dispatch that was still on disk."""
+        s = Sink(root, "notify", every_s=10)
+        s.event("   Sent to Codex", "sent", seq=9)
+        for i in range(1_000):
+            s.event(f"chatter {i}")
+        assert not (root / watchlog.ROTATED_REL).exists()
+        assert watchlog.last_event(root)["seq"] == 9
+        assert watchlog.last_event(root, watchlog.DISPATCH_KINDS)["seq"] == 9
+        # …and once it has been rotated out of the live file
+        monkeypatch.setattr(watchlog, "MAX_BYTES", (root / watchlog.EVENTS_REL).stat().st_size - 1)
+        s.event("after rotation")
+        live = (root / watchlog.EVENTS_REL).read_text()
+        assert "Sent to Codex" not in live and "Sent to Codex" in (root / watchlog.ROTATED_REL).read_text()
+        assert watchlog.last_event(root)["seq"] == 9
+        s.event("gate: pass", "gate")                                   # the live file wins when it has a match
+        assert watchlog.last_event(root)["kind"] == "gate"
+        assert watchlog.last_event(root, watchlog.DISPATCH_KINDS)["seq"] == 9
+
     def test_concurrent_callers_across_rotation(self, root, monkeypatch):
         """watch_with_events calls the processor from two threads."""
         monkeypatch.setattr(watchlog, "MAX_BYTES", 4_000)
@@ -312,6 +331,35 @@ class TestHeartbeatLoops:
         with patch("tagteam.watcher.notify_macos"):
             assert watcher._run_event_loop(p, str(root)) is True
         assert watchlog.read_beat(root)["seq"] == 9
+
+    @pytest.mark.parametrize("ending", ["inner-handler", "propagated"])
+    def test_event_loop_records_exactly_one_stop(self, sink, root, monkeypatch, ending):
+        """impl r3: `watch_with_events` catches KeyboardInterrupt itself and
+        returns normally — the path a real Ctrl-C / SIGTERM takes."""
+        from tagteam import watcher_events
+
+        def fake(_path, on_change):
+            on_change()
+            try:
+                raise KeyboardInterrupt
+            except KeyboardInterrupt:
+                if ending == "propagated":
+                    raise
+        monkeypatch.setattr(watcher, "read_state", lambda _d: _state(9, status="working"))
+        monkeypatch.setattr(watcher_events, "watch_with_events", fake)
+        assert watcher._run_event_loop(_processor("notify", project_dir=str(root)), str(root)) is True
+        assert [e["kind"] for e in _events(root)].count("stop") == 1
+        assert _events(root)[-1]["msg"] == "Watcher stopped."
+
+    def test_event_loop_failure_is_an_error_not_a_stop(self, sink, root, monkeypatch):
+        from tagteam import watcher_events
+
+        def boom(_path, _on_change):
+            raise SystemError("Cannot start fsevents stream")
+        monkeypatch.setattr(watcher_events, "watch_with_events", boom)
+        assert watcher._run_event_loop(_processor("notify", project_dir=str(root)), str(root)) is False
+        kinds = [e["kind"] for e in _events(root)]
+        assert kinds.count("error") == 1 and "stop" not in kinds      # the caller falls back to polling
 
     def test_throttle_and_concurrent_beats(self, root):
         s = Sink(root, "notify", every_s=1)

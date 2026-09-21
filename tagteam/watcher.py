@@ -1844,12 +1844,16 @@ def _run_event_loop(processor: "_StateProcessor", project_dir: str) -> bool:
     try:
         watcher_events.watch_with_events(state_path, on_change)
     except KeyboardInterrupt:
-        _log("Watcher stopped.", kind="stop")
-        return True
+        pass
     except Exception as e:
         _log(f"[trigger] event mode failed:"
              f" {type(e).__name__}: {e}", kind="error")
         return False
+    # Phase 67: `watch_with_events` swallows the interrupt itself (Ctrl-C and
+    # the SIGTERM handler both arrive as KeyboardInterrupt inside its sleep)
+    # and returns normally, so the clean-exit line belongs here — one `stop`
+    # whichever way the loop ended, as in poll mode.
+    _log("Watcher stopped.", kind="stop")
     return True
 
 
