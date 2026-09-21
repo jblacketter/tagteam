@@ -159,16 +159,261 @@ def watcher_status(project_dir: str | Path, inflight: dict | None = None,
 # /api/now
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Phase 68: the headline — "who has the ball", derived once, server-side.
+#
+# `status_facts()` gathers what the sentence needs WITHOUT opening the
+# database (so `tagteam watch status` can use it on any project, in any mode,
+# and create nothing); `inflight_liveness()` and `headline()` are pure. The
+# front end appends the ticking age and must not re-derive any of this.
+
+TERMINAL_WATCHER_MODES = ("iterm2", "terminal", "tmux")   # a `sent` event here means: typed into the agent's session
+OWED_ATTENTION_S = 900                                     # the threshold the old owed chip used
+
+
+def inflight_liveness(marker: dict | None, *, child_alive: bool | None, owner_gone: bool | None) -> str | None:
+    """starting | no-child | running | finishing | unknown | lost.
+
+    `now.inflight.pid_alive` is False for `pid: None` as well as for a dead
+    child, and a gate marker has `pid: None` for its whole run — so that flag
+    must never decide "the turn is lost". Lost means the marker's OWNER (the
+    runner recorded as `watcher_pid`) is definitively gone
+    (`headless.slot_owner_gone`), or, for a legacy marker with no runner pid,
+    that its recorded child is confirmed dead. No evidence is `unknown`,
+    never a guess."""
+    if not marker:
+        return None
+    if owner_gone is True:
+        return "lost"
+    pid = marker.get("pid")
+    if not (isinstance(pid, int) and pid > 0):
+        return "no-child" if marker.get("kind") == "gate" else "starting"
+    if child_alive is True:
+        return "running"
+    if child_alive is None:
+        return "unknown"
+    rpid = marker.get("watcher_pid")
+    return "finishing" if (isinstance(rpid, int) and rpid > 0) else "lost"
+
+
+def _probe_inflight(root: Path) -> dict | None:
+    inflight = h.read_inflight(root)
+    if inflight is None:
+        return None
+    inflight = dict(inflight)
+    inflight["age_s"] = _age_s(inflight.get("started_at"))
+    pid = inflight.get("pid")
+    child_alive: bool | None = None
+    try:
+        from tagteam import procs
+        if isinstance(pid, int) and pid > 0:
+            child_alive = bool(procs.pid_alive(pid))
+        inflight["pid_alive"] = bool(child_alive)          # unchanged contract: False for pid None too
+    except Exception:
+        inflight["pid_alive"] = None
+        child_alive = None
+    try:
+        owner_gone: bool | None = bool(h.slot_owner_gone(inflight)[0])
+    except Exception:
+        owner_gone = None
+    inflight["liveness"] = inflight_liveness(inflight, child_alive=child_alive, owner_gone=owner_gone)
+    return inflight
+
+
+def status_facts(project_dir: str | Path) -> dict:
+    """The headline's inputs, from reads that never open the database:
+    handoff-state.json, tagteam.yaml, the in-flight and pause markers, the
+    watcher's pidfile/scan, its heartbeat and its event log."""
+    from tagteam.state import read_state
+    from tagteam.config import read_config, get_agent_names
+    from tagteam import watchlog
+    root = Path(project_dir)
+    state = read_state(str(root)) or {}
+    try:
+        config = read_config(root / "tagteam.yaml") or {}
+    except Exception:
+        config = {}
+    try:
+        lead, reviewer = (get_agent_names(config) if config else (None, None))
+    except Exception:
+        lead, reviewer = None, None
+
+    owed = None
+    turn = state.get("turn")
+    if state.get("status") in ("ready", "working") and turn in ("lead", "reviewer"):
+        owed = {"role": turn, "agent": lead if turn == "lead" else reviewer,
+                "since": state.get("updated_at"), "age_s": _age_s(state.get("updated_at"))}
+
+    inflight = _probe_inflight(root)
+
+    paused = h.read_pause(root)
+    if paused is not None:
+        paused = dict(paused)
+        paused["age_s"] = _age_s(paused.get("ts"))
+
+    try:
+        watcher = watcher_status(root, inflight)
+    except Exception:
+        watcher = {"running": False, "pid": None, "mode": None, "source": None, "stale_pidfile": False}
+    # Phase 67: when the watcher last looked (derived state, so no consumer
+    # re-derives staleness), the last thing it did that was not chatter, and
+    # (Phase 68) its last dispatch.
+    try:
+        beat = watchlog.beat_view(root, watcher, inflight)
+        beat["text"] = watchlog.describe_beat(beat, inflight)
+        watcher["beat"] = beat
+        watcher["last_event"] = watchlog.last_event(root)
+        watcher["last_dispatch"] = watchlog.last_event(root, watchlog.DISPATCH_KINDS)
+    except Exception:
+        watcher.setdefault("beat", {"state": "none", "age_s": None, "every_s": None, "stale_after_s": None,
+                                    "text": "never (no heartbeat recorded)"})
+        watcher.setdefault("last_event", None)
+        watcher.setdefault("last_dispatch", None)
+
+    return {"state": state, "config": config, "agents": {"lead": lead, "reviewer": reviewer}, "owed": owed,
+            "inflight": inflight, "turn_kind": (inflight or {}).get("kind") or ("cycle" if inflight else None),
+            "paused": paused, "watcher": watcher}
+
+
+def _type_word(t) -> str:
+    return {"plan": "plan", "impl": "implementation"}.get(str(t or ""), str(t or ""))
+
+
+def turn_delivered(facts: dict) -> bool:
+    """Was the owed turn typed into the agent's own session? Only a terminal
+    watcher's `sent` says so: notify's `sent` is a notification and headless's
+    precedes the engine's dispatch. A missing seq never matches."""
+    ev = ((facts.get("watcher") or {}).get("last_dispatch")) or {}
+    seq = (facts.get("state") or {}).get("seq")
+    return (ev.get("kind") == "sent" and ev.get("mode") in TERMINAL_WATCHER_MODES
+            and seq is not None and ev.get("seq") is not None and ev.get("seq") == seq)
+
+
+def _working_text(facts: dict) -> tuple[str, str | None, str | None]:
+    inf = facts.get("inflight") or {}
+    agents = facts.get("agents") or {}
+    kind = facts.get("turn_kind") or "cycle"
+    role = inf.get("role")
+    rnd = f" · round {inf['round']}" if inf.get("round") is not None else ""
+    if kind == "gate":
+        return "Pre-check running" + rnd, "gatekeeper", None
+    if kind == "panel":
+        return "Review panel running" + rnd, "reviewer", None
+    if kind == "briefer":
+        return "Writing the decision brief", None, None
+    agent = inf.get("agent") or (agents.get("lead") if role == "lead" else agents.get("reviewer")) \
+        or inf.get("provider") or (role or "an agent")
+    if inf.get("liveness") == "finishing":
+        return f"{agent}'s turn has ended — recording the result", role, agent
+    if kind == "conversation":
+        return f"{agent} is answering you", "lead", agent
+    if role == "reviewer":
+        return f"{agent} is reviewing" + rnd, role, agent
+    ctype = str(inf.get("target_type") or inf.get("type") or "")
+    verb = "is implementing" if ctype == "impl" else "is working on the plan" if ctype == "plan" else "is working"
+    return f"{agent} {verb}" + rnd, role, agent
+
+
+def headline(facts: dict, launch: dict | None = None) -> dict:
+    """One sentence for "who has the ball". First match wins; the order and
+    every row are specified in docs/phases/cockpit-turn-bar-and-watcher-drawer.md.
+    `text` never contains an age: `age_s` / `age_of` carry the one age the
+    sentence is about and each surface appends it exactly once."""
+    state = facts.get("state") or {}
+    inf, owed, paused = facts.get("inflight"), facts.get("owed"), facts.get("paused")
+    watcher = facts.get("watcher") or {}
+    beat = watcher.get("beat") or {}
+    status = state.get("status")
+
+    def out(st, tone, text, age_s=None, age_of=None, role=None, agent=None):
+        return {"state": st, "tone": tone, "text": text, "age_s": age_s, "age_of": age_of if age_s is not None else None,
+                "role": role, "agent": agent}
+
+    roadmap_reason = ((state.get("roadmap") or {}).get("pause_reason")) if isinstance(state.get("roadmap"), dict) else None
+    if status in ("escalated", "needs-human") or roadmap_reason:
+        age = _age_s(state.get("updated_at"))
+        if roadmap_reason:
+            return out("needs-you", "attention", f"Waiting on you — roadmap paused: {roadmap_reason}", age, "owed", "you")
+        if status == "needs-human":
+            who = state.get("updated_by")
+            return out("needs-you", "attention",
+                       f"Waiting on you — a question from {who}" if who else "Waiting on you — a question", age, "owed", "you")
+        return out("needs-you", "attention", "Waiting on you — escalated", age, "owed", "you")
+
+    if inf:
+        text, role, agent = _working_text(facts)
+        if inf.get("liveness") == "lost":
+            who = f"{agent}'s turn" if agent else "The running " + {"gate": "pre-check", "panel": "review panel",
+                                                                   "briefer": "decision brief"}.get(facts.get("turn_kind"), "turn")
+            return out("turn-lost", "danger", f"{who} was abandoned — the process running it is gone",
+                       inf.get("age_s"), "turn", role, agent)
+        return out("working", "working", text, inf.get("age_s"), "turn", role, agent)
+
+    if launch and launch.get("status") == "pending":
+        lead = (facts.get("agents") or {}).get("lead") or "the lead"
+        what = ", ".join(x for x in (launch.get("phase"), _type_word(launch.get("type"))) if x)
+        return out("launching", "working", f"Starting {what} — {lead} is on it" if what else f"Starting — {lead} is on it",
+                   launch.get("age_s"), "turn", "lead", lead)
+
+    if owed:
+        agent = owed.get("agent") or owed.get("role")
+        role = owed.get("role")
+        delivered = turn_delivered(facts)
+        if paused:
+            by = paused.get("by")
+            head = f"Paused by {by}" if by else "Paused"
+            text = (f"{head} — {agent} has its turn; further hand-offs are held" if delivered
+                    else f"{head} — {agent}'s turn is held")
+            return out("paused", "attention", text, paused.get("age_s"), "pause", role, agent)
+        if not watcher.get("running"):
+            text = (f"Waiting on {agent} — its turn was sent; the watcher has since stopped, so the next hand-off will not happen"
+                    if delivered else f"Waiting on {agent} — the watcher is off, nothing will start its turn")
+            return out("watcher-off", "attention", text, owed.get("age_s"), "owed", role, agent)
+        mode = watcher.get("mode")
+        if beat.get("state") == "stale":
+            if delivered:
+                return out("watcher-stale", "attention", f"Waiting on {agent} — it has its turn; the watcher has stopped looking",
+                           beat.get("age_s"), "beat", role, agent)
+            return out("stalled", "danger", f"Stalled: {agent} is owed a turn and the watcher has stopped looking",
+                       beat.get("age_s"), "beat", role, agent)
+        if mode == "headless" and beat.get("state") in ("fresh", "in-turn"):
+            return out("starting", "working", f"Starting {agent}'s turn…", owed.get("age_s"), "owed", role, agent)
+        if mode in TERMINAL_WATCHER_MODES:
+            text = (f"Waiting on {agent} — its turn was sent to its terminal" if delivered
+                    else f"Waiting on {agent} — the watcher will send its turn to its terminal")
+        elif mode == "notify":
+            text = f"Waiting on {agent} — the watcher only notifies you; run the turn in {agent}'s session"
+        elif mode == "headless":
+            text = f"Waiting on {agent} — a headless watcher is running but has not reported in"
+        else:
+            text = f"Waiting on {agent} — a watcher is running"
+        age = owed.get("age_s")
+        tone = "attention" if (age is not None and age > OWED_ATTENTION_S) else "waiting"
+        return out("waiting", tone, text, age, "owed", role, agent)
+
+    what = ", ".join(x for x in (state.get("phase"), _type_word(state.get("type"))) if x)
+    if status == "done":
+        result = state.get("result")
+        if result == "roadmap-complete":
+            return out("approved", "ok", "Roadmap complete")
+        if result == "approved":
+            return out("approved", "ok", f"Approved — {what}" if what else "Approved")
+        return out("approved", "idle", f"Cycle complete — {result or 'done'}" + (f": {what}" if what else ""))
+    if status == "aborted":
+        return out("aborted", "idle", f"Aborted — {what}" if what else "Aborted")
+    return out("idle", "idle", "Nothing in progress")
+
+
 def now_payload(project_dir: str | Path) -> dict:
     """State, owed role (+ how long owed), in-flight, pause marker, watcher
     liveness, briefer flag, agents, and a pending-notes count."""
-    from tagteam.state import read_state
-    from tagteam.config import read_config, get_agent_names, get_briefer_spec
+    from tagteam.config import get_briefer_spec
     from tagteam.cycle import read_status
     root = Path(project_dir)
-    state = read_state(str(root)) or {}
-    config = read_config(root / "tagteam.yaml") or {}
-    lead, reviewer = (get_agent_names(config) if config else (None, None))
+    facts = status_facts(root)             # Phase 68: the DB-free facts, shared with `tagteam watch status`
+    state, config = facts["state"], facts["config"]
+    lead, reviewer = facts["agents"]["lead"], facts["agents"]["reviewer"]
+    owed, inflight, paused, watcher = facts["owed"], facts["inflight"], facts["paused"], facts["watcher"]
     try:
         briefer_enabled = bool(get_briefer_spec(config).get("enabled")) if config else False
     except Exception:
@@ -181,46 +426,6 @@ def now_payload(project_dir: str | Path) -> dict:
             cycle_status = read_status(phase, ctype, str(root))
         except Exception:
             cycle_status = None
-
-    owed = None
-    turn = state.get("turn")
-    if state.get("status") in ("ready", "working") and turn in ("lead", "reviewer"):
-        owed = {
-            "role": turn,
-            "agent": lead if turn == "lead" else reviewer,
-            "since": state.get("updated_at"),
-            "age_s": _age_s(state.get("updated_at")),
-        }
-
-    inflight = h.read_inflight(root)
-    if inflight is not None:
-        inflight = dict(inflight)
-        inflight["age_s"] = _age_s(inflight.get("started_at"))
-        pid = inflight.get("pid")
-        try:
-            from tagteam import procs
-            inflight["pid_alive"] = bool(isinstance(pid, int) and pid > 0 and procs.pid_alive(pid))
-        except Exception:
-            inflight["pid_alive"] = None
-
-    paused = h.read_pause(root)
-    if paused is not None:
-        paused = dict(paused)
-        paused["age_s"] = _age_s(paused.get("ts"))
-
-    try:
-        watcher = watcher_status(root, inflight)
-    except Exception:
-        watcher = {"running": False, "pid": None, "mode": None, "source": None, "stale_pidfile": False}
-    # Phase 67: when the watcher last looked (derived state, so no consumer
-    # re-derives staleness) and the last thing it did that was not chatter.
-    try:
-        from tagteam import watchlog
-        watcher["beat"] = watchlog.beat_view(root, watcher, inflight)
-        watcher["last_event"] = watchlog.last_event(root)
-    except Exception:
-        watcher.setdefault("beat", {"state": "none", "age_s": None, "every_s": None, "stale_after_s": None})
-        watcher.setdefault("last_event", None)
 
     pending_notes = 0
     try:
@@ -270,6 +475,7 @@ def now_payload(project_dir: str | Path) -> dict:
         "inflight": inflight,
         "turn_kind": turn_kind,
         "launch": launch,
+        "headline": headline(facts, launch),
         "last_turn": last,
         "paused": paused,
         "watcher": watcher,

@@ -586,3 +586,278 @@ class TestActions:
         monkeypatch.setattr(controls, "pause_command", boom)
         r = capi.run_action("pause", {}, project)
         assert not r["ok"] and "kaboom" in r["message"]
+
+
+# ---------------------------------------------------------------------------
+# Phase 68 — the headline: status_facts() (no database), inflight_liveness()
+# over real marker shapes, and the first-match table in headline().
+
+import itertools
+from datetime import datetime, timedelta, timezone
+
+
+def _dead_pid() -> int:
+    p = subprocess.Popen([sys.executable, "-c", "pass"])
+    p.wait()
+    return p.pid
+
+
+def _marker_fields(**over):
+    me = os.getpid()
+    f = {"phase": "feat-x", "type": "impl", "round": 2, "role": "reviewer", "agent": "Codex", "provider": "codex",
+         "stem": "feat-x_impl_r2_reviewer_x", "log_path": None, "events_path": None,
+         "started_at": datetime.now(timezone.utc).isoformat(), "pid": None, "child_ident": None,
+         "watcher_pid": me, "watcher_ident": procs.identity(me)}
+    f.update(over)
+    return f
+
+
+class TestInflightLiveness:
+    """Markers are written by the real slot writers (`claim_turn_slot`,
+    `update_turn_slot`) with the field sets the gate and the engine use, then
+    read back through `status_facts()`."""
+
+    def _liveness(self, root):
+        inf = capi.status_facts(root)["inflight"]
+        return inf["liveness"], inf["pid_alive"]
+
+    def test_a_running_gate_has_no_child_by_design(self, project):
+        # gatekeeper.py: pid None for the whole run, watcher_pid = the process running the gate
+        claim = h.claim_turn_slot(project, kind=h.SLOT_KIND_GATE, role="gatekeeper",
+                                  fields=_marker_fields(role="gatekeeper", agent="gatekeeper", provider=None))
+        try:
+            assert self._liveness(project) == ("no-child", False)      # pid_alive is False here — and means nothing
+            hl = capi.headline(capi.status_facts(project))
+            assert (hl["state"], hl["text"]) == ("working", "Pre-check running · round 2")
+        finally:
+            h.release_turn_slot(claim)
+
+    @pytest.mark.parametrize("kind", [h.SLOT_KIND_CYCLE, h.SLOT_KIND_PANEL])
+    def test_before_the_child_is_spawned_then_running_then_finishing(self, project, kind):
+        claim = h.claim_turn_slot(project, kind=kind, role="reviewer", fields=_marker_fields())
+        try:
+            assert self._liveness(project) == ("starting", False)
+            assert capi.headline(capi.status_facts(project))["state"] == "working"
+            child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+            try:
+                assert h.update_turn_slot(claim, pid=child.pid, child_ident=procs.identity(child.pid))
+                assert self._liveness(project) == ("running", True)
+            finally:
+                child.kill(); child.wait()
+            assert self._liveness(project) == ("finishing", False)        # child gone, live owner recording the result
+            hl = capi.headline(capi.status_facts(project))
+            assert hl["state"] == "working" and hl["tone"] == "working"
+            if kind == h.SLOT_KIND_CYCLE:
+                assert hl["text"] == "Codex's turn has ended — recording the result"
+        finally:
+            h.release_turn_slot(claim)
+
+    def test_a_dead_owner_is_lost(self, project):
+        claim = h.claim_turn_slot(project, kind=h.SLOT_KIND_CYCLE, role="lead",
+                                  fields=_marker_fields(role="lead", agent="Claude", watcher_pid=_dead_pid(),
+                                                        watcher_ident="gone", pid=os.getpid()))
+        try:
+            assert self._liveness(project)[0] == "lost"              # a live child does not save a dead runner
+            hl = capi.headline(capi.status_facts(project))
+            assert (hl["state"], hl["tone"]) == ("turn-lost", "danger")
+            assert hl["text"] == "Claude's turn was abandoned — the process running it is gone"
+        finally:
+            h.release_turn_slot(claim)
+
+    def test_pure_rules_for_legacy_markers_and_missing_evidence(self):
+        L = capi.inflight_liveness
+        assert L(None, child_alive=None, owner_gone=None) is None
+        assert L({"pid": 5}, child_alive=False, owner_gone=False) == "lost"           # legacy: no runner pid, child dead
+        assert L({"pid": 5}, child_alive=True, owner_gone=False) == "running"
+        assert L({"pid": 5, "watcher_pid": 9}, child_alive=False, owner_gone=False) == "finishing"
+        # no evidence is never promoted to a confirmed-dead sentence
+        assert L({"pid": 5, "watcher_pid": 9}, child_alive=None, owner_gone=None) == "unknown"
+        assert L({"pid": 5, "watcher_pid": 9}, child_alive=None, owner_gone=False) == "unknown"
+        assert L({"pid": None, "watcher_pid": 9}, child_alive=None, owner_gone=None) == "starting"
+        # an owner whose identity cannot be read is not gone (slot_owner_gone fails closed) → not lost
+        m = _marker_fields(pid=os.getpid())
+        with patch_identity(None):
+            gone = h.slot_owner_gone(m)[0]
+        assert gone is False and L(m, child_alive=True, owner_gone=gone) == "running"
+
+    def test_unknown_liveness_reads_as_working_not_as_finishing(self):
+        facts = _facts(inflight={"kind": "cycle", "role": "reviewer", "agent": "Codex", "round": 1, "type": "impl",
+                                 "liveness": "unknown", "age_s": 12.0})
+        assert capi.headline(facts)["text"] == "Codex is reviewing · round 1"
+
+
+from contextlib import contextmanager
+
+
+@contextmanager
+def patch_identity(value):
+    real = procs.identity
+    procs.identity = lambda _pid: value
+    try:
+        yield
+    finally:
+        procs.identity = real
+
+
+_NOWISH = datetime.now(timezone.utc).isoformat()
+
+
+def _facts(*, status="ready", turn="reviewer", seq=7, inflight=None, paused=None, running=True, mode="iterm2",
+           beat="fresh", dispatch=None, owed_age=30.0, **state):
+    st = {"phase": "feat-x", "type": "impl", "round": 2, "status": status, "turn": turn, "seq": seq, **state}
+    agents = {"lead": "Claude", "reviewer": "Codex"}
+    owed = None
+    if status in ("ready", "working") and turn in ("lead", "reviewer"):
+        owed = {"role": turn, "agent": agents[turn], "since": None, "age_s": owed_age}
+    return {"state": st, "config": {}, "agents": agents, "owed": owed, "inflight": inflight,
+            "turn_kind": (inflight or {}).get("kind"), "paused": paused,
+            "watcher": {"running": running, "mode": mode if running else None, "pid": 1 if running else None,
+                        "beat": {"state": beat, "age_s": 400.0 if beat == "stale" else 3.0},
+                        "last_dispatch": dispatch}}
+
+
+def _sent(mode="iterm2", seq=7, kind="sent"):
+    return {"kind": kind, "mode": mode, "seq": seq, "msg": "Sent to Codex"}
+
+
+class TestHeadline:
+    @pytest.mark.parametrize("facts, state, tone, text, age_of", [
+        (_facts(status="escalated", turn=None, updated_at=_NOWISH), "needs-you", "attention", "Waiting on you — escalated", "owed"),
+        (_facts(status="needs-human", turn=None, updated_at=_NOWISH, updated_by="Codex"), "needs-you", "attention",
+         "Waiting on you — a question from Codex", "owed"),
+        (_facts(status="escalated", turn=None, updated_at=_NOWISH, roadmap={"pause_reason": "blocked: p2 needs p1"}), "needs-you",
+         "attention", "Waiting on you — roadmap paused: blocked: p2 needs p1", "owed"),
+        (_facts(inflight={"kind": "cycle", "role": "lead", "agent": "Claude", "round": 1, "type": "impl",
+                          "liveness": "running", "age_s": 62.0}), "working", "working",
+         "Claude is implementing · round 1", "turn"),
+        (_facts(inflight={"kind": "cycle", "role": "lead", "agent": "Claude", "round": 1, "type": "plan",
+                          "liveness": "starting", "age_s": 1.0}), "working", "working",
+         "Claude is working on the plan · round 1", "turn"),
+        (_facts(inflight={"kind": "panel", "role": "reviewer", "round": 2, "liveness": "running", "age_s": 5.0}),
+         "working", "working", "Review panel running · round 2", "turn"),
+        (_facts(inflight={"kind": "briefer", "liveness": "running", "age_s": 5.0}), "working", "working",
+         "Writing the decision brief", "turn"),
+        (_facts(inflight={"kind": "conversation", "role": "lead", "agent": "Claude", "liveness": "running",
+                          "age_s": 8.0}), "working", "working", "Claude is answering you", "turn"),
+        (_facts(inflight={"kind": "gate", "role": "gatekeeper", "round": 3, "liveness": "lost", "age_s": 900.0}),
+         "turn-lost", "danger", "The running pre-check was abandoned — the process running it is gone", "turn"),
+        (_facts(paused={"by": "jack", "age_s": 40.0}), "paused", "attention", "Paused by jack — Codex's turn is held",
+         "pause"),
+        # a pause applied AFTER the turn was typed into the terminal holds future dispatch, not that turn
+        (_facts(paused={"by": "jack", "age_s": 40.0}, dispatch=_sent()), "paused", "attention",
+         "Paused by jack — Codex has its turn; further hand-offs are held", "pause"),
+        (_facts(running=False), "watcher-off", "attention",
+         "Waiting on Codex — the watcher is off, nothing will start its turn", "owed"),
+        (_facts(running=False, dispatch=_sent()), "watcher-off", "attention",
+         "Waiting on Codex — its turn was sent; the watcher has since stopped, so the next hand-off will not happen",
+         "owed"),
+        (_facts(beat="stale"), "stalled", "danger", "Stalled: Codex is owed a turn and the watcher has stopped looking",
+         "beat"),
+        (_facts(beat="stale", dispatch=_sent()), "watcher-stale", "attention",
+         "Waiting on Codex — it has its turn; the watcher has stopped looking", "beat"),
+        (_facts(mode="headless", beat="fresh"), "starting", "working", "Starting Codex's turn…", "owed"),
+        (_facts(mode="headless", beat="in-turn"), "starting", "working", "Starting Codex's turn…", "owed"),
+        (_facts(mode="headless", beat="none"), "waiting", "waiting",
+         "Waiting on Codex — a headless watcher is running but has not reported in", "owed"),
+        (_facts(mode="headless", beat="previous"), "waiting", "waiting",
+         "Waiting on Codex — a headless watcher is running but has not reported in", "owed"),
+        (_facts(mode="iterm2", dispatch=_sent()), "waiting", "waiting",
+         "Waiting on Codex — its turn was sent to its terminal", "owed"),
+        (_facts(mode="tmux"), "waiting", "waiting",
+         "Waiting on Codex — the watcher will send its turn to its terminal", "owed"),
+        (_facts(mode="notify", dispatch=_sent(mode="notify")), "waiting", "waiting",
+         "Waiting on Codex — the watcher only notifies you; run the turn in Codex's session", "owed"),
+        (_facts(mode=None), "waiting", "waiting", "Waiting on Codex — a watcher is running", "owed"),
+        (_facts(mode="iterm2", owed_age=901.0), "waiting", "attention",
+         "Waiting on Codex — the watcher will send its turn to its terminal", "owed"),
+        (_facts(status="done", turn=None, result="approved"), "approved", "ok", "Approved — feat-x, implementation", None),
+        (_facts(status="done", turn=None, result="roadmap-complete"), "approved", "ok", "Roadmap complete", None),
+        (_facts(status="aborted", turn=None), "aborted", "idle", "Aborted — feat-x, implementation", None),
+        ({"state": {}, "agents": {}, "owed": None, "inflight": None, "paused": None, "watcher": {}}, "idle", "idle",
+         "Nothing in progress", None),
+    ])
+    def test_rows(self, facts, state, tone, text, age_of):
+        hl = capi.headline(facts)
+        assert (hl["state"], hl["tone"], hl["text"], hl["age_of"]) == (state, tone, text, age_of)
+        assert set(hl) == {"state", "tone", "text", "age_s", "age_of", "role", "agent"}
+
+    def test_priorities(self):
+        busy = {"kind": "cycle", "role": "reviewer", "agent": "Codex", "round": 2, "type": "impl",
+                "liveness": "running", "age_s": 9.0}
+        # a pause holds future dispatch; it does not stop a running turn
+        assert capi.headline(_facts(inflight=busy, paused={"by": "jack", "age_s": 1.0}))["state"] == "working"
+        # a stale beat while this watcher runs the turn is `in-turn`, and in any case in-flight wins
+        assert capi.headline(_facts(inflight=busy, beat="stale"))["state"] == "working"
+        # an old beat file says nothing about a watcher that is not running
+        assert capi.headline(_facts(running=False, beat="stale"))["state"] == "watcher-off"
+        # needs-you outranks everything
+        assert capi.headline(_facts(status="escalated", turn=None, inflight=busy))["state"] == "needs-you"
+        # the cockpit-only launch row: below in-flight, above the owed rows
+        launch = {"status": "pending", "phase": "feat-x", "type": "impl", "age_s": 2.0}
+        assert capi.headline(_facts(inflight=busy), launch)["state"] == "working"
+        hl = capi.headline(_facts(status="done", turn=None, result="approved"), launch)
+        assert (hl["state"], hl["text"]) == ("launching", "Starting feat-x, implementation — Claude is on it")
+        assert capi.headline(_facts(status="done", turn=None, result="approved"),
+                             {"status": "failed"})["state"] == "approved"
+
+    def test_delivered_means_typed_into_a_terminal_for_this_seq(self):
+        assert capi.turn_delivered(_facts(dispatch=_sent()))
+        for ev in (_sent(mode="notify"), _sent(mode="headless"), _sent(seq=6), _sent(kind="turn"),
+                   _sent(kind="send-failed"), {"kind": "sent", "mode": "iterm2"}, None):
+            assert not capi.turn_delivered(_facts(dispatch=ev)), ev
+        assert not capi.turn_delivered(_facts(seq=None, dispatch={"kind": "sent", "mode": "iterm2", "seq": None}))
+
+    def test_an_owed_turn_never_reads_as_idle_and_always_names_the_agent(self):
+        """The owed-turn rows are exhaustive: every combination of pause ×
+        watcher × beat × mode × delivered lands on a sentence about the agent."""
+        seen = set()
+        for paused, running, beat, mode, delivered, turn in itertools.product(
+                (None, {"by": "jack", "age_s": 5.0}), (True, False),
+                ("none", "previous", "fresh", "in-turn", "stale"),
+                ("headless", "iterm2", "terminal", "tmux", "notify", None), (False, True), ("lead", "reviewer")):
+            facts = _facts(turn=turn, paused=paused, running=running, mode=mode, beat=beat,
+                           dispatch=_sent(mode=mode or "iterm2") if delivered else None)
+            hl = capi.headline(facts)
+            seen.add(hl["state"])
+            who = "Claude" if turn == "lead" else "Codex"
+            assert hl["state"] not in ("idle", "approved", "aborted", "working", "launching"), (facts, hl)
+            assert who in hl["text"] and hl["agent"] == who and hl["role"] == turn, (facts, hl)
+            assert hl["age_s"] is not None and hl["age_of"] in ("owed", "pause", "beat")
+        assert seen == {"paused", "watcher-off", "stalled", "watcher-stale", "starting", "waiting"}
+
+    def test_the_text_never_carries_an_age(self):
+        import re
+        ages = re.compile(r"\b\d+\s*(s|m|h|min|sec)\b|\bago\b")
+        for facts in (_facts(beat="stale"), _facts(running=False), _facts(paused={"by": "j", "age_s": 400.0}),
+                      _facts(inflight={"kind": "gate", "round": 3, "liveness": "no-child", "age_s": 431.0})):
+            assert not ages.search(capi.headline(facts)["text"]), capi.headline(facts)["text"]
+
+
+class TestStatusFacts:
+    def test_no_database_is_opened_and_now_payload_uses_the_same_facts(self, project, monkeypatch):
+        _init_cycle(project)
+        now = capi.now_payload(project)                         # the cockpit's payload, database and all
+        real = db.connect
+        monkeypatch.setattr(db, "connect", lambda *a, **k: pytest.fail("status_facts opened the database"))
+        facts = capi.status_facts(project)
+        monkeypatch.setattr(db, "connect", real)
+        assert facts["owed"]["role"] == "reviewer" and facts["owed"]["agent"] == "Codex"
+        assert facts["watcher"]["beat"]["text"] == "never (no heartbeat recorded)"
+        hl = capi.headline(facts)
+        assert now["headline"]["text"] == hl["text"] == "Waiting on Codex — the watcher is off, nothing will start its turn"
+        # every key the cockpit already relied on is still there
+        assert {"ts", "state", "cycle", "owed", "inflight", "turn_kind", "launch", "last_turn", "paused", "watcher",
+                "briefer_enabled", "gatekeeper", "agents", "pending_notes", "project_dir"} <= set(now)
+        assert {"running", "pid", "mode", "source", "stale_pidfile", "beat", "last_event", "last_dispatch"} \
+            <= set(now["watcher"])
+
+    def test_real_dispatch_record_makes_the_turn_delivered(self, project):
+        from tagteam import watchlog
+        _init_cycle(project)
+        (project / ".tagteam").mkdir(exist_ok=True)
+        seq = state_mod.read_state(str(project))["seq"]
+        sink = watchlog.Sink(project, "iterm2", every_s=10)
+        sink.event(">> Codex's turn", "turn", seq=seq); sink.event("   Sent to Codex: /handoff", "sent", seq=seq)
+        facts = capi.status_facts(project)
+        assert facts["watcher"]["last_dispatch"]["kind"] == "sent" and capi.turn_delivered(facts)
+        assert capi.headline(facts)["text"].startswith("Waiting on Codex — its turn was sent; the watcher has since stopped")

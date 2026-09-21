@@ -564,6 +564,7 @@ class TestCli:
     def test_status_and_log_on_an_empty_project(self, proj, monkeypatch, capsys):
         rc, out, _ = _cli(monkeypatch, capsys, proj, "watch", "status")
         assert rc == 0 and out.splitlines() == [
+            "now: Nothing in progress",                       # Phase 68: the cockpit's headline, first
             "watcher: not running", "last look: never (no heartbeat recorded)",
             "last dispatch: none recorded", "dispatch: not paused"]
         rc, out, _ = _cli(monkeypatch, capsys, proj, "watch", "log")
@@ -588,12 +589,36 @@ class TestCli:
         s.event("gate: pass", "gate"); s.beat({"seq": 1})
         rc, out, _ = _cli(monkeypatch, capsys, proj, "watch", "status")
         lines = out.splitlines()
-        assert lines[1] in ("last look: 0s ago", "last look: 1s ago")
-        assert lines[2].startswith("last dispatch: ") and lines[2].endswith("Sent to Codex: /handoff")
+        assert lines[0].startswith("now: ")
+        assert lines[2] in ("last look: 0s ago", "last look: 1s ago")
+        assert lines[3].startswith("last dispatch: ") and lines[3].endswith("Sent to Codex: /handoff")
         s.event("   REFUSED: " + "x" * 400, "refused")               # status stays one screen line; the log keeps it all
-        line = _cli(monkeypatch, capsys, proj, "watch", "status")[1].splitlines()[2]
+        line = _cli(monkeypatch, capsys, proj, "watch", "status")[1].splitlines()[3]
         assert line.endswith("…") and len(line) < 140
         assert len(_cli(monkeypatch, capsys, proj, "watch", "log", "-n", "1")[1]) > 400
+
+    @pytest.mark.parametrize("read_only", [False, True])
+    def test_status_creates_nothing_on_a_project_without_a_database(self, proj, monkeypatch, capsys, read_only):
+        """Phase 68: the headline's facts never open the database — `now_payload`
+        would db.connect(), which creates and migrates .tagteam/tagteam.db in
+        ordinary mode (only TAGTEAM_READ_ONLY stops that)."""
+        from tagteam import db
+        (proj / "handoff-state.json").write_text(json.dumps({
+            "phase": "p1", "type": "impl", "round": 2, "status": "ready", "turn": "reviewer", "seq": 4,
+            "command": "/handoff", "updated_at": datetime.now(timezone.utc).isoformat()}))
+        monkeypatch.setattr(db, "connect", lambda *a, **k: pytest.fail("watch status opened the database"))
+        if read_only:
+            monkeypatch.setenv("TAGTEAM_READ_ONLY", "1")
+        else:
+            monkeypatch.delenv("TAGTEAM_READ_ONLY", raising=False)
+
+        def tree():
+            return {str(q.relative_to(proj)): (q.read_bytes() if q.is_file() else None) for q in proj.rglob("*")}
+        before = tree()
+        rc, out, _ = _cli(monkeypatch, capsys, proj, "watch", "status")
+        assert rc == 0 and out.splitlines()[0].startswith(
+            "now: Waiting on Codex — the watcher is off, nothing will start its turn · ")
+        assert tree() == before and not (proj / ".tagteam" / "tagteam.db").exists()
 
     def test_describe_beat_wording(self):
         d = watchlog.describe_beat
@@ -638,8 +663,10 @@ class TestApi:
         from tagteam import cockpit_api as capi
         w = capi.now_payload(str(proj))["watcher"]
         assert {"running", "pid", "mode", "source", "stale_pidfile"} <= set(w)          # existing keys stay
-        assert w["beat"] == {"state": "none", "age_s": None, "every_s": None, "stale_after_s": None}
-        assert w["last_event"] is None and capi.watcher_events_payload(str(proj)) == {"events": []}
+        assert w["beat"] == {"state": "none", "age_s": None, "every_s": None, "stale_after_s": None,
+                             "text": "never (no heartbeat recorded)"}                  # Phase 68: + text
+        assert w["last_event"] is None and w["last_dispatch"] is None
+        assert capi.watcher_events_payload(str(proj)) == {"events": []}
         s = Sink(proj, "iterm2", every_s=10)
         s.event(">> Claude's turn", "turn", phase="p1"); s.event("chatter"); s.beat({"seq": 2})
         w = capi.now_payload(str(proj))["watcher"]
