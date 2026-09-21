@@ -45,6 +45,51 @@ What worked, so it is on record: both headless reviews ran and approved (29 s,
 (run by hand afterwards); the lead lane streamed the turn live; the Phase 67 log
 recorded every dispatch kind, including `resumed` after a busy turn slot.
 
+## Implementation notes
+- Approval note 1: the new path requires `run_mode == "single-phase"`
+  explicitly (default when absent). Two tests pin that a full-roadmap run which
+  declined to advance — no roadmap metadata; a staleness guard — is not retried
+  through it.
+- Approval note 2: the post-tick beat carries the state *after* the tick.
+  `_beat_after_tick()` re-reads the state only when `Sink.due()` says a beat
+  would be written, so a short tick costs neither a write nor a read.
+- Approval note 3: the normal-advance test first ticks a witnessed `ready`
+  state; a separate test pins that a first tick on an already-approved plan
+  does nothing.
+- The plan-approval macOS notification is kept in the new path (the old code
+  sent it before the dead notice). "Sending completion notice…" is no longer
+  printed by a headless watcher for *any* completion — it never had anywhere
+  to send one; tab, tmux and notify watchers print and send exactly as before.
+- The contract needed no change: it already says `start [phase] impl` is what
+  the lead runs "or is handed by the watcher after plan approval".
+- 9 of the 14 new processor tests fail on the previous `watcher.py`; the other
+  5 pin unchanged behaviour (three terminal modes, full-roadmap, first tick).
+
+### Criterion 8 — real processes, 2026-09-20 23:46–23:49 PDT (manual)
+Scratch project `trial2` (one phase, `wc.py` + test), plan cycle opened by
+hand, then only `tagteam watch --mode headless --pidfile`. Non-`info` events
+from `tagteam watch log`:
+
+```
+23:46:56  start    Watching handoff-state.json (interval: 10s, mode: headless)
+23:46:56  turn     >> codex's turn (phase: word-count, round: 1)
+23:46:56  sent     Command: Read the handoff contract …
+23:47:36  done     ** Cycle complete: approved
+23:47:37  advance  AUTO-ADVANCE: plan approved → lead implements (phase: word-count)
+23:47:47  turn     >> claude's turn (phase: word-count, round: 1)
+23:47:47  sent     Command: Read the handoff contract …, tagteam.yaml, and …
+23:48:31  turn     >> codex's turn (phase: word-count, round: 1)
+23:48:31  sent     Command: Read the handoff contract …
+23:49:11  done     ** Cycle complete: approved
+```
+
+No click, no cockpit. The lead's turn is a cycle turn
+(`.tagteam/turns/word-count_plan_r1_lead_….log`), not a conversation. Final
+state `impl / done / approved`; `python3 test_wc.py` → 6 passed, exit 0 (run by
+hand). `tagteam watch status` sampled every 3 s for the whole run and 18 s
+after it: 39 samples, **0 STALE** (the first trial showed one within seconds of
+a turn ending). One run — an observation, not a rate.
+
 ## Summary
 Two engine fixes that make a headless cycle run end to end by itself, as the
 iTerm2 one does. No UI.
