@@ -1341,6 +1341,7 @@
   //   follow  the lane follows only while already at the bottom; scrolled back, the reader stays on the
   //           same LINE (measured in the scroller's coordinates — rowTopIn — not offsetTop)
   var BLOCK_CAP = 2000;
+  var NO_GATE_LOG = 'A pre-check keeps no turn log. Its verdict and any failing output are the gatekeeper\'s entry in the Rounds tab below (or: tagteam gate status).';
   var LANE_UNREAD = {};            // containerId -> true while there is output the reader has not scrolled to
   var LANE_FOLLOW = {};            // containerId -> false once the READER scrolled away from the foot (default: follow)
   // A block opening, a header patch or a fold changes the lane's height without any scroll event; judging
@@ -1417,7 +1418,10 @@
       rec.box.addEventListener('mouseenter', function () { rec.hover = true; });
       rec.box.addEventListener('mouseleave', function () { rec.hover = false; });
     }
-    if (isRunning(rec.item)) attachActStream(rec);
+    // A pre-check writes no turn log (seen live: its stream URL is a 404 and the block sat empty). Say where
+    // its output is instead of asking for a log that cannot exist.
+    if (rec.item.kind === 'gate') { if (!rec.lines.length) appendActLine(rec, NO_GATE_LOG); }
+    else if (isRunning(rec.item)) attachActStream(rec);
     else if (!rec.lines.length) fillActLinesFromRecord(rec);
     restick(laneOf(rec));
   }
@@ -1578,8 +1582,8 @@
       var agents = (NOW && NOW.agents) || {};
       var who = slot.role === 'reviewer' ? (agents.reviewer || 'the reviewer') : (cfg.agent || agents.lead || 'the lead');
       var sentence = (slot.kind === 'gate') ? 'The pre-check is running' : (slot.kind === 'panel') ? 'A review lens is running' : (slot.kind === 'briefer') ? 'The decision brief is being written' : who + ' is working on its ' + (slot.role === 'reviewer' ? 'review' : 'turn');
-      var where = (slot.kind === 'gate' || slot.kind === 'panel') ? 'in the checks strip above the lanes' : slot.role === 'reviewer' ? 'in the reviewer lane' : 'above';
-      st.appendChild(document.createTextNode(sentence + (slot.round ? ' (round ' + slot.round + ')' : '') + ' — streaming ' + where + ' · '));
+      var where = (slot.kind === 'gate') ? 'shown as a chip in the checks strip above the lanes' : (slot.kind === 'panel') ? 'in the checks strip above the lanes' : slot.role === 'reviewer' ? 'in the reviewer lane' : 'above';
+      st.appendChild(document.createTextNode(sentence + (slot.round ? ' (round ' + slot.round + ')' : '') + ' — ' + (slot.kind === 'gate' ? '' : 'streaming ') + where + ' · '));
       var see = el('button', 'link-btn', 'watch it'); see.type = 'button'; see.addEventListener('click', focusWorkingLane);
       st.appendChild(see); st.appendChild(document.createTextNode(', wait, or '));
       var lnk = el('button', 'link-btn', 'leave a note for the next turn'); lnk.type = 'button'; lnk.addEventListener('click', function () { showTab('notes'); });

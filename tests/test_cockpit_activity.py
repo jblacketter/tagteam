@@ -1693,7 +1693,6 @@ class TestOneStory:
 
     def test_checks_strip_routes_and_opens_a_run(self):
         r = _run_68b(TestTurnBlocks.SETUP + r"""
-          TAILS['gate-r1'] = { lines: ['1 failed'], path: '/p/g1.log' };
           [item('turn:gate-r1', 'gatekeeper', 'gate', 'finished', '2026-01-01T00:01:00+00:00', 1, { raw_status: 'bounce' }),
            item('turn:gate-r2', 'gatekeeper', 'gate', 'running', '2026-01-01T00:09:00+00:00', 2),
            item('turn:gate-old', 'gatekeeper', 'gate', 'finished', '2025-12-01T00:00:00+00:00', 4, { raw_status: 'pass', phase: 'other' }),
@@ -1714,7 +1713,9 @@ class TestOneStory:
         assert r["before"]["lane"] == 0 and r["before"]["log"] is True                   # nothing of the machinery's in the reviewer's lane
         assert r["before"]["chips"] == ["check-chip warn | pre-check r1 — bounced · 1s", "check-chip | review lens (scope) r1 — done · 1s",
                                         "check-chip running | pre-check r2 — running · 1s"]          # this cycle only, oldest first
-        assert r["open"]["log"] is False and r["open"]["stream"] == ["1 failed"] and r["open"]["chips"][0].startswith("check-chip warn open")
+        assert r["open"]["log"] is False and r["open"]["chips"][0].startswith("check-chip warn open")
+        # a pre-check keeps no turn log: the block says where its output is, and asks the server for nothing
+        assert len(r["open"]["stream"]) == 1 and "keeps no turn log" in r["open"]["stream"][0] and "Rounds tab" in r["open"]["stream"][0]
         assert r["closed"] == {"log": True, "dom": 0}
 
 
@@ -1909,7 +1910,6 @@ class TestChecksStayClosed:
         r = _run_68b(TestTurnBlocks.SETUP + r"""
           var lens = item('turn:lens', 'reviewer', 'panel_lens', 'running', '2026-01-01T00:05:00+00:00', 1, { detail: 'scope' });
           var gate = item('turn:gate-r1', 'gatekeeper', 'gate', 'finished', '2026-01-01T00:01:00+00:00', 1, { raw_status: 'pass' });
-          TAILS['gate-r1'] = { lines: ['1 passed'], path: '/p/g.log' };
           [lens, gate].forEach(function (it) { upsertRow(CHECKS, it); }); renderChecks();
           var rec = CHECKS.rows['turn:lens'];
           var idle = { folded: rec.folded, key: rec.streamKey, sources: SOURCES.length };         // running, but not selected: no stream
@@ -1935,7 +1935,8 @@ class TestChecksStayClosed:
         assert r["idle"] == {"folded": True, "key": None, "sources": 0}
         assert r["open"] == {"folded": False, "stream": ["lens 1"]}
         assert r["closed"] == {"folded": True, "open": None, "dom": 0, "lines": 0, "key": None, "logHidden": True}
-        assert r["switched"] == {"lens": True, "lensKey": None, "open": "turn:gate-r1"} and r["gateOpen"] == ["1 passed"]
+        assert r["switched"] == {"lens": True, "lensKey": None, "open": "turn:gate-r1"}
+        assert len(r["gateOpen"]) == 1 and "keeps no turn log" in r["gateOpen"][0]
         assert r["cycleChange"] == {"open": None, "gateFolded": True, "gateDom": 0, "stripHidden": True}
 
 
