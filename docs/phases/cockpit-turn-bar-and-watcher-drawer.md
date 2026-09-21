@@ -4,7 +4,7 @@
 - [x] Planning: approved round 2 (2026-09-21) at `a7dae2b`
 - [x] Implementation: branch `phase/cockpit-turn-bar-and-watcher-drawer`
 - [x] Implementation Review: approved round 3 (2026-09-21) at `1132e1f`; gate 2,275 passed, 5 skipped
-- [ ] Complete: PR open; merge is the arbiter's
+- [x] Complete: PR #53 merged 2026-09-21 (rebase).
 
 ## Closeout
 ```
