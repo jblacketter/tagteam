@@ -4,7 +4,7 @@
 - [x] Planning: approved round 1 (2026-09-20) at `340cb32`
 - [x] Implementation: branch `phase/roadmap-dependency-problems-name-their-line`
 - [x] Implementation Review: approved round 1 (2026-09-20) at `6295abf`; gate 2,148 passed, 5 skipped (the first full suite on the repaired `.venv`, pytest 9.1.1)
-- [ ] Complete: PR open, merge pending
+- [x] Complete: PR #50 merged 2026-09-20 (rebase).
 
 ## Closeout
 ```
