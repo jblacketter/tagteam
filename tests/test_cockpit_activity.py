@@ -1851,3 +1851,124 @@ class TestLanesInARealBrowser:
         assert r["held"]["before"] == {"line": "L40", "into": 9}
         assert r["held"]["after"] == r["held"]["before"] and r["held"]["sameNode"] is True and r["held"]["cue"] is True
         assert r["rolled"] == {"after": {"line": "L40", "into": 9}, "kept": 100}
+
+
+class TestLeadLaneIsOneSequence:
+    """impl review r1: the lead's chat turns and cycle turns are ONE chronological
+    sequence with one open/fold policy, and a folded chat is one header line."""
+
+    SETUP = TestChatBlocks.SETUP + r"""
+      CYCLE_ID = 'feat_impl'; setVerdictCycle(CYCLE_ID); setLaneCycle(CYCLE_ID);
+      function state() { return leadBlocks().map(function (b) { return (b.chat ? 'chat#' + b.rec.turn.n : b.rec.item.id.replace('turn:', '')) + ':' + (b.rec.folded ? 'folded' : 'open'); }); }
+      function cyc(id, status, mm) { return item('turn:' + id, 'lead', 'cycle', status, '2026-01-01T00:' + mm + ':00+00:00', 1); }
+    """
+
+    def test_a_finished_chat_folds_when_a_newer_cycle_turn_starts_and_vice_versa(self):
+        r = _run_68b(self.SETUP + r"""
+          TAILS['lead-r1'] = { lines: ['did the work'], path: '/p/l1.log' };
+          LEAD.conv = { id: 'c-1', turns: [turn(1, 'ok', { reply: 'hello', finished_at: '2026-01-01T00:11:30+00:00' })] };
+          renderLeadTimeline();
+          var s1 = state();
+          upsertRow(LLANE, cyc('lead-r1', 'running', '20')); applyLeadPolicy();          // a cycle turn starts after the chat
+          var s2 = state(), chat1 = LEAD.msgRows['msg:c-1:1'];
+          var folded = { dom: chat1.box.children.length, rowOpen: chat1.row.classList.contains('open'), excerpt: chat1.excerptEl.textContent,
+                         promptKept: chat1.promptEl.textContent, replyKept: chat1.closeEl.textContent };
+          upsertRow(LLANE, cyc('lead-r1', 'finished', '20')); applyLeadPolicy();
+          var s3 = state();
+          LEAD.conv.turns.push(turn(30, 'running')); renderLeadTimeline();                // then the arbiter chats again
+          var RESULT = {};
+          DONE = Promise.resolve().then(function () { return Promise.resolve(); }).then(function () {
+            RESULT = { s1: s1, s2: s2, folded: folded, s3: s3, s4: state(), cycleDom: LLANE.rows['turn:lead-r1'].box.children.length };
+          });
+        """)
+        assert r["s1"] == ["chat#1:open"]
+        assert r["s2"] == ["chat#1:folded", "lead-r1:open"]                  # not two "newest" blocks
+        assert r["folded"] == {"dom": 0, "rowOpen": False, "excerpt": "you ▸ message 1", "promptKept": "you ▸ message 1",
+                               "replyKept": "Claude ▸ hello"}               # kept for reopening, not shown
+        assert r["s3"] == ["chat#1:folded", "lead-r1:open"]
+        assert r["s4"] == ["chat#1:folded", "lead-r1:folded", "chat#30:open"] and r["cycleDom"] == 0
+
+    def test_the_arbiters_choices_and_running_blocks_are_respected(self):
+        r = _run_68b(self.SETUP + r"""
+          LEAD.conv = { id: 'c-1', turns: [turn(1, 'ok', { reply: 'one', finished_at: 'x' }), turn(2, 'ok', { reply: 'two', finished_at: 'y' })] };
+          renderLeadTimeline();
+          LEAD.msgRows['msg:c-1:1'].openBtn.ls = null;
+          var one = LEAD.msgRows['msg:c-1:1'], two = LEAD.msgRows['msg:c-1:2'];
+          one.userOpened = true; openChatBlock(one);                                   // he opened the old one…
+          two.userClosed = true; foldChatBlock(two, false);                            // …and closed the newest
+          upsertRow(LLANE, cyc('lead-r1', 'running', '40')); applyLeadPolicy(); renderLeadTimeline();
+          var RESULT = { after: state() };
+          foldBlock(LLANE.rows['turn:lead-r1'], true);                                  // a refresh may not fold a running block
+          RESULT.running = LLANE.rows['turn:lead-r1'].folded;
+        """)
+        assert r["after"] == ["chat#1:open", "chat#2:folded", "lead-r1:open"] and r["running"] is False
+
+
+class TestChecksStayClosed:
+    def test_a_closed_running_check_is_not_reopened_by_refreshes_or_late_frames(self):
+        r = _run_68b(TestTurnBlocks.SETUP + r"""
+          var lens = item('turn:lens', 'reviewer', 'panel_lens', 'running', '2026-01-01T00:05:00+00:00', 1, { detail: 'scope' });
+          var gate = item('turn:gate-r1', 'gatekeeper', 'gate', 'finished', '2026-01-01T00:01:00+00:00', 1, { raw_status: 'pass' });
+          TAILS['gate-r1'] = { lines: ['1 passed'], path: '/p/g.log' };
+          [lens, gate].forEach(function (it) { upsertRow(CHECKS, it); }); renderChecks();
+          var rec = CHECKS.rows['turn:lens'];
+          var idle = { folded: rec.folded, key: rec.streamKey, sources: SOURCES.length };         // running, but not selected: no stream
+          toggleCheck('turn:lens');
+          var src = SOURCES[SOURCES.length - 1]; emit(src, 'line', { id: 1, text: 'lens 1' });
+          var open = { folded: rec.folded, stream: streamOf(rec) };
+          var late = STREAMS['log:lens'].handlers.line['checks:turn:lens'];
+          toggleCheck('turn:lens');                                                          // the arbiter closes it
+          for (var i = 0; i < 3; i++) { upsertRow(CHECKS, lens); renderChecks(); late({ id: 10 + i, text: 'late ' + i }); }   // refreshes + late frames
+          var closed = { folded: rec.folded, open: CHECK_OPEN, dom: rec.box.children.length, lines: rec.lines.length, key: rec.streamKey,
+                         logHidden: $('checks-log').classList.contains('hidden') };
+          // selecting another run folds the previous one; a cycle change folds whatever was open
+          toggleCheck('turn:lens'); toggleCheck('turn:gate-r1');
+          var switched = { lens: rec.folded, lensKey: rec.streamKey, open: CHECK_OPEN };
+          var RESULT = {};
+          DONE = Promise.resolve().then(function () { return Promise.resolve(); }).then(function () {
+            var g = CHECKS.rows['turn:gate-r1']; var gateOpen = streamOf(g);
+            CYCLE_ID = 'next_plan'; setLaneCycle(CYCLE_ID); renderChecks();
+            RESULT = { idle: idle, open: open, closed: closed, switched: switched, gateOpen: gateOpen,
+                       cycleChange: { open: CHECK_OPEN, gateFolded: g.folded, gateDom: g.box.children.length, stripHidden: $('lane-checks').classList.contains('hidden') } };
+          });
+        """)
+        assert r["idle"] == {"folded": True, "key": None, "sources": 0}
+        assert r["open"] == {"folded": False, "stream": ["lens 1"]}
+        assert r["closed"] == {"folded": True, "open": None, "dom": 0, "lines": 0, "key": None, "logHidden": True}
+        assert r["switched"] == {"lens": True, "lensKey": None, "open": "turn:gate-r1"} and r["gateOpen"] == ["1 passed"]
+        assert r["cycleChange"] == {"open": None, "gateFolded": True, "gateDom": 0, "stripHidden": True}
+
+
+class TestLeadLaneTurnoverInARealBrowser:
+    def test_a_long_finished_chat_folds_to_one_line_under_a_newer_chat_and_a_newer_cycle_turn(self):
+        r = _run_lanes_in_chromium(TestLanesInARealBrowser.MEASURE + r"""
+          CYCLE_ID = 'feat_impl'; setVerdictCycle(CYCLE_ID); setLaneCycle(CYCLE_ID);
+          LEAD.cfg = { ok: true, agent: 'Claude' };
+          var reply = []; for (var i = 0; i < 99; i++) reply.push('reply line ' + i);
+          LEAD.conv = { id: 'c-1', turns: [{ n: 1, ts: '2026-01-01T00:10:00+00:00', user_text: 'a long question\nwith a second line', status: 'ok',
+                                             reply: reply.join('\n'), finished_at: '2026-01-01T00:11:00+00:00' }] };
+          renderLeadTimeline();
+          var one = LEAD.msgRows['msg:c-1:1'];
+          function shape(rec) { return { h: Math.round(rec.row.getBoundingClientRect().height), reply: getComputedStyle(rec.closeEl).display, prompt: getComputedStyle(rec.promptEl).display,
+                                         excerpt: getComputedStyle(rec.excerptEl).display }; }
+          var openShape = shape(one);
+          // (a) another chat follows
+          LEAD.conv.turns.push({ n: 2, ts: '2026-01-01T00:20:00+00:00', user_text: 'next', status: 'running' });
+          renderLeadTimeline();
+          var underChat = shape(one), two = LEAD.msgRows['msg:c-1:2'];
+          // (b) a cycle turn follows the chats
+          LEAD.conv.turns[1] = { n: 2, ts: '2026-01-01T00:20:00+00:00', user_text: 'next', status: 'ok', reply: 'short', finished_at: '2026-01-01T00:21:00+00:00' };
+          renderLeadTimeline();
+          upsertRow(LLANE, { id: 'turn:lead-r1', kind: 'cycle', role: 'lead', agent: 'Claude', status: 'running', started_at: '2026-01-01T00:30:00+00:00',
+                             round: 1, phase: 'feat', type: 'impl', stem: 'lead-r1', ref: { log: 'x' }, age_s: 1 });
+          applyLeadPolicy();
+          var underCycle = { one: shape(one), two: shape(two), cycleOpen: !LLANE.rows['turn:lead-r1'].folded };
+          // reopening brings the kept prompt and reply back, once
+          one.openBtn.click();
+          var RESULT = { openShape: openShape, underChat: underChat, underCycle: underCycle, reopened: shape(one), replyText: one.closeEl.textContent.split('\n').length };
+        """)
+        assert r["openShape"]["h"] > 1500 and r["openShape"]["reply"] == "block" and r["openShape"]["excerpt"] == "none"
+        for folded in (r["underChat"], r["underCycle"]["one"], r["underCycle"]["two"]):
+            assert folded["h"] < 45 and folded["reply"] == "none" and folded["prompt"] == "none" and folded["excerpt"] != "none", folded
+        assert r["underCycle"]["cycleOpen"] is True
+        assert r["reopened"]["h"] > 1500 and r["reopened"]["reply"] == "block" and r["replyText"] == 99

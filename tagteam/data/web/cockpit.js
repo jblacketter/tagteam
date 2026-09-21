@@ -1135,7 +1135,12 @@
     var ids = Object.keys(CHECKS.rows).filter(function (id) { return cycleKey(CHECKS.rows[id].item) === LANE_CYCLE; });
     ids.sort(function (a, b) { return ascSortKey(CHECKS.rows[a].item.started_at, a) < ascSortKey(CHECKS.rows[b].item.started_at, b) ? -1 : 1; });
     while (chips.firstChild) chips.removeChild(chips.firstChild);
-    if (CHECK_OPEN && ids.indexOf(CHECK_OPEN) < 0) CHECK_OPEN = null;
+    if (CHECK_OPEN && ids.indexOf(CHECK_OPEN) < 0) {            // the cycle moved on: its open run is folded, not just hidden
+      if (CHECKS.rows[CHECK_OPEN]) foldBlock(CHECKS.rows[CHECK_OPEN], false);
+      CHECK_OPEN = null;
+    }
+    // belt and braces: no unselected check may hold a stream (a late upsert, a cycle change)
+    Object.keys(CHECKS.rows).forEach(function (id) { var r = CHECKS.rows[id]; if (id !== CHECK_OPEN && !r.folded) foldBlock(r, false); });
     ids.forEach(function (id) {
       var rec = CHECKS.rows[id], it = rec.item, v = verdictFor(it);
       var chip = el('button', 'check-chip' + (isRunning(it) ? ' running' : (v ? ' ' + v.cls : '')) + (CHECK_OPEN === id ? ' open' : ''), checkChipText(it));
@@ -1150,8 +1155,8 @@
   }
   function toggleCheck(id) {
     var was = CHECK_OPEN; CHECK_OPEN = (was === id) ? null : id;
-    if (was && CHECKS.rows[was] && was !== CHECK_OPEN) foldBlock(CHECKS.rows[was]);
-    if (CHECK_OPEN) openBlock(CHECKS.rows[CHECK_OPEN]); else if (CHECKS.rows[id]) foldBlock(CHECKS.rows[id]);
+    if (was && CHECKS.rows[was]) foldBlock(CHECKS.rows[was], false);         // closing, or switching to another run
+    if (CHECK_OPEN && CHECKS.rows[CHECK_OPEN]) { CHECKS.rows[CHECK_OPEN].userClosed = false; openBlock(CHECKS.rows[CHECK_OPEN], false); }
     renderChecks();
   }
   function toggleLastSession() { SHOW_LAST_SESSION = !SHOW_LAST_SESSION; return renderReviewerLaneScope(); }
@@ -1192,7 +1197,7 @@
       $('activity-more').classList.toggle('hidden', !b.truncated);
       $('activity-meta').textContent = items.length ? (items.length + ' turn' + (items.length === 1 ? '' : 's') + (b.truncated ? ' (newest ' + b.limit + ')' : '')) : '';
       renderReviewerLaneScope();
-      applyBlockPolicy(RLANE); applyBlockPolicy(LLANE);
+      applyBlockPolicy(RLANE); applyLeadPolicy();
       restick($('reviewer-timeline')); restick($('lead-timeline'));
       renderChecks();
       renderLeadEmpty();
@@ -1217,7 +1222,9 @@
       // log's last lines are drained); the stream closes on its own `end`.
       if (rec.row.dataset.key !== storeSortKey(store, it)) insertRow(store, rec);
     }
-    if (isRunning(it)) openBlock(rec, true);
+    // a running turn streams by itself in a lane / the flat list; a CHECK streams only while its chip is
+    // selected — otherwise a refresh reopened a closed running check and it kept filling hidden DOM
+    if (isRunning(it) && (store !== CHECKS || it.id === CHECK_OPEN)) openBlock(rec, true);
     return rec;
   }
   function insertKeyed(list, row, key, ascending) {
@@ -1645,6 +1652,7 @@
     rec.kindEl = el('span', 'kind'); head.appendChild(rec.kindEl);
     rec.statusEl = el('span', 'status'); head.appendChild(rec.statusEl);
     rec.contEl = el('span', 'cycle-tag'); head.appendChild(rec.contEl);
+    rec.excerptEl = el('span', 'bl-excerpt'); head.appendChild(rec.excerptEl);     // what was asked, on the folded header line
     head.appendChild(el('span', 'spacer'));
     rec.openBtn = el('button', 'link-btn', 'log'); rec.openBtn.type = 'button';
     rec.openBtn.addEventListener('click', function () {
@@ -1670,6 +1678,7 @@
     var cont = t.continuity === 'resumed session' ? 'same session' : (t.continuity || '');
     rec.contEl.textContent = cont; rec.contEl.classList.toggle('hidden', !cont);
     rec.promptEl.textContent = 'you ▸ ' + (t.user_text || '');
+    rec.excerptEl.textContent = 'you ▸ ' + String(t.user_text || '').replace(/\s+/g, ' ').slice(0, 140);
     // the closing lines: the recorded reply, or what went wrong
     rec.closeEl.className = 'bl-close' + (t.status === 'running' ? ' hidden' : (t.status === 'ok' ? '' : ' fail'));
     if (t.status === 'ok') rec.closeEl.textContent = agent + ' ▸ ' + (t.reply || '(no text reply)');
@@ -1685,14 +1694,32 @@
     if (!rec.folded) { var shown = rec.box.children.length - (rec.noteEl ? 1 : 0); if (shown !== leadLines(cid, t.n).length) chatLinesInto(rec); }
     rec.sig = msgSig(cid, t);
   }
-  function applyChatPolicy() {                        // newest chat block open, earlier folded — unless the arbiter chose
-    var keys = Object.keys(LEAD.msgRows).sort(function (a, b) { return LEAD.msgRows[a].turn.n - LEAD.msgRows[b].turn.n; });
-    keys.forEach(function (key, i) {
-      var rec = LEAD.msgRows[key]; var newest = i === keys.length - 1;
-      if (rec.turn.status === 'running' || newest) { if (!rec.userClosed) openChatBlock(rec); }
-      else if (!rec.userOpened) foldChatBlock(rec, true);
+  // ONE policy for the lead's merged timeline (impl review r1): its cycle turns and its chat turns are one
+  // chronological sequence — the newest block (or a running one) is open, every earlier one is a one-line
+  // header — unless the arbiter opened or closed a block himself. Two separate "newest" policies left a
+  // finished chat open under a newer cycle turn.
+  function leadBlocks() {
+    var out = [];
+    Object.keys(LLANE.rows).forEach(function (id) {
+      var r = LLANE.rows[id];
+      if (cycleKey(r.item) === LANE_CYCLE) out.push({ key: ascSortKey(r.item.started_at, r.item.id), running: isRunning(r.item), rec: r, chat: false });
+    });
+    Object.keys(LEAD.msgRows).forEach(function (k) {
+      var r = LEAD.msgRows[k];
+      out.push({ key: ascSortKey(r.turn.ts, k), running: r.turn.status === 'running', rec: r, chat: true });
+    });
+    out.sort(function (a, b) { return a.key < b.key ? -1 : a.key > b.key ? 1 : 0; });
+    return out;
+  }
+  function applyLeadPolicy() {
+    var blocks = leadBlocks();
+    blocks.forEach(function (b, i) {
+      var newest = i === blocks.length - 1, rec = b.rec;
+      if (b.running || newest) { if (!rec.userClosed) { if (b.chat) openChatBlock(rec); else openBlock(rec, true); } }
+      else if (!rec.userOpened) { if (b.chat) foldChatBlock(rec, true); else if (!rec.folded && rec.opened) foldBlock(rec, true); }
     });
   }
+  function applyChatPolicy() { applyLeadPolicy(); }
   function upsertLeadMessage(cid, t) {
     var key = 'msg:' + cid + ':' + t.n;
     var rec = LEAD.msgRows[key];
