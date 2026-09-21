@@ -78,8 +78,14 @@ def test_same_version_editable_and_unknown_are_listed_without_a_warning(proj):
 
 
 @pytest.mark.parametrize("metadata", ["", "Name: tagteam\n", "Version: 1.0\nVersion: 2.0\n", "Name: x\n\nVersion: 3.12.0\n",
-                                       "Version:\n"],
-                         ids=["empty", "no-version", "duplicate", "only-in-body", "blank-value"])
+                                       "Version:\n",
+                                       "Version: 3.12.0\nVersion:\n",                  # review r1: a second header
+                                       "Version: 3.12.0\nVersion: invalid value\n",     # counts whatever its value
+                                       "Version:\nVersion: 3.12.0\n",
+                                       "version: 3.12.0\nVERSION: 3.12.0\n",           # header names are case-insensitive
+                                       "Version: 3.12.0 extra\n", "Version: ../../x\n"],
+                         ids=["empty", "no-version", "duplicate", "only-in-body", "blank-value", "dup-blank",
+                              "dup-invalid", "blank-then-valid", "dup-other-case", "two-tokens", "not-a-version"])
 def test_malformed_metadata_is_unknown_never_a_mismatch(proj, metadata):
     _venv(proj, OTHER, metadata=metadata)
     assert [r["state"] for r in ins.observe_installs(proj)] == ["unknown"]
@@ -151,3 +157,52 @@ def test_doctor_and_state_report_it_under_read_only(proj, monkeypatch, capsys):
     data = json.loads(capsys.readouterr().out)
     assert data["installs"][0]["state"] == "differs" and data["counts"]["warn"] == 1
     assert _snapshot(proj) == before
+
+
+# ---------------------------------------------------------------------------
+# impl review round 1 — the read cap and the check-then-open window
+# ---------------------------------------------------------------------------
+
+def test_header_block_cut_off_by_the_read_cap_is_unknown(proj):
+    """Another Version header may sit beyond the cap, so an incomplete header
+    block proves nothing. A complete block followed by a long body is fine —
+    that is every real METADATA (the README is the body)."""
+    padding = "".join(f"Classifier: padding {i:06d}\n" for i in range(ins.METADATA_LIMIT // 27 + 50))
+    _venv(proj, OTHER, metadata=f"Version: {OTHER}\n{padding}Version: 9.9.9\n\nbody\n")
+    assert len(padding) > ins.METADATA_LIMIT
+    assert [r["state"] for r in ins.observe_installs(proj)] == ["unknown"]
+    assert dg.build_report(proj).counts["warn"] == 0 and ".venv:" not in fw.version_line(proj)
+    import shutil; shutil.rmtree(proj / ".venv")
+    _venv(proj, OTHER, metadata=f"Metadata-Version: 2.1\nVersion: {OTHER}\n\n" + "x" * (ins.METADATA_LIMIT * 2))
+    assert [(r["version"], r["state"]) for r in ins.observe_installs(proj)] == [(OTHER, "differs")]
+
+
+def test_metadata_that_is_not_utf8_is_unknown(proj):
+    di = _venv(proj, OTHER)
+    (di / "METADATA").write_bytes(b"Version: 3.12.0\n\xff\xfe\n\nbody\n")
+    assert [r["state"] for r in ins.observe_installs(proj)] == ["unknown"]
+
+
+@pytest.mark.parametrize("swap", ["symlink", "fifo"])
+def test_metadata_replaced_between_the_check_and_the_open_is_not_followed(proj, tmp_path, monkeypatch, swap):
+    """Deterministic version of the race: the path is a plain file when it is
+    lstat-ed and something else by the time it is opened. O_NOFOLLOW refuses
+    the link; O_NONBLOCK + fstat refuse the FIFO without blocking."""
+    from tagteam import safe_read
+    di = _venv(proj, OTHER)
+    outside = tmp_path / "outside-METADATA"; outside.write_text("Version: 9.8.7\n\n")
+    real = safe_read._lstat_chain
+
+    def lstat_then_swap(root, rel):
+        r = real(root, rel)
+        if rel.endswith("/METADATA") and r.state == "file":
+            (di / "METADATA").unlink()
+            if swap == "symlink":
+                (di / "METADATA").symlink_to(outside)
+            else:
+                os.mkfifo(di / "METADATA")
+        return r
+    monkeypatch.setattr(safe_read, "_lstat_chain", lstat_then_swap)
+    rows = ins.observe_installs(proj)
+    assert [(r["version"], r["state"]) for r in rows] == [(None, "unknown")]          # never 9.8.7, never a hang
+    assert outside.read_text() == "Version: 9.8.7\n\n"

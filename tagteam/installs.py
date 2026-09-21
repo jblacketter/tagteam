@@ -6,8 +6,8 @@ one on PATH for anything launched through that venv — ``.venv/bin/tagteam``,
 so. This module only *looks*: lstat and bounded reads, no subprocess, no
 import of the other copy, and nothing is read through a symlink at any level.
 
-Deliberately free of other tagteam imports (only ``tagteam.__version__``) so
-both ``diagnostics`` and ``framework`` can use it without a cycle.
+Deliberately free of other tagteam imports (only ``tagteam.__version__`` and
+the dependency-free ``safe_read``) so both ``diagnostics`` and ``framework`` can use it without a cycle.
 """
 from __future__ import annotations
 
@@ -17,10 +17,15 @@ import stat
 import sys
 from pathlib import Path
 
+from tagteam.safe_read import read_bounded
+
 VENV_NAMES = (".venv", "venv")
 METADATA_LIMIT = 64 * 1024
 _DIST_INFO_RE = re.compile(r"^tagteam-.+\.dist-info$", re.IGNORECASE)
-_VERSION_RE = re.compile(r"^Version:[ \t]*(\S+)[ \t]*$", re.MULTILINE)
+# Every `Version` header counts, whatever follows the colon; only one that is
+# also a single sane token is believed.
+_VERSION_HEADER_RE = re.compile(r"^version[ \t]*:(.*)$", re.MULTILINE | re.IGNORECASE)
+_VERSION_VALUE_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+!_-]*$")
 
 
 def _kind(path: Path) -> str:
@@ -43,20 +48,27 @@ def _entries(path: Path) -> list[str]:
         return []
 
 
-def _metadata_version(dist_info: Path) -> str | None:
-    """The one ``Version:`` header, or None when the file is missing, not a
-    plain file, unreadable, or carries none / more than one."""
-    meta = dist_info / "METADATA"
-    if _kind(meta) != "file":
+def _metadata_version(root: Path, dist_info_rel: str) -> str | None:
+    """The one ``Version:`` header of ``<dist-info>/METADATA``, or None on any
+    doubt: not a plain file at open time (the guarded reader refuses a symlink
+    or FIFO swapped in after the check), unreadable, not UTF-8, a header block
+    cut off by the read cap, no ``Version`` header, more than one — counted
+    whatever their values — or a value that is not a single sane token."""
+    r = read_bounded(root, f"{dist_info_rel}/METADATA", METADATA_LIMIT, truncate=True)
+    if r.state != "file" or r.data is None:
         return None
     try:
-        with open(meta, "rb") as f:
-            text = f.read(METADATA_LIMIT).decode("utf-8", errors="replace")
-    except OSError:
+        text = r.data.decode("utf-8").replace("\r\n", "\n")
+    except UnicodeDecodeError:
         return None
-    headers = text.replace("\r\n", "\n").split("\n\n", 1)[0]
-    found = _VERSION_RE.findall(headers)
-    return found[0] if len(found) == 1 else None
+    head, sep, _ = text.partition("\n\n")
+    if not sep and r.truncated:
+        return None                     # the cap fell inside the headers: another Version may follow
+    headers = _VERSION_HEADER_RE.findall(head)
+    if len(headers) != 1:
+        return None
+    value = headers[0].strip()
+    return value if _VERSION_VALUE_RE.match(value) else None
 
 
 def _site_packages(venv: Path) -> list[Path]:
@@ -122,7 +134,7 @@ def observe_installs(root: str | Path, *, running: str | None = None,
                     continue
                 if k != "dir":
                     continue
-                version = _metadata_version(sp / n)
+                version = _metadata_version(root, rel)
                 if editable:
                     state = "editable"
                 elif version is None:
