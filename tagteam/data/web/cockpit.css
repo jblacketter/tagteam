@@ -345,6 +345,11 @@ table.u th { color: var(--text-dim); font-weight: 500; }
 .lanes .timeline .act-row, .lane-checks .timeline .act-row { flex: 0 0 auto; }
 .timeline .act-row.open > .act-head { background: var(--bg-3); border-radius: 6px 6px 0 0; }
 .timeline .act-row.s-running.open { border-color: var(--accent); }
+/* a folded chat block is ONE header line — its prompt, stream and reply fold away (kept for reopening);
+   the header carries a one-line excerpt of what was asked, shown only while folded */
+.chat-block:not(.open) > .bl-prompt, .chat-block:not(.open) > .bl-close, .chat-block:not(.open) > .act-lines { display: none; }
+.chat-block .bl-excerpt { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); font-family: var(--mono); font-size: 12px; }
+.chat-block.open .bl-excerpt { display: none; }
 .bl-prompt { padding: 6px 10px 4px; font-family: var(--mono); font-size: 12.5px; color: var(--lead); white-space: pre-wrap; word-break: break-word; }
 .bl-close { padding: 8px 10px; border-top: 1px solid var(--line); font-size: 13px; white-space: pre-wrap; word-break: break-word; }
 .bl-close.fail { color: var(--warn); }
