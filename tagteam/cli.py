@@ -395,6 +395,8 @@ Commands:
   session       Manage orchestration session (start/kill/attach)
   watch         Start the watcher daemon for automated orchestration
                 (--mode headless spawns each turn as a fresh agent process)
+                watch status: is it running, when it last looked, its last dispatch
+                watch log [-n N] [--json]: what the watcher did, newest last
   tail          Follow the in-flight headless turn log (or show the last one)
   pause         Hold dispatch in every watcher mode (marker file)
   resume        Clear the pause; the watcher re-dispatches the owed turn once
@@ -486,10 +488,11 @@ READ_ONLY_COMMANDS: dict[str, "callable"] = {
     "hook": lambda rest: True,
     "doctor": lambda rest: True,
     "report": lambda rest: True,
+    "watch": _sub_in("status", "log"),   # Phase 67: the heartbeat / event-log reads only
 }
 # Never a helper's business: parents, humans and installers only. Refused with
 # any arguments — `--help` included (see `read_only_refusal`).
-READ_ONLY_REFUSED = ("quickstart", "init", "setup", "migrate", "watch", "pause", "resume", "cancel-turn",
+READ_ONLY_REFUSED = ("quickstart", "init", "setup", "migrate", "pause", "resume", "cancel-turn",
                      "rollback", "rule", "session", "serve", "lead", "tui", "upgrade", "bench")
 
 
@@ -515,7 +518,7 @@ def _read_only_summary() -> list[tuple[str, tuple[str, ...] | None]]:
             ("panel", ("status", "lenses", "list")), ("roadmap", ("queue", "phases", "check", "graph", "ready")),
             ("interject --list", None), ("brief", None), ("hub list", None),
             ("registry list", None), ("usage", None), ("contract", None), ("tail", None), ("hook", None),
-            ("doctor", None), ("report", None)]
+            ("doctor", None), ("report", None), ("watch", ("status", "log"))]
 
 
 def main() -> int:

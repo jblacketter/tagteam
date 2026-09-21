@@ -212,6 +212,15 @@ def now_payload(project_dir: str | Path) -> dict:
         watcher = watcher_status(root, inflight)
     except Exception:
         watcher = {"running": False, "pid": None, "mode": None, "source": None, "stale_pidfile": False}
+    # Phase 67: when the watcher last looked (derived state, so no consumer
+    # re-derives staleness) and the last thing it did that was not chatter.
+    try:
+        from tagteam import watchlog
+        watcher["beat"] = watchlog.beat_view(root, watcher, inflight)
+        watcher["last_event"] = watchlog.last_event(root)
+    except Exception:
+        watcher.setdefault("beat", {"state": "none", "age_s": None, "every_s": None, "stale_after_s": None})
+        watcher.setdefault("last_event", None)
 
     pending_notes = 0
     try:
@@ -1277,3 +1286,13 @@ def run_action(action: str, params: dict, project_dir: str | Path,
     except ValueError as e:
         return {"ok": False, "message": str(e), "rc": 400, "cli": None}
     return _run(fn, args, project_dir)
+
+
+def watcher_events_payload(project_dir: str | Path, n: int = 50) -> dict:
+    """GET /api/watcher/events — the newest `n` watcher events, oldest first."""
+    from tagteam import watchlog
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        n = 50
+    return {"events": watchlog.read(project_dir, max(1, min(n, 500)))}

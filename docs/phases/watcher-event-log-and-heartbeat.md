@@ -1,10 +1,47 @@
 # Phase 67: Watcher event log and heartbeat
 
 ## Status
-- [ ] Planning
-- [ ] Implementation: branch `phase/watcher-event-log-and-heartbeat`
+- [x] Planning: approved round 2 (2026-09-20) at `dcf4f2e`
+- [x] Implementation: branch `phase/watcher-event-log-and-heartbeat`
 - [ ] Implementation Review
 - [ ] Complete
+
+## Implementation notes (where the code differs from the plan text below)
+- **`in-turn` is wider than planned, on purpose.** The plan exempted only a
+  headless *cycle* turn. Reading the code showed the watcher loop also blocks
+  inside a gate run (minutes — this repo's suite is ~8), a panel and a brief,
+  each of which claims the turn slot with `watcher_pid` = the watcher. The rule
+  implemented is the accurate one: **the in-flight record's runner is the
+  beat's own watcher** (`watcher_pid` equal, `watcher_ident` not contradicting).
+  A lead conversation is run by the server (another pid) and never matches; a
+  marker from another or an earlier watcher never matches; a dead runner makes
+  the beat `previous` before the question arises. The child `pid` is not
+  required to be alive: a gate's marker carries `pid: None` throughout.
+- **Effective cadence** (approval note 1): staleness uses
+  `max(every_s, 5 s throttle)`, so `--interval 1` is judged against 15 s, not
+  3 s; a missing / non-positive `every_s` falls back to 30 s.
+- **Leaf `lstat` kept** (approval note 2): `_open_regular` refuses an existing
+  non-regular leaf by `lstat` before opening, then `fstat`s the descriptor;
+  `O_NOFOLLOW` is additional, not the only guard. The module docstring says
+  what this is not: a defence against someone replacing the project's
+  directories while the watcher runs.
+- **`slot-busy` dropped from the vocabulary.** That line is printed by the
+  headless engine through the `log=` callable it is handed; tagging it would
+  mean changing the engine's logging signature, which the plan ruled out. It
+  arrives as `info`. 18 kinds remain, pinned by a test against the source.
+- **`docs/workflows.md` left alone.** It lists watcher *modes*, not commands,
+  and it is a managed framework file: a two-line addition would refresh it in
+  every registered project on the next upgrade. README, `HELP_TEXT` and
+  `CLAUDE.md` carry the two commands.
+- `tagteam watch status` truncates the `last dispatch` message to 100
+  characters (a participant-mismatch refusal is ~330); `watch log` never does.
+- Criterion 10 was done against a real watcher *process* in a scratch project
+  (`tagteam watch --mode notify --poll --interval 2`: `watch status` showed
+  `running (pid …)`, `last look: 2s ago`, the `refused` dispatch; after SIGTERM
+  the beat was gone, the log ended in `stop  Watcher stopped.` and matched the
+  process's stdout line for line). **Not done on this repo:** the iTerm2
+  watcher running here was started before this change and holds the old code;
+  it records nothing until the arbiter restarts that tab.
 
 ## Summary
 First phase of the cockpit arc (Phases 67–74, agreed with the arbiter on
