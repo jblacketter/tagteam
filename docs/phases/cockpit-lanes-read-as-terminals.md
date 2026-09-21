@@ -1,0 +1,192 @@
+# Phase 68b: Cockpit lanes read as terminals
+
+## Status
+- [ ] Planning
+- [ ] Implementation: branch `phase/cockpit-lanes-read-as-terminals`
+- [ ] Implementation Review
+- [ ] Complete
+
+## Summary
+The arbiter, 2026-09-20: the cockpit "should emulate the terminals to a certain
+degree. A lane to the left is the lead, a lane to the right is the reviewer…
+I want the lead window to show what I see in the lead tab in the CLI version.
+It's OK if it starts with a fresh output on each turn." Only the lead lane has a
+composer; the reviewer side needs "the running activity and status".
+
+What the lanes are today (live looks of 2026-09-20/21; screenshots
+`.playwright-mcp/trial-*.png`, `p68-*.png`):
+
+| # | Seen | Where it comes from |
+|---|---|---|
+| 1 | Reviewer lane = a stack of cards, each with a log box `max-height: 16em` (~6 visible lines in a lane); lead lane = chat bubbles **and** cards. Two looks, neither a terminal. | `buildActRow` / `.act-lines` (css 322, 286); `fillMsgRow` |
+| 2 | Pre-check runs sit in the reviewer's lane; `BOUNCED` reads as codex's verdict. | `inReviewerLane` accepts `role: gatekeeper` (js 1101) |
+| 3 | The lead lane shows Phase 52 turn cards under the current cycle's header. | `loadActivity` → `if (inLeadLane(it)) upsertRow(LLANE, it)` — no cycle filter; the reviewer lane got one in Phase 58 (`applyLaneScope`). Open backlog item, `docs/roadmap.md`. |
+| 4 | **A healthy turn is offered for cancellation.** The Needs-you card "*X*'s process disappeared mid-turn — **Cancel turn**" fires on `n.inflight.pid_alive === false` (js 578); the lanes' `gone` state and "process disappeared" text use the same test (js 995–1007). `pid_alive` is `False` for `pid: None` — the whole of every pre-check (a gate marker never has a child) and the start of every turn. Phase 68 fixed this for the headline (`inflight.liveness`); the card and the lanes still use the old flag. | read in the code; the payload shape is pinned by Phase 68's `("no-child", False)` test. **Not yet seen on screen** — to be captured before the fix (criterion 9). |
+| 5 | With the bar saying **Stalled**, *Needs you* is calm ("Waiting on codex…") and the reviewer lane says "its turn · the watcher will start it". | `renderNeeds`, `laneText` derive their own story from `owed` / `watcher.running`; they do not read `n.headline`. |
+| 6 | A lead turn started by the Start card runs as a chat (`YOU: /tagteam:handoff start … impl`). Since Phase 68a a headless watcher hands the plan over as a cycle turn, so this now happens only on a manual Start. | `launch` → lead conversation |
+
+## Principles
+- **Match the real world / mental model** — the thing being replaced is a
+  terminal tab: one continuous, monospace, auto-following stream of what the
+  agent is doing *now*. A turn is the unit the arbiter thinks in.
+- **Visibility of status** — the active lane must be unmistakable, and must
+  say the same thing as the turn bar (one story, told once: Phase 68).
+- **Error prevention** — never offer a destructive action (Cancel turn) on a
+  guess.
+- **Consistency** — a turn looks the same whoever started it (watcher, Start
+  card, chat) and whichever lane it is in.
+
+## Proposed design — three choices that are the arbiter's
+These are UX calls; the recommendation is marked. The arbiter can overrule any
+of them with an interjection during plan review.
+
+1. **Lane body = the newest turn, open and full height; earlier turns of this
+   cycle folded to one line above it.** *(recommended)* — "fresh output on each
+   turn", like a terminal after `clear`, with history one click away.
+   Alternative: one continuous scroll of every turn's output.
+2. **Pre-checks and panels move to a strip across the top of the lanes region**
+   (`pre-checks  r1 ✗ bounced 7m52s · r2 ✗ 8m04s · r3 ✓ passed 7m48s`), each
+   one opening its log under the strip. *(recommended)* Alternative: a third,
+   narrow middle lane — but the arbiter ruled out a middle lane for the watcher
+   and the same argument (looked at occasionally) applies.
+3. **A chat turn is a turn**: rendered in the same stream style, opening with
+   the arbiter's message as a prompt line (`you ▸ /tagteam:handoff start …`).
+   *(recommended)* The composer and the conversation picker stay.
+
+## Scope
+**In**
+
+### 1. One turn, one terminal block (both lanes)
+- A **turn block** = a one-line header (`12:36:47  plan review · round 1 ·
+  working · 0:41` → `done · 29s · APPROVED`) and a **stream**: the rendered
+  turn log the server already serves (`/api/activity/log/<stem>/events`, SSE,
+  replayed from the start for a finished turn; `/api/tail?stem=` for a closed
+  one) — the same `→ Bash: …` / `← …` lines the terminal shows. Monospace,
+  wraps, no inner max-height: the block's stream fills the lane and the **lane**
+  scrolls.
+- The newest block in a lane is open; earlier blocks of the cycle are folded to
+  their header (click / Enter toggles; a block the arbiter opened stays open).
+  A running block is always open and cannot be folded away by a refresh.
+- **Follow like a terminal:** the lane follows new output only while already at
+  the bottom; scrolling back holds the position (measured in the scroll
+  container's coordinates — Phase 68's `rowTopIn`, not `offsetTop`) and shows a
+  "new output ↓" cue until the arbiter returns to the bottom.
+- The stream is `textContent` lines only. No `innerHTML` (the page holds the
+  POST token; log lines are arbitrary text).
+- Existing keyed-and-patched stores (`RLANE` / `LLANE`, `upsertRow`,
+  `patchActRow`, `attachActStream`) are kept — rows are restyled and re-nested,
+  not rebuilt on every refresh (a rebuild would drop the SSE cursor and the
+  arbiter's scroll position).
+
+### 2. Both lanes scoped to the current cycle
+`applyLaneScope` / `LANE_CYCLE` / "Show last session" apply to `LLANE` exactly
+as they do to `RLANE`. Chat turns of the selected conversation are shown in
+time order with the cycle's lead turns; chat turns from before the current
+cycle started fold under the same "earlier" disclosure. Closes the backlog
+item; the roadmap entry is updated.
+
+### 3. Pre-checks and panels leave the reviewer's lane
+- `inReviewerLane` stops accepting `gatekeeper`; `gate`, `panel` and
+  `panel_lens` items go to a new **checks strip** (`#lane-checks`) above the two
+  lanes, scoped to the current cycle, newest right. Each chip: round, outcome
+  word (the existing `VERDICT_WORD` / `OUTCOME_LABEL` vocabularies), duration;
+  the running one pulses. Selecting a chip opens that run's log in a block under
+  the strip (same block component); selecting it again closes it.
+- The header's `chip-gate` stays (last decision at a glance).
+
+### 4. Lanes and Needs-you tell the headline's story
+- `laneText` stops deriving: the lane whose role is `n.headline.role` shows
+  `n.headline.text` with the ticking age, and takes the bar's tone
+  (`working` → pulse in the role colour; `danger` / `attention` → the lane's
+  border). The other lane shows the quiet counterpart it shows today
+  (`waiting` / the cycle's outcome).
+- **Liveness, not `pid_alive`:** the lanes' `gone` state and the Needs-you
+  "process disappeared" card key on `n.inflight.liveness === 'lost'`. Nothing in
+  `cockpit.js` reads `pid_alive` afterwards (guarded). The card's wording
+  follows the headline ("…'s turn was abandoned — the process running it is
+  gone"); Cancel turn keeps its confirm.
+- New Needs-you card for `headline.state` `stalled` / `watcher-stale`: "The
+  watcher has stopped looking" — what it means, `last look` from
+  `watcher.beat.text`, and one action: **Open the watcher** (opens the Phase 68
+  drawer, where Stop / Start live). No new endpoint.
+- The "Waiting on X, but the watcher is off" card is unchanged.
+
+### 5. Tests
+- Node-harness tests (the Phase 43/45 slice is already run under node): block
+  build / patch, newest-open and earlier-folded, a running block is never
+  folded, lead-lane cycle scoping incl. "Show last session", gate/panel items
+  routed to the strip and not to the reviewer lane, chat turn rendered as a
+  block with its prompt line, lane text = headline text for the headline's
+  role, `liveness: 'lost'` → card, `pid_alive: false` with `liveness:
+  'no-child' | 'starting'` → **no** card and no `gone` lane.
+- A **real-Chromium** test (Phase 68's `_run_in_chromium` technique, shipped
+  CSS + markup): a lane with a long wrapped stream follows at the bottom, holds
+  the reader's line when scrolled back while lines arrive, and the block fills
+  the lane (no 16em box).
+- String guards: updated deliberately and listed in the submission
+  (`OUTCOME_LABEL` / `VERDICT_WORD` stay literal; `.act-lines` selector and the
+  lane ids stay; `pid_alive` joins the must-not-appear list for `cockpit.js`).
+
+### 6. Docs
+`README.md` (cockpit section + the two screenshots' alt text if they change),
+`CLAUDE.md`, `docs/cockpit-issues.md` (close the 68b items), `docs/roadmap.md`
+(this phase; the lead-lane backlog item → done).
+
+**Out**
+- Any server or API change beyond what a test needs (the stream endpoints, the
+  activity items and `headline` / `liveness` already exist).
+- Typing into a running turn; a reviewer composer (arbiter: not now).
+- The roadmap tab (69), rules (70/71), jobs strip (72), the Saloon, a light theme.
+- Re-rendering ANSI colour or the interactive Claude Code / Codex TUI: the
+  stream is tagteam's rendering of the turn, as agreed on 2026-09-20.
+- README screenshots are regenerated only if the change makes them wrong.
+
+## Technical approach
+- **Restyle and re-nest, do not rewrite.** The stores, keys, SSE attachment and
+  cursor logic of Phases 43/45/58 work and are tested; the block is the
+  existing row with its log box promoted from a 16em inset to the lane's body,
+  and with folding added. The chat bubble renderer (`fillMsgRow`) is the part
+  that is replaced, by a block whose header is the prompt line.
+- **One scroller per lane.** Today each card's log box scrolls inside a lane
+  that also scrolls; nested scrollers are why a lane never feels like a
+  terminal. The block's stream does not scroll; the lane does.
+- **Risk — performance.** A turn log can be thousands of lines. Folded blocks
+  hold no DOM for their stream (it is dropped on fold and re-read from
+  `/api/tail` on open); an open finished block is capped at the last 2,000
+  lines with a "show the whole log" link to the existing tail view; a running
+  block appends incrementally as now.
+- **Risk — the test guards.** Same rule as Phase 68: every changed guard is
+  changed on purpose and listed; none is deleted to get green.
+- **Look first, then again.** Phase 68's three review rounds each turned on
+  something only a real page showed. This phase's submission includes a browser
+  pass over a real headless cycle *after* the last code change, not only before.
+
+## Files
+- Modified: `tagteam/data/web/cockpit.html`, `cockpit.js`, `cockpit.css`,
+  `tests/test_cockpit_activity.py`, `README.md`, `CLAUDE.md`,
+  `docs/cockpit-issues.md`, `docs/roadmap.md`
+
+## Success criteria
+1. In a headless cycle each lane shows the running turn as one full-lane,
+   monospace, live stream; when the turn ends and the next begins, the lane
+   shows the new turn's output with the earlier one folded above it.
+2. Lead and reviewer blocks look the same; a chat turn is a block that opens
+   with the arbiter's message.
+3. Neither lane shows a turn from another cycle unless "Show last session" is
+   on; the lead-lane backlog item is closed.
+4. No pre-check or panel appears in the reviewer's lane; the checks strip shows
+   them per round and opens a run's log.
+5. During a pre-check and at the start of a turn there is **no** "process
+   disappeared" card and no `gone` lane; a marker whose owner is really gone
+   still produces the card. `pid_alive` is not read anywhere in `cockpit.js`.
+6. Under a stalled watcher: the bar, the owed agent's lane and a Needs-you card
+   say the same thing; the card opens the watcher drawer.
+7. Follow / hold / cue behaviour passes in real Chromium with the shipped CSS.
+8. Node-harness and guard tests pass; every changed guard is listed.
+9. Seen, not assumed — screenshots (git-ignored `.playwright-mcp/`) of a real
+   headless cycle: reviewer streaming, hand-off, lead streaming, earlier turn
+   folded, a chat turn, the checks strip with a bounced and a passed run, the
+   stalled trio (bar + lane + card); and, **before** the fix, the false
+   "process disappeared" card during a real pre-check. A final pass after the
+   last code change. States not seen are named in the closeout.
+10. Full suite green via the gate; checkout clean afterwards.
