@@ -1,0 +1,16 @@
+{
+  "state": "in-progress",
+  "ready_for": "lead",
+  "round": 1,
+  "phase": "cockpit-turn-bar-and-watcher-drawer",
+  "type": "plan",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-21",
+  "baseline": {
+    "sha": "20d14acc94a832fdbe7f3ab8994c1d0a1c524878",
+    "dirty_paths": [],
+    "captured_at": "2026-09-21T07:19:09.765780+00:00",
+    "source": "plan-init"
+  }
+}
