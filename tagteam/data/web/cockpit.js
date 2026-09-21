@@ -166,44 +166,16 @@
       cyc.textContent = 'no phase in progress';
     }
 
-    // who chip: who is working now (in flight) OR who we are waiting on
-    var inf = $('chip-inflight');
-    if (n.inflight) {
-      inf.classList.remove('hidden');
-      inf.innerHTML = inflightChipHTML(n);
-    } else {
-      inf.classList.add('hidden');
-    }
-    renderOwedChip(n);
-
-    var pz = $('chip-paused');
+    // Phase 68: who has the ball is ONE sentence, derived server-side (n.headline);
+    // the watcher's facts and history live in the drawer behind it.
+    renderTurnBar(n);
+    renderDrawerFacts(n);
     if (n.paused) {
-      pz.classList.remove('hidden');
-      pz.textContent = 'turns paused ' + fmtAge(n.paused.age_s) + (n.paused.by ? ' by ' + n.paused.by : '');
       $('btn-pause').textContent = 'Resume';
       $('btn-pause').title = 'resume turns (tagteam resume) — the watcher picks up the waiting turn';
     } else {
-      pz.classList.add('hidden');
       $('btn-pause').textContent = 'Pause';
       $('btn-pause').title = 'pause turns (tagteam pause) — nothing new is started until you resume';
-    }
-
-    // watcher chip: a switch — on / off — with the one action that flips it
-    var w = $('chip-watcher');
-    var wr = n.watcher || {};
-    w.className = 'chip ' + (wr.running ? 'ok' : (n.owed && !n.inflight ? 'warn' : ''));
-    var wbtn = $('btn-watcher');
-    var wlabel = w.firstChild;   // text node before the button
-    if (wr.running) {
-      wlabel.textContent = 'watcher: on';
-      w.title = 'the watcher runs each turn by itself (' + (wr.mode || '?') + ' mode, pid ' + wr.pid + ', found via ' + (wr.source || '?') + ')';
-      wbtn.textContent = 'Stop'; wbtn.title = 'stop this watcher (tagteam watch --stop; identity-checked)';
-      wbtn.classList.toggle('hidden', wr.source !== 'pidfile');
-    } else {
-      wlabel.textContent = wr.stale_pidfile ? 'watcher: off (it died)' : 'watcher: off';
-      w.title = (wr.stale_pidfile ? 'the recorded watcher process is gone. ' : '') + 'Turns only run when the watcher is on (or when you chat with the lead here).';
-      wbtn.textContent = 'Start'; wbtn.title = 'start the watcher: tagteam watch --mode ' + ((START && START.headless && START.headless.ok) ? 'headless' : 'notify') + ' --pidfile';
-      wbtn.classList.remove('hidden');
     }
 
     // Phase 38: gate chip — only when the gate is on; last decision for this cycle.
@@ -233,32 +205,14 @@
     fitLanes();
   }
 
-  function renderOwedChip(n) {
-    var owed = $('chip-owed');
-    owed.className = 'chip';
-    owed.classList.toggle('hidden', !!n.inflight);
-    if (n.owed) {
-      owed.innerHTML = 'waiting on <b>' + esc(n.owed.agent || n.owed.role) + '</b> · ' + esc(fmtAge(n.owed.age_s));
-      if (n.owed.age_s > 900) owed.classList.add('warn');
-    } else if (n.cycle && (n.cycle.state === 'escalated' || n.cycle.state === 'needs-human')) {
-      owed.innerHTML = 'waiting on <b>you</b>';
-      owed.classList.add('warn');
-    } else if (n.last_turn) {
-      owed.textContent = 'idle · ' + lastTurnText(n.last_turn);
-      owed.title = 'nothing is running; the last turn: ' + kindLabel(n.last_turn) + ' — ' + outcomeLabel(n.last_turn.status);
-    } else {
-      owed.textContent = 'idle';
-    }
-  }
-
   $('btn-watcher').addEventListener('click', function (e) {
     e.stopPropagation();
     var wr = (NOW && NOW.watcher) || {};
     if (wr.running) {
       act($('btn-watcher'), '/api/watch/stop', {}, { confirm: { title: 'Stop the watcher?', body: 'Sends SIGTERM to the pidfile\'d watcher only if its identity verifies.' } });
     } else {
-      var mode = (START && START.headless && START.headless.ok) ? 'headless' : 'notify';
-      act($('btn-watcher'), '/api/watch/start', { mode: mode }, { confirm: { title: 'Start the watcher?', body: mode === 'headless' ? 'From then on each waiting turn runs by itself as a fresh agent process, detached from this server.' : 'Notifies you on each turn flip (this page cannot run turns for both agents).' } });
+      var mode = watcherStartMode();
+      act($('btn-watcher'), '/api/watch/start', { mode: mode }, { confirm: { title: 'Start the watcher?', body: watcherStartBody(mode) } });
     }
   });
 
@@ -269,6 +223,138 @@
   });
   // (Phase 43: the tail drawer is gone — the running Activity row streams
   // the same log, and Cancel lives on that row.)
+
+  // ---------- Phase 68: Turn bar + watcher drawer (text nodes only — the page holds the POST token) ----------
+  // The sentence, its tone and its age come from the server (`n.headline`,
+  // cockpit_api.headline). This block only presents them: it appends the ONE
+  // ticking age, colours the bar, and fills the drawer. It must not work out
+  // who has the ball for itself.
+  var HEAD = null;                 // the headline being shown (age ticks locally between polls)
+  var DRAWER = { open: false, all: false, events: [], follow: true, timer: null };
+  var DRAWER_KEY = 'tagteam.cockpit.drawer';
+  var KIND_FAMILY = { turn: 'dispatch', sent: 'dispatch', resumed: 'dispatch', advance: 'dispatch', start: 'dispatch', stop: 'dispatch',
+    gate: 'check', panel: 'check', paused: 'hold', watchdog: 'hold', done: 'done',
+    'send-failed': 'problem', refused: 'problem', stuck: 'problem', error: 'problem', aborted: 'problem', escalated: 'problem', info: 'info' };
+  var TERMINAL_MODES = { iterm2: 1, terminal: 1, tmux: 1 };
+
+  function renderTurnBar(n) {
+    var h = (n && n.headline) || { state: 'idle', tone: 'idle', text: '…', age_s: null };
+    HEAD = { state: h.state, tone: h.tone, text: h.text, age_s: h.age_s, role: h.role };
+    var bar = $('turn-bar');
+    bar.className = 'turn-bar tone-' + (h.tone || 'idle') + (h.role === 'lead' || h.role === 'reviewer' ? ' role-' + h.role : '');
+    bar.dataset.state = h.state || '';
+    $('turn-text').textContent = h.text || '';
+    paintTurnAge();
+  }
+  function paintTurnAge() {
+    $('turn-age').textContent = (HEAD && HEAD.age_s != null) ? '· ' + fmtAge(Math.round(HEAD.age_s)) : '';
+  }
+  function tickTurnBar() {        // called once a second by renderNowAges
+    if (HEAD && HEAD.age_s != null) { HEAD.age_s += 1; paintTurnAge(); }
+  }
+
+  function watcherStartMode() { return (START && START.headless && START.headless.ok) ? 'headless' : 'notify'; }
+  function headlessReasons() { return (START && START.headless && !START.headless.ok && START.headless.errors) || []; }
+  function watcherStartBody(mode) {
+    if (mode === 'headless') return 'From then on each waiting turn runs by itself as a fresh agent process, detached from this server.';
+    var why = headlessReasons();
+    return 'Starts a watcher that only NOTIFIES you on each turn flip — it runs no turns. This page cannot run the agents itself yet' +
+      (why.length ? ': ' + why.join('; ') + '.' : '.');
+  }
+  function watcherNote(n) {       // why the lanes may be empty / why this page cannot run turns
+    var wr = (n && n.watcher) || {};
+    if (wr.running && TERMINAL_MODES[wr.mode]) return 'Agents are running in their terminals (' + wr.mode + '). The lanes show only turns the cockpit runs itself.';
+    if (wr.running && wr.mode === 'notify') return 'This watcher only notifies you; it runs no turns.';
+    var why = headlessReasons();
+    if (!wr.running && why.length) return 'This page cannot run the agents itself yet: ' + why.join('; ') + '.';
+    return '';
+  }
+
+  function fact(dl, label, value, cls) {
+    dl.appendChild(el('dt', null, label));
+    dl.appendChild(el('dd', cls || null, value));
+  }
+  function renderDrawerFacts(n) {
+    var wr = (n && n.watcher) || {}; var beat = wr.beat || {};
+    var dl = $('wd-facts');
+    while (dl.firstChild) dl.removeChild(dl.firstChild);
+    if (wr.running) fact(dl, 'watcher', 'running — ' + (wr.mode || 'mode unknown') + ', pid ' + wr.pid + (wr.started_at ? ', since ' + fmtTime(wr.started_at) : ''));
+    else fact(dl, 'watcher', wr.stale_pidfile ? 'not running — the recorded process died' : 'not running', (n && n.owed) ? 'warn' : null);
+    fact(dl, 'last look', beat.text || 'never', beat.state === 'stale' ? 'danger' : null);
+    fact(dl, 'turns', n && n.paused ? 'paused' + (n.paused.by ? ' by ' + n.paused.by : '') + (n.paused.reason ? ' — ' + n.paused.reason : '') : 'not paused', n && n.paused ? 'warn' : null);
+    if (n && n.last_turn) fact(dl, 'last turn', lastTurnText(n.last_turn).replace(/^last: /, ''));
+    var wbtn = $('btn-watcher');
+    if (wr.running) {
+      wbtn.textContent = 'Stop the watcher'; wbtn.title = 'stop this watcher (identity-checked)';
+      wbtn.classList.toggle('hidden', wr.source !== 'pidfile');
+    } else {
+      wbtn.textContent = 'Start the watcher'; wbtn.title = 'tagteam watch --mode ' + watcherStartMode() + ' --pidfile';
+      wbtn.classList.remove('hidden');
+    }
+    var note = watcherNote(n);
+    $('wd-note').textContent = note;
+    $('wd-note').classList.toggle('hidden', !note);
+  }
+
+  function drawerRow(ev) {
+    var fam = KIND_FAMILY[ev.kind] || 'info';
+    var row = el('div', 'wd-row f-' + fam);
+    row.dataset.kind = ev.kind || 'info';
+    row.appendChild(el('span', 't', fmtTime(ev.ts)));
+    row.appendChild(el('span', 'k', ev.kind || 'info'));
+    row.appendChild(el('span', 'm', String(ev.msg == null ? '' : ev.msg).replace(/^\s+/, '')));
+    return row;
+  }
+  function atBottom(box) { return box.scrollHeight - box.scrollTop - box.clientHeight < 8; }
+  function renderDrawerRows(events) {
+    var box = $('wd-rows');
+    var had = DRAWER.events.length;
+    var follow = had === 0 || atBottom(box);       // follow new rows only while already at the bottom
+    var top = box.scrollTop;
+    DRAWER.events = events || [];
+    while (box.firstChild) box.removeChild(box.firstChild);
+    var shown = 0;
+    DRAWER.events.forEach(function (ev) {
+      if (!DRAWER.all && (ev.kind || 'info') === 'info') return;
+      box.appendChild(drawerRow(ev)); shown += 1;
+    });
+    if (!shown) {
+      box.appendChild(el('div', 'wd-empty', DRAWER.events.length
+        ? 'Only routine lines so far — tick "show everything" to see them.'
+        : 'No watcher history yet — it is recorded once a watcher runs here (tagteam 3.14.5+).'));
+    }
+    if (follow) { box.scrollTop = box.scrollHeight; $('wd-new').classList.add('hidden'); }
+    else { box.scrollTop = top; $('wd-new').classList.toggle('hidden', DRAWER.events.length <= had); }
+    DRAWER.follow = follow;
+  }
+  function loadWatcherEvents() {
+    if (!DRAWER.open) return Promise.resolve();   // nothing is fetched while the drawer is closed
+    return getJSON('/api/watcher/events?n=200').then(function (r) {
+      if (r.ok && r.body && DRAWER.open) renderDrawerRows(r.body.events || []);
+    });
+  }
+  function refreshDrawer() {
+    // `last look` is a sentence with an age in it; while the drawer is open it
+    // is re-read every few seconds rather than left to go stale for 30 s.
+    if (!DRAWER.open) return;
+    getJSON('/api/now').then(function (r) { if (r.ok && r.body && DRAWER.open) { renderTurnBar(r.body); NOW.watcher = r.body.watcher; NOW.paused = r.body.paused; renderDrawerFacts(r.body); } });
+    loadWatcherEvents();
+  }
+  function setDrawer(open) {
+    DRAWER.open = !!open;
+    $('watcher-drawer').classList.toggle('hidden', !DRAWER.open);
+    $('turn-bar').setAttribute('aria-expanded', DRAWER.open ? 'true' : 'false');
+    $('turn-caret').textContent = DRAWER.open ? '▴' : '▾';
+    try { localStorage.setItem(DRAWER_KEY, DRAWER.open ? '1' : '0'); } catch (e) {}
+    if (DRAWER.timer) { clearInterval(DRAWER.timer); DRAWER.timer = null; }
+    if (DRAWER.open) { loadWatcherEvents(); DRAWER.timer = setInterval(refreshDrawer, 5000); }
+    if (typeof fitLanes === 'function') fitLanes();
+  }
+  $('turn-bar').addEventListener('click', function () { setDrawer(!DRAWER.open); });
+  $('wd-all').addEventListener('change', function () { DRAWER.all = !!$('wd-all').checked; renderDrawerRows(DRAWER.events); });
+  $('wd-new').addEventListener('click', function () { var box = $('wd-rows'); box.scrollTop = box.scrollHeight; $('wd-new').classList.add('hidden'); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && DRAWER.open && !document.querySelector('.modal-overlay:not(.hidden)')) setDrawer(false); });
+  // ---------- end Phase 68 ----------
 
   // ---------- Needs you ----------
   function briefSections(md) {
@@ -467,7 +553,7 @@
       var wstart = el('button', 'btn btn-primary', 'Start the watcher');
       var wmode = (START && START.headless && START.headless.ok) ? 'headless' : 'notify';
       wstart.title = 'tagteam watch --mode ' + wmode + ' --pidfile';
-      wstart.addEventListener('click', function () { act(wstart, '/api/watch/start', { mode: wmode }, { confirm: { title: 'Start the watcher?', body: wmode === 'headless' ? 'From then on each waiting turn runs by itself as a fresh agent process, detached from this server.' : 'Notifies you on each turn flip (this page cannot run turns for both agents).' } }); });
+      wstart.addEventListener('click', function () { act(wstart, '/api/watch/start', { mode: wmode }, { confirm: { title: 'Start the watcher?', body: watcherStartBody(wmode) } }); });
       wfin.appendChild(wstart); wr2.appendChild(wfin); wc.appendChild(wr2);
       wrap.appendChild(wc); cards++;
     }
@@ -796,11 +882,6 @@
     if (k === 'briefer') return 'decision brief';
     if (k === 'gate') return 'pre-check';
     return k;
-  }
-  function inflightChipHTML(n) {
-    var inf = n.inflight;
-    return '<span class="pulse"></span> <b>' + esc(inf.agent || inf.provider || '?') + '</b> is working · ' + esc(inflightKind(n)) + ' · ' + esc(fmtAge(inf.age_s)) +
-      (inf.pid_alive === false ? ' · <span class="muted">' + esc(OUTCOME_LABEL.process_gone) + '</span>' : '');
   }
   function agoText(ts) {
     if (!ts) return '';
@@ -1492,6 +1573,7 @@
   }
 
   // ---------- boot ----------
+  try { if (localStorage.getItem(DRAWER_KEY) === '1') setDrawer(true); } catch (e) {}   // Phase 68: the drawer stays as you left it
   var verMeta = document.querySelector('meta[name="tagteam-version"]');
   if (verMeta) $('now-version').textContent = verMeta.getAttribute('content') || '';
   if (BASE) {
@@ -1520,9 +1602,7 @@
     if (NOW.inflight && NOW.inflight.age_s != null) NOW.inflight.age_s += 1;
     if (NOW.paused && NOW.paused.age_s != null) NOW.paused.age_s += 1;
     if (NOW.launch && NOW.launch.age_s != null) NOW.launch.age_s += 1;
-    renderOwedChip(NOW);
-    if (NOW.inflight) $('chip-inflight').innerHTML = inflightChipHTML(NOW);
-    if (NOW.paused) $('chip-paused').textContent = 'turns paused ' + fmtAge(NOW.paused.age_s) + (NOW.paused.by ? ' by ' + NOW.paused.by : '');
+    tickTurnBar();
     renderLaneAges();
   }
 })();

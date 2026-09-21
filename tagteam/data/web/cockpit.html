@@ -8,21 +8,26 @@
 </head>
 <body>
 
-<!-- NOW strip (UX pass 2026-08-17): the project first — you can serve the
-     wrong one — then four chips in the arbiter's words: the phase, who is
-     working / who we are waiting on, the watcher (on / off), the connection. -->
+<!-- NOW strip. The project first — you can serve the wrong one — then ONE
+     dominant sentence, the turn bar (Phase 68): who has the ball, derived
+     server-side (`/api/now` → `headline`). Selecting it opens the watcher
+     drawer underneath. The phase, the pre-check and waiting notes follow as
+     small secondary chips. -->
 <header class="now" id="now">
   <div class="now-row">
     <div class="brand">
       <span class="brand-name" id="now-project" title="project directory">…</span>
       <span class="brand-sub">Tagteam cockpit <span class="version" id="now-version"></span></span>
     </div>
+    <button class="turn-bar tone-idle" id="turn-bar" type="button" aria-expanded="false" aria-controls="watcher-drawer"
+            title="who has the ball — select to see what the watcher is doing">
+      <span class="turn-dot" id="turn-dot"></span>
+      <span class="turn-text" id="turn-text">…</span>
+      <span class="turn-age" id="turn-age"></span>
+      <span class="turn-cue">watcher <span id="turn-caret">▾</span></span>
+    </button>
     <div class="now-chips" id="now-chips">
       <span class="chip" id="chip-cycle" title="the phase in progress: name — plan or implementation, round — and its state">—</span>
-      <span class="chip" id="chip-owed" title="who we are waiting on, and for how long">—</span>
-      <span class="chip chip-inflight hidden" id="chip-inflight" title="who is working right now, on what">—</span>
-      <span class="chip chip-hold hidden" id="chip-paused" title="turns are paused">paused</span>
-      <span class="chip" id="chip-watcher" title="the watcher runs each turn by itself when it is on (tagteam watch)">—<button class="chip-btn hidden" id="btn-watcher" type="button">Start</button></span>
       <span class="chip hidden" id="chip-gate" title="pre-checks (gatekeeper) before each review">—</span>
       <span class="chip hidden" id="chip-notes" title="notes waiting for the next turn">—</span>
     </div>
@@ -32,6 +37,25 @@
       <a class="theme-link" href="/?theme=saloon" title="the Saloon theme">Saloon ↗</a>
     </div>
   </div>
+  <!-- WATCHER DRAWER (Phase 68): not a modal and not a tab — the lanes stay in
+       view while it is open. Facts on the left, what the watcher did on the
+       right (chatter hidden until asked for). Nothing is fetched while closed. -->
+  <section class="watcher-drawer hidden" id="watcher-drawer" aria-label="Watcher">
+    <div class="wd-facts">
+      <h3 class="wd-title">Watcher</h3>
+      <dl class="wd-list" id="wd-facts"></dl>
+      <button class="btn small" id="btn-watcher" type="button">Start</button>
+      <p class="wd-note hidden" id="wd-note"></p>
+    </div>
+    <div class="wd-history">
+      <div class="wd-head">
+        <h3 class="wd-title">What the watcher did</h3>
+        <label class="wd-all"><input type="checkbox" id="wd-all"> show everything</label>
+      </div>
+      <div class="wd-rows" id="wd-rows" tabindex="0"></div>
+      <button class="wd-new hidden" id="wd-new" type="button">new events ↓</button>
+    </div>
+  </section>
 </header>
 
 <main class="grid">
