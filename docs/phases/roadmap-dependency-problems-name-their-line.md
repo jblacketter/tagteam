@@ -3,8 +3,20 @@
 ## Status
 - [x] Planning: approved round 1 (2026-09-20) at `340cb32`
 - [x] Implementation: branch `phase/roadmap-dependency-problems-name-their-line`
-- [ ] Implementation Review
-- [ ] Complete
+- [x] Implementation Review: approved round 1 (2026-09-20) at `6295abf`; gate 2,148 passed, 5 skipped (the first full suite on the repaired `.venv`, pytest 9.1.1)
+- [ ] Complete: PR open, merge pending
+
+## Closeout
+```
+Phase report: roadmap-dependency-problems-name-their-line — plan approved r1 · impl approved r1
+  plan   1 round · 0 change requests · 0 bounces
+  impl   1 round · 0 change requests · 0 bounces · gate 1 run, 7m 46s
+  time   start→approve 11m 37s · implementation before first submit 2m 06s
+         lead unknown (0 spans, 2 unknown) · reviewer 1m 45s (2 spans) · gate 7m 46s (1 span)  (elapsed; includes relay wait)
+  usage  no usage rows stored under this phase
+  turns  matched 0 of 4 · no token data 0 · unmatched 2 · unknown 2
+```
+No reviewer notes at approval.
 
 ## Summary
 `tagteam roadmap check` reports a bad `Depends on:` reference without saying
