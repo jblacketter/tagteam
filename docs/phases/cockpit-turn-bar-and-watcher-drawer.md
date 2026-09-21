@@ -38,42 +38,99 @@ Split from the lanes work (now Phase 68b) so each half is reviewable.
 **In**
 
 ### 1. The headline — derived server-side
-`cockpit_api.headline(now)` (pure function of the `now` payload; no I/O) and
-`now_payload()["headline"]`:
+Two pure pieces in `cockpit_api.py`, no I/O in either:
 
-```
-{"state": <below>, "tone": "working|waiting|attention|danger|idle|ok",
- "text": "<one sentence, no age>", "age_s": <float|null>,
- "role": "lead|reviewer|gatekeeper|you|null", "agent": "<name>|null"}
-```
+- `headline(facts)` → `{"state", "tone", "text", "age_s", "age_of", "role",
+  "agent"}`. `text` never contains an age; `age_s` is the one age the sentence
+  is about and `age_of` names it (`turn` | `owed` | `pause` | `beat`). The
+  browser appends ` · 1m02s` with its existing 1 Hz ticker (`renderNowAges`)
+  and the CLI appends it once — a single age representation, never one frozen
+  in the text and another ticking beside it.
+- `inflight_liveness(marker, *, child_alive, owner_gone)` → one of
+  `starting | running | no-child | finishing | lost` (below).
+
+**Inputs — side-effect-free by construction** (plan review r1, point 3).
+`status_facts(root)` collects exactly what the headline needs from reads that
+never open the database: `handoff-state.json` (`read_state`), `tagteam.yaml`
+(agent names), the in-flight marker (`headless.read_inflight` +
+`headless.slot_owner_gone`), the pause marker, `watcher_status()`, and
+`watchlog.beat_view()` / `last_event()`. The cycle condition comes from the
+state file's own `status` / `result` / `roadmap.pause_reason`
+(`escalated`, `needs-human`, `done`, `aborted`) — not from `cycle.read_status`,
+which may open `db.connect` and so create or migrate `.tagteam/tagteam.db`.
+- `now_payload()` calls `status_facts()` for these facts (it already gathers
+  the same ones; the gathering moves into the shared function), then adds the
+  one DB-derived input the cockpit has and the CLI does not: a pending Start
+  `launch`. It passes `facts + launch` to `headline()`.
+- `tagteam watch status` calls `status_facts()` + `headline()` and nothing
+  else. It therefore cannot show the `launching` row; every other row is
+  identical by construction. Tested on a project **without** a database, with
+  and without `TAGTEAM_READ_ONLY`: the tree (incl. `.tagteam/`) is
+  byte-identical before and after.
+
+**In-flight liveness** (point 1). `now.inflight.pid_alive` is `False` for
+`pid: None` as well as for a dead child, and a gate marker carries `pid: None`
+for its whole run (`gatekeeper.py:702`); cycle and panel markers start that
+way too. The old chip's predicate must not be promoted into the headline.
+`pid_alive` stays as it is (compatibility); `inflight.liveness` is added:
+
+| liveness | when | reads as |
+|---|---|---|
+| `lost` | the marker's **owner** is definitively gone (`slot_owner_gone`: runner pid dead, or a recorded identity that mismatches) — or a legacy marker with no runner pid whose recorded child pid is dead | turn-lost |
+| `no-child` | live owner, kind `gate` (no child by design) | working |
+| `starting` | live owner, `pid is None`, any other kind (not spawned yet) | working |
+| `running` | live owner, recorded child pid alive | working |
+| `finishing` | live owner, recorded child pid dead — the runner is verifying and recording the result | working, worded "…'s turn has ended — recording the result" |
+
+An owner that is alive but whose identity cannot be read is **not** gone
+(`slot_owner_gone` fails closed) → never `lost` on a guess.
+
+**Was the owed turn delivered?** (point 2: dispatch machinery ≠ agent
+execution.) `watcher` gains `last_dispatch` — `watchlog.last_event(root,
+DISPATCH_KINDS)`. `delivered` = its kind is `sent` and its `seq` equals the
+state's `seq`. A terminal agent that already has its command may be working
+whatever has since happened to the watcher; the sentence must not call that
+turn stalled or unstartable.
 
 First match wins:
 
-| # | state | when | text (examples) | tone |
+| # | state | when | text | tone |
 |---|---|---|---|---|
-| 1 | `needs-you` | cycle escalated / needs-human, or a roadmap pause reason | "Waiting on you — escalated" · "Waiting on you — codex has a question" · "Waiting on you — roadmap paused: blocked: …" | attention |
-| 2 | `turn-lost` | in-flight marker whose process is gone (`pid_alive is False`) | "claude's turn stopped unexpectedly" | danger |
-| 3 | `working` | an in-flight turn | "codex is reviewing · round 2" · "claude is implementing · round 1" · "Pre-check running · round 3" · "Review panel running · round 2" · "claude is answering you" · "Writing the escalation brief" | working |
-| 3a | `launching` | a Start launch is pending (`now.launch`) and no turn is in flight yet | "Starting greeting-script, implementation — claude is on it" | working |
-| 4 | `paused` | a held pause marker and a turn owed | "Paused by jack — codex's turn is held" | attention |
-| 5 | `watcher-off` | a turn owed, watcher not running | "Waiting on codex — the watcher is off, nothing will start it" | attention |
-| 6 | `stalled` | a turn owed, watcher running, `watcher.beat.state == "stale"` | "Stalled: codex is owed a turn — the watcher last looked 6m ago" (age from the beat) | danger |
-| 7 | `starting` | a turn owed, headless watcher running and fresh | "Starting codex's turn…" | working |
-| 8 | `waiting-terminal` | a turn owed, tab/tmux/notify watcher running | "Waiting on codex — in its terminal" (`attention` once owed for more than 15 min — the threshold `chip-owed` uses today — else `waiting`) | waiting |
-| 9 | `approved` / `aborted` | cycle done | "Approved — watcher-event-log, implementation" | ok / idle |
-| 10 | `idle` | nothing in progress | "Nothing in progress" | idle |
+| 1 | `needs-you` | state `escalated` / `needs-human`, or a roadmap pause reason | "Waiting on you — escalated" · "Waiting on you — a question from codex" · "Waiting on you — roadmap paused: blocked: …" | attention |
+| 2 | `turn-lost` | in-flight, liveness `lost` | "claude's turn was abandoned — the process running it is gone" | danger |
+| 3 | `working` | in-flight, any other liveness | "codex is reviewing · round 2" · "claude is implementing · round 1" · "Pre-check running · round 3" · "Review panel running · round 2" · "claude is answering you" · "Writing the escalation brief" · (`finishing`) "codex's turn has ended — recording the result" | working |
+| 3a | `launching` | cockpit only: a Start launch pending, nothing in flight | "Starting greeting-script, implementation — claude is on it" | working |
+| 4 | `paused` | a turn owed and a held pause marker | "Paused by jack — codex's turn is held" | attention |
+| 5a | `watcher-off` | a turn owed, no watcher, **not delivered** | "Waiting on codex — the watcher is off, nothing will start its turn" | attention |
+| 5b | `watcher-off` | a turn owed, no watcher, **delivered** | "Waiting on codex — its turn was sent; the watcher has since stopped, so the next hand-off will not happen" | attention |
+| 6a | `stalled` | a turn owed, watcher running, beat `stale`, not delivered | "Stalled: codex is owed a turn and the watcher has stopped looking" (`age_of: beat`) | danger |
+| 6b | `watcher-stale` | same, but delivered | "Waiting on codex — it has its turn; the watcher has stopped looking" (`age_of: beat`) | attention |
+| 7 | `starting` | a turn owed, **headless** watcher, beat `fresh` or `in-turn` | "Starting codex's turn…" | working |
+| 8 | `waiting` | a turn owed, watcher running, anything else — wording by what is actually known: | | waiting (`attention` once owed > 15 min, `chip-owed`'s threshold today) |
+| | | · tab / tmux, delivered | "Waiting on codex — its turn was sent to its terminal" | |
+| | | · tab / tmux, not delivered | "Waiting on codex — the watcher will send its turn to its terminal" | |
+| | | · notify | "Waiting on codex — the watcher only notifies you; run the turn in codex's session" | |
+| | | · headless with beat `none` / `previous` | "Waiting on codex — a headless watcher is running but has not reported in" | |
+| | | · mode unknown (process scan only) | "Waiting on codex — a watcher is running" | |
+| 9 | `approved` / `aborted` | state `done` / `aborted` | "Approved — watcher-event-log, implementation" | ok / idle |
+| 10 | `idle` | nothing owed, nothing in flight | "Nothing in progress" | idle |
 
-- Inputs are only what `now_payload()` already assembles (`state`, `cycle`,
-  `owed`, `inflight`, `turn_kind`, `launch`, `last_turn`, `paused`, `watcher`
-  incl. `beat`, `agents`) — no new reads. `age_s` is the age the sentence is about (in-flight turn, owed turn, pause,
-  beat). The browser appends ` · 1m02s` with its existing 1 Hz ticker
-  (`renderNowAges`), so the server text stays stable between polls.
+- **Exhaustive for an owed turn:** rows 4–8 cover every combination of
+  {paused} × {watcher off / running} × {beat none, previous, fresh, in-turn,
+  stale} × {mode headless, tab, tmux, notify, unknown} × {delivered or not};
+  row 8 is the catch-all, so an owed agent can never fall through to
+  "Nothing in progress". The table test enumerates the product and asserts no
+  owed combination yields `idle`, and that the owed agent's name is in every
+  one of their sentences.
+- **Order:** `working` outranks `paused` (a pause holds future dispatch; it
+  does not stop a running turn). `watcher-off` outranks the beat: an old beat
+  file is not evidence about a process that is not running — rows 6a/6b
+  require `watcher.running`.
 - Verbs come from the existing turn vocabulary (`inflightKind`, `kindLabel`):
-  the same words the lanes use — one term per concept.
-- `watcher.beat` gains `text`: `watchlog.describe_beat()`'s sentence, so the
-  drawer and `tagteam watch status` cannot word it differently.
+  one term per concept across bar and lanes.
+- `watcher.beat` gains `text` (`watchlog.describe_beat()`), so the drawer and
+  `tagteam watch status` word "last look" identically.
 - `tagteam watch status` prints the headline as its first line (`now: …`).
-  It already assembles the same inputs; one extra line, still a read.
 
 ### 2. Turn bar (cockpit.html / .js / .css)
 - The headline is the header's dominant element: a `<button id="turn-bar"
@@ -112,6 +169,9 @@ remembered in `localStorage` like the lead conversation is.
   kinds coloured by family (dispatch · gate/panel · pause · problem). `info`
   lines are hidden behind a "show everything" toggle (off by default) — the
   eighteen tagged kinds are the story, the chatter is for debugging.
+  Follows new rows **only while already scrolled to the bottom**; once the
+  arbiter scrolls back, their position is kept and a small "new events ↓" cue
+  appears instead.
   Refreshed on the cockpit's existing refresh tick while the drawer is open;
   no new SSE stream, nothing fetched while it is closed.
 - Empty state: "No watcher history yet — it is recorded once a watcher runs
@@ -120,16 +180,28 @@ remembered in `localStorage` like the lead conversation is.
   rule; event messages are arbitrary text).
 
 ### 4. Tests
-- `tests/test_cockpit_api.py`: a table test for `headline()` — every row above,
-  the priority order (e.g. in-flight beats paused; turn-lost beats working;
-  `stale` beat with a turn in flight is not `stalled`), role/agent naming from
-  config, `beat.text`; existing `now` keys unchanged.
-- `tests/test_watchlog.py`: `watch status` first line.
+- `tests/test_cockpit_api.py`:
+  - `inflight_liveness` over **real marker shapes** (built by the marker
+    writers, not hand-typed dicts): a live gate owner with `pid: None`; a
+    cycle and a panel marker before the child is spawned; a live child; a
+    confirmed-dead child under a live owner (`finishing`); a dead owner; a
+    legacy marker without a runner pid; an owner whose identity is unreadable.
+  - `headline()` table: every row; the enumerated owed-turn product (never
+    `idle`, agent always named); delivered vs not for watcher-off, stale and
+    terminal modes; notify wording; headless with beat `none` / `previous`;
+    unknown mode; `working` over `paused`; `watcher-off` over a stale beat
+    file; `text` contains no age for any row; existing `now` keys unchanged.
+  - `status_facts()` opens no database: asserted by running it on a DB-less
+    project with `db.connect` patched to fail the test if called.
+- `tests/test_watchlog.py`: `watch status` first line; on a DB-less project,
+  with **and without** `TAGTEAM_READ_ONLY`, the project tree is identical
+  before and after (no `.tagteam/tagteam.db`, no sidecars).
 - `tests/test_cockpit_activity.py`: the drawer's row builder and the bar's
   renderer live in their own banner-delimited slice of `cockpit.js`, run under
   node by the existing harness technique (`_DOM_STUB`): events → rows, `info`
   hidden unless toggled, empty state, tone class per state, age appended
-  locally, `aria-expanded` toggling. String guards updated **deliberately**:
+  locally and exactly once, `aria-expanded` toggling, scroll-follow only at
+  the bottom. String guards updated **deliberately**:
   `chip-owed`, `chip-inflight`, `chip-watcher` leave the required-id list and
   join the must-stay-absent list; `turn-bar`, `watcher-drawer` join the
   required list; no `innerHTML` in the new slice.
@@ -176,8 +248,9 @@ headline is derived and that the front end must not re-derive it),
   `docs/roadmap.md`
 
 ## Success criteria
-1. `headline()` table test passes for every row and the stated priorities;
-   `now_payload()` keeps every existing key.
+1. `headline()` and `inflight_liveness()` table tests pass for every row, the
+   stated priorities and the enumerated owed-turn product; a running gate is
+   `working`, never `turn-lost`; `now_payload()` keeps every existing key.
 2. Header: one dominant bar; `chip-owed` / `chip-inflight` / `chip-paused` /
    `chip-watcher` gone; cycle, pre-check and notes still shown; Pause works.
 3. Drawer: opens from the bar and by keyboard, shows facts + history, hides
@@ -185,7 +258,9 @@ headline is derived and that the front end must not re-derive it),
 4. The notify-mode confirm and the drawer name the reasons headless is
    unavailable; a terminal-mode watcher gets the "agents are in their
    terminals" note.
-5. `tagteam watch status` prints the same headline the cockpit shows.
+5. `tagteam watch status` prints the same headline the cockpit shows (every
+   row but the cockpit-only `launching`), and creates or changes no file on a
+   DB-less project, with or without `TAGTEAM_READ_ONLY`.
 6. Node-harness tests for the new slice pass; every changed guard is listed.
 7. Seen, not assumed — screenshots attached to the submission (Playwright,
    `.playwright-mcp/`, git-ignored) of: a headless run in a scratch project
