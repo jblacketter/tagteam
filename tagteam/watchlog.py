@@ -159,6 +159,12 @@ class Sink:
                     pass
 
     # -- heartbeat ------------------------------------------------------
+    def due(self) -> bool:
+        """Would `beat()` write now? Lets a caller skip work (re-reading the
+        state) that a throttled beat would throw away."""
+        with self._lock:
+            return not self._last_beat or time.monotonic() - self._last_beat >= BEAT_THROTTLE_S
+
     def beat(self, state: dict | None = None, force: bool = False) -> bool:
         try:
             with self._lock:

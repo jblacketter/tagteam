@@ -1,0 +1,25 @@
+{
+  "state": "approved",
+  "ready_for": null,
+  "round": 1,
+  "phase": "headless-watcher-hands-an-approved-plan-to-the-lead",
+  "type": "plan",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-21",
+  "baseline": {
+    "sha": "3a54c926ccf6bedfdbf2929dec5bca2df32009a2",
+    "dirty_paths": [],
+    "captured_at": "2026-09-21T06:42:15.074155+00:00",
+    "source": "plan-init"
+  },
+  "impl_boundary": {
+    "sha": "684906f68fd6073c64bd6a262da6cffaed13a841",
+    "dirty": {
+      "docs/handoffs/headless-watcher-hands-an-approved-plan-to-the-lead_plan_rounds.jsonl": "bff7a00d509355b6fff4a0767b70fdd1759d5b0edbc0d4d0f21fa0eb10ffd41b",
+      "docs/handoffs/headless-watcher-hands-an-approved-plan-to-the-lead_plan_status.json": "b6fb6f7200e7884d78b9b60525e9b5851e052899faceadc3b0cf9ef66f751af4"
+    },
+    "captured_at": "2026-09-21T06:43:11.432274+00:00",
+    "source": "plan-approve"
+  }
+}
