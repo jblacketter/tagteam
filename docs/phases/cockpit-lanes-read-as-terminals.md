@@ -1,10 +1,102 @@
 # Phase 68b: Cockpit lanes read as terminals
 
 ## Status
-- [ ] Planning
-- [ ] Implementation: branch `phase/cockpit-lanes-read-as-terminals`
+- [x] Planning: approved round 2 (2026-09-21) at `1988723`
+- [x] Implementation: branch `phase/cockpit-lanes-read-as-terminals`
 - [ ] Implementation Review
 - [ ] Complete
+
+## Implementation notes — what was built, and what looking at it changed
+**Seen before the fix (criterion 9).** `p68b-0-before-false-cancel-card.png`: a
+scratch project whose gate runs `sleep 40`; 11 s into a healthy pre-check the bar
+says "Pre-check running · round 1" while *Needs you* shows ATTENTION
+"gatekeeper's process disappeared mid-turn" with a red **Cancel turn**; the
+pre-check sits in codex's lane; codex's lane header says "its turn · the watcher
+is off". Payload at that moment: `pid: None, pid_alive: False, liveness:
+'no-child'`.
+
+**Built as planned:** turn blocks in both lanes (`openBlock` / `foldBlock`, a
+fold generation `rec.gen` that discards late SSE frames and late tail responses,
+`BLOCK_CAP = 2000` for cycle, check and chat blocks with the honest note,
+reopen = one consistent read); `applyBlockPolicy` (newest open, earlier folded,
+a running block never folded by a refresh, the arbiter's own choice kept);
+`CHECKS` store + checks strip; both lanes scoped to the cycle, one "Show last
+session" switch shown in whichever lane has earlier rows; lanes and Needs-you
+cards take `n.headline` (the watcher-off and stalled cards say `headline.text`;
+the stalled card opens the drawer); `liveness === 'lost'` is the only thing that
+offers Cancel turn; `pid_alive` appears nowhere in `cockpit.js` (guarded).
+Chat turns are keyed blocks (`buildMsgRow` + a patching `fillMsgRow`,
+`appendChatLine`); the signature no longer counts lines, so a poll never
+rebuilds the stream; reply, error and continuity are kept.
+
+**Approval note (shared STREAMS registry).** A reopen never resets another
+consumer: if the key is already registered the block is emptied and takes the
+registry's buffer replay from its start; otherwise a fresh connection starts at
+0 (a fold clears the cursor). A conversation stream is filtered by turn. A
+**replayed** `end` detaches the block but does not call `refreshAll` again.
+Tests: reopen with the all-activity row still attached (its lines untouched, no
+new connection, no duplicates); a replayed end → no refresh.
+
+**What the live look changed (again — none of it caught by green tests):**
+1. *Follow is the reader's intent, not geometry.* I first judged "at the
+   bottom" by measuring; a block opening or a header patch changes the lane's
+   height with no scroll event, so both lanes showed "new output ↓" to a reader
+   who had never scrolled. `LANE_FOLLOW` now changes only in the scroll handler
+   (`onLaneScroll`); `restick()` re-pins a following lane after opens, policy
+   passes and chat renders.
+2. *The lead lane had three lines of output.* The two-line "No messages yet…"
+   prompt showed above the lead's turn blocks and the composer took ~150 px.
+   The prompt now yields to turn blocks (a test that pinned the opposite —
+   "prompt stays with cards" — is reversed on purpose and says why); the
+   composer is one line until focused or typed in, its hint shown on focus.
+3. *The Start card offered the thing already running* ("Next: clamp —
+   implementation" beside "claude is implementing"), a consequence of 68a's
+   automatic hand-off. It is not shown while a turn is in flight or the headline
+   is working / starting / launching.
+4. *A dollar figure in plain view.* The rendered turn log ended
+   `… cost=$0.81859325 …`; the full-lane stream makes that prominent, and the
+   arbiter's standing rule is no API-dollar figures (turns run on a
+   subscription). **Scope addition, one line, server side:**
+   `headless.render_event` no longer prints `cost=`; tokens, turns and duration
+   stay; nothing stored changes. Test added against the real fixture.
+5. The lead lane's "busy" line said a pre-check streams "in the reviewer
+   lane"; it says "in the checks strip above the lanes".
+
+Also from the Chromium test: trimming now loops to the cap (`while`), and the
+hold anchor is kept in whole pixels — a fractional delta re-measured on every
+append drifted 17 px → 16 px across a trim.
+
+**Deviations.** (a) Chat turns are scoped by the conversation picker, not folded
+by cycle time as the plan sketched — the page has no cycle start time and the
+picker already scopes them; newest chat block open, earlier folded. (b) A gate
+has no turn log, so its block says "no turn log for '<stem>'" (as the old card
+did); showing the gate's own report there would be a server change — not done.
+(c) The server-side change in 4 above.
+
+**Guards changed on purpose** (`tests/test_cockpit_activity.py`): the lead
+block must no longer contain a `<details>` "activity (N lines)" disclosure and
+must use the keyed stream + cap; the reviewer-lane test now expects the
+pre-check in `CHECKS` and a chip, not a lane row (counts 5/3/2 → 5/2/2); the
+chat-merge test asserts the block's prompt / stream / closing line and that the
+stream node survives a re-render; "prompt stays with cards" reversed (above).
+
+### Criterion 9 — seen, not assumed (2026-09-21, `.playwright-mcp/p68b-*.png`, git-ignored)
+| Shot | What it shows, produced for real (scratch project, headless watcher) |
+|---|---|
+| `p68b-0-before-false-cancel-card` | BEFORE the fix: the false "process disappeared — Cancel turn" card during a healthy pre-check |
+| `p68b-1-checks-strip` | a finished pre-check as a chip above the lanes, its block opened; bar, card and reviewer lane saying one sentence (watcher off) |
+| `p68b-2-reviewer-block-streaming` | the reviewer's turn as one block streaming into the full lane; lane header = the bar's sentence |
+| `p68b-3-lead-block-streaming` | the lead's turn after the automatic hand-off — and findings 1–3 above, as first seen |
+| `p68b-4-after-fixes` | **a pre-check running with NO false card**: bar "Pre-check running · round 1 · 33s", chip "running · 32s", Needs you calm; the lead's finished block full height, followed to the foot, one-line composer |
+| `p68b-5-stalled-trio` | SIGSTOP-ped watcher: red bar, Needs-you card with **Open the watcher**, and codex's lane — one sentence; lead lane scoped, "Show last session" |
+| `p68b-6-chat-block` | a real chat turn as a block: `you ▸ …`, its stream, `claude ▸ …` closing line (this shot still shows `cost=$…`: the scratch server had been started before the renderer change; that fix is verified by its test only) |
+
+**Not seen:** an earlier block folding as a new turn starts *in the same cycle*
+(both scratch cycles had one turn per lane — node-tested); the "new output ↓"
+cue by hand; a chip for a bounced run; `turn-lost`; the watcher-stale
+(delivered) card; a block past 2,000 lines. No browser pass was made after the
+very last change (the trim loop and whole-pixel anchor), which the real-Chromium
+tests exercise.
 
 ## Summary
 The arbiter, 2026-09-20: the cockpit "should emulate the terminals to a certain

@@ -105,6 +105,8 @@ up to seven equal pills; `watcher: on` with nothing behind it; the notify-mode f
 - Phase 68a (3.14.6): a headless cycle runs through by itself.
 - Phase 68: the turn bar (one server-derived sentence) and the watcher drawer.
 
+*(2026-09-21: the Phase 68b items below are addressed in `docs/phases/cockpit-lanes-read-as-terminals.md` — lanes as terminal blocks, checks strip, lead lane scoped, cards and lanes saying the headline, and the false "process disappeared — Cancel turn" card during every pre-check, found while planning it.)*
+
 Still open, for **Phase 68b**: the lanes (reviewer = a card with a small log box, lead = chat bubbles; gate
 runs under the reviewer's name; the lead lane not scoped to the current cycle), and two things the Phase 68
 live look showed — *Needs you* stays calm while the bar says **Stalled**, and the reviewer lane still says
