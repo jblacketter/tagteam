@@ -1,0 +1,16 @@
+{
+  "state": "approved",
+  "ready_for": null,
+  "round": 1,
+  "phase": "wait-child-test-waits-for-its-child",
+  "type": "impl",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-21",
+  "baseline": {
+    "sha": "638558e80d4f4ea11715513b02ffdb92b0ed24dd",
+    "dirty_paths": [],
+    "captured_at": "2026-09-21T14:07:11.570878+00:00",
+    "source": "impl-init-fallback"
+  }
+}
