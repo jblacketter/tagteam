@@ -37,6 +37,8 @@ What the lanes are today (live looks of 2026-09-20/21; screenshots
   card, chat) and whichever lane it is in.
 
 ## Proposed design — three choices that are the arbiter's
+*(Plan review r1: no interjection from the arbiter; the reviewer agreed the recommended choices can proceed unless he says otherwise.)*
+
 These are UX calls; the recommendation is marked. The arbiter can overrule any
 of them with an interjection during plan review.
 
@@ -109,7 +111,17 @@ item; the roadmap entry is updated.
   watcher has stopped looking" — what it means, `last look` from
   `watcher.beat.text`, and one action: **Open the watcher** (opens the Phase 68
   drawer, where Stop / Start live). No new endpoint.
-- The "Waiting on X, but the watcher is off" card is unchanged.
+- **The watcher-off card stops telling its own story** (plan review r1, point 1).
+  Today it says "Nothing runs X's turn until the watcher is on" for *every*
+  owed turn with no watcher — including a terminal turn that was already
+  delivered, where the headline (correctly) says "its turn was sent; the watcher
+  has since stopped, so the next hand-off will not happen". The card keeps its
+  trigger (`headline.state === 'watcher-off'`) and its **Start the watcher**
+  action, but its title and body are `headline.text`; delivery is never
+  re-derived in JS. The stalled / watcher-stale card does the same, so the
+  delivered case reads "…it has its turn; the watcher has stopped looking" and
+  never implies the agent is stuck. Both delivered and undelivered variants of
+  both cards are tested.
 
 ### 5. Tests
 - Node-harness tests (the Phase 43/45 slice is already run under node): block
@@ -119,10 +131,23 @@ item; the roadmap entry is updated.
   block with its prompt line, lane text = headline text for the headline's
   role, `liveness: 'lost'` → card, `pid_alive: false` with `liveness:
   'no-child' | 'starting'` → **no** card and no `gone` lane.
-- A **real-Chromium** test (Phase 68's `_run_in_chromium` technique, shipped
-  CSS + markup): a lane with a long wrapped stream follows at the bottom, holds
-  the reader's line when scrolled back while lines arrive, and the block fills
-  the lane (no 16em box).
+- Node harness, streams: the cap for a running cycle block **and** a running
+  chat block (2,050 lines in → 2,000 kept, the note row shown with the log
+  path); fold drops the stream DOM; a final SSE `line`/`end` frame and a
+  delayed tail response arriving **after** the fold change nothing; reopen of a
+  finished block renders the tail once (no duplicates after fold → open → fold
+  → open); reopen of a running block starts from `after=0` into an empty
+  stream; polling does not rebuild an open chat block's stream (node identity
+  preserved across `renderLeadTimeline`).
+- Node harness, cards: watcher-off delivered / undelivered and stalled /
+  watcher-stale each show `headline.text`; no card text mentions "Nothing runs"
+  for a delivered turn.
+- **Real Chromium** (Phase 68's `_run_in_chromium`, shipped CSS + markup), for a
+  cycle block **and** a chat block: follows at the bottom; holds the reader's
+  line while lines arrive; **cap rollover** while scrolled back — the anchored
+  line survives trimming of older lines, and when the anchor itself is trimmed
+  the view rests on the oldest retained line with the cue shown; the block
+  fills the lane (no 16em box, one scroller).
 - String guards: updated deliberately and listed in the submission
   (`OUTCOME_LABEL` / `VERDICT_WORD` stay literal; `.act-lines` selector and the
   lane ids stay; `pid_alive` joins the must-not-appear list for `cockpit.js`).
@@ -146,15 +171,49 @@ item; the roadmap entry is updated.
   cursor logic of Phases 43/45/58 work and are tested; the block is the
   existing row with its log box promoted from a 16em inset to the lane's body,
   and with folding added. The chat bubble renderer (`fillMsgRow`) is the part
-  that is replaced, by a block whose header is the prompt line.
+  that is replaced, by a block whose header is the prompt line. Its row
+  signature includes the streamed line count today, so every poll **rebuilds**
+  the chat body; the replacement keys the stream DOM and appends to it (the
+  signature covers status / reply / error only), otherwise a chat block could
+  not hold the reader's place. The recorded reply, the error text and the
+  continuity note ("memory: resumed session · 2 messages") are kept: reply and
+  error as the block's closing lines, continuity in the header.
 - **One scroller per lane.** Today each card's log box scrolls inside a lane
   that also scrolls; nested scrollers are why a lane never feels like a
   terminal. The block's stream does not scroll; the lane does.
-- **Risk — performance.** A turn log can be thousands of lines. Folded blocks
-  hold no DOM for their stream (it is dropped on fold and re-read from
-  `/api/tail` on open); an open finished block is capped at the last 2,000
-  lines with a "show the whole log" link to the existing tail view; a running
-  block appends incrementally as now.
+- **Bounded streams — one policy for every block** (plan review r1, point 2).
+  There is no whole-log view to link to: `/api/tail` returns JSON clamped to
+  `MAX_TAIL_LINES = 2000` and the old tail drawer is gone. So:
+  - **Cap:** a block's stream holds at most the **newest 2,000 lines**, running
+    or finished, cycle or chat. `appendActLine` already caps a cycle block;
+    the chat stream (`LEAD.lines[cid][n]`, filled by `subscribeLead`) grows
+    without limit today and gets the same cap.
+  - **Honest label:** when lines were dropped from a running block, or a
+    finished block's tail comes back with exactly the cap (the tail payload has
+    no truncation flag — `{path, lines, …}` — so "2,000 lines returned" is the
+    only signal, and the note says "may be longer"), the block's first row is a
+    note: "showing the last 2,000 lines — the whole log: `<path>`", the path
+    being the tail payload's `path` / the activity item's `log_path`
+    (selectable text, not a link: the page serves no file route). No "show the
+    whole log" link. No server change.
+  - **Trim vs. the reader's anchor:** lines are trimmed from the top. While the
+    reader is scrolled back, the anchor is the first visible *line* (Phase 68's
+    event-anchor rule, `rowTopIn`); if trimming removes the anchored line, the
+    view stays on the oldest retained line (scrollTop → the block's first
+    line), never jumps to the bottom, and the "new output ↓" cue stays.
+  - **Fold = no stream DOM, and it stays that way.** Folding detaches the SSE
+    listener (`detachActStream` / the lead stream's handler), empties the
+    stream and marks the block folded; a `line` or `end` frame already in
+    flight, or a delayed `/api/tail` response, is **discarded** for a folded
+    block (checked at delivery, by block key and a fold generation counter).
+  - **Reopen = one consistent read.** A finished block re-reads
+    `/api/tail?stem=…&lines=2000` and renders exactly that. A running block
+    re-attaches the SSE stream **from the start** (`after=0`), renders into an
+    empty stream, and the cap applies as lines arrive — no splice of "what I
+    had" with "what arrives", so nothing is duplicated or omitted. The stores'
+    SSE cursors are kept for blocks that stay open; a fold resets that block's.
+  - A chat block follows the same rules through the lead stream
+    (`/api/lead/<cid>/events`, `?after=`).
 - **Risk — the test guards.** Same rule as Phase 68: every changed guard is
   changed on purpose and listed; none is deleted to get green.
 - **Look first, then again.** Phase 68's three review rounds each turned on
@@ -176,11 +235,16 @@ item; the roadmap entry is updated.
    on; the lead-lane backlog item is closed.
 4. No pre-check or panel appears in the reviewer's lane; the checks strip shows
    them per round and opens a run's log.
+4a. No block holds more than 2,000 stream lines, running or finished, cycle or
+   chat; a truncated block says so and names the local log path; a folded block
+   holds no stream DOM whatever arrives late; reopening neither duplicates nor
+   omits output.
 5. During a pre-check and at the start of a turn there is **no** "process
    disappeared" card and no `gone` lane; a marker whose owner is really gone
    still produces the card. `pid_alive` is not read anywhere in `cockpit.js`.
-6. Under a stalled watcher: the bar, the owed agent's lane and a Needs-you card
-   say the same thing; the card opens the watcher drawer.
+6. Under a stalled watcher and with the watcher off — delivered and not — the
+   bar, the owed agent's lane and the Needs-you card say the same sentence; the
+   stalled card opens the watcher drawer, the watcher-off card starts a watcher.
 7. Follow / hold / cue behaviour passes in real Chromium with the shipped CSS.
 8. Node-harness and guard tests pass; every changed guard is listed.
 9. Seen, not assumed — screenshots (git-ignored `.playwright-mcp/`) of a real
