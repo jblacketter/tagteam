@@ -9,7 +9,7 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 
 ## Phases
 ### Phase 65: Hardening: shadow installs, quiet upgrades, clean test runs
-- **Status:** ✅ Complete — plan approved round 1, impl approved round 2 (2026-09-20); gate: 2,142 passed, 5 skipped at `df0db7f`. Branch `phase/hardening-shadow-installs-quiet-upgrades-clean-test-runs`; PR merge pending. See `docs/phases/hardening-shadow-installs-quiet-upgrades-clean-test-runs.md`.
+- **Status:** ✅ Complete — plan approved round 1, impl approved round 2 (2026-09-20); gate: 2,142 passed, 5 skipped at `df0db7f`. PR #49 merged 2026-09-20. See `docs/phases/hardening-shadow-installs-quiet-upgrades-clean-test-runs.md`.
 - **Description:** Four small fixes from the 2026-09-20 issues log. (1) `doctor` and `tagteam state` report a tagteam installed in the project's own `.venv` / `venv` whose version differs from the running one — six such copies had gone unnoticed and one pre-3.14 copy can still re-create the retired `templates/`. (2) `_same_manifest()` ignores the top-level version stamp, so a release that changes no framework file no longer rewrites the manifest in every project. (3) The `wheel_venv` test fixture builds from a copy, so the suite stops leaving `build/` and `tagteam.egg-info/` in the checkout. (4) The watcher-lock tests print the spawned watcher's output when a wait times out, so the flake seen once in a gate run can explain itself next time.
 - **Depends on:** Phase 64
 

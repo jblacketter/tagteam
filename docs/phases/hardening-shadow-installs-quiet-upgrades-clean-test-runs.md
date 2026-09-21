@@ -4,7 +4,7 @@
 - [x] Planning: approved round 1 (2026-09-20) at `79de8a1`
 - [x] Implementation: branch `phase/hardening-shadow-installs-quiet-upgrades-clean-test-runs`
 - [x] Implementation Review: approved round 2 (2026-09-20) at `df0db7f`; gate 2,142 passed, 5 skipped. Round 1: two reviewer findings in `installs.py` (duplicate `Version` headers counted only when valid; METADATA read without the guarded reader).
-- [ ] Complete: PR open, merge pending
+- [x] Complete: PR #49 merged 2026-09-20 (rebase).
 
 ## Closeout
 ```
