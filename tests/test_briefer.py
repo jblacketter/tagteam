@@ -160,7 +160,7 @@ class TestConfig:
         from tagteam import watcher
         _enable(project, "  provider: gemini\n")   # invalid briefer → warn only
         logs = []
-        orig = watcher._log; watcher._log = logs.append
+        orig = watcher._log; watcher._log = lambda m, **_kw: logs.append(m)   # Phase 67: _log takes kind=/context
         try:
             proc = watcher._build_processor(mode="notify", lead_pane="a", reviewer_pane="b",
                                             confirm=False, timeout_minutes=30,
