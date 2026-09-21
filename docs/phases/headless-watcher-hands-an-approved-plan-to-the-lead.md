@@ -3,8 +3,20 @@
 ## Status
 - [x] Planning: approved round 1 (2026-09-20) at `3a54c92`
 - [x] Implementation: branch `phase/headless-watcher-hands-an-approved-plan-to-the-lead`
-- [ ] Implementation Review
-- [ ] Complete
+- [x] Implementation Review: approved round 1 (2026-09-20) at `b01183f`; gate 2,219 passed, 5 skipped
+- [ ] Complete: PR open; merge is the arbiter's
+
+## Closeout
+```
+Phase report: headless-watcher-hands-an-approved-plan-to-the-lead — plan approved r1 · impl approved r1
+  plan   1 round · 0 change requests · 0 bounces
+  impl   1 round · 0 change requests · 0 bounces · gate 1 run, 7m 44s
+  time   start→approve 16m 37s · implementation before first submit 6m 54s
+         lead unknown (0 spans, 2 unknown) · reviewer 1m 59s (2 spans) · gate 7m 44s (1 span)  (elapsed; includes relay wait)
+  usage  no usage rows stored under this phase
+  turns  matched 0 of 4 · no token data 0 · unmatched 2 · unknown 2
+```
+No reviewer findings at approval. Disclosed limitation: the post-tick beat in the event loop has modelled coverage only (headless always polls; no real-watchdog run).
 
 ## Where this comes from: the 2026-09-20 cockpit trial
 The cockpit arc's goal is that the cockpit replaces the three iTerm2 tabs. To
