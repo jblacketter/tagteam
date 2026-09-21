@@ -490,10 +490,17 @@ def test_wait_child_reports_a_child_that_already_exited(tmp_path):
 
 
 def test_wait_child_terminates_and_reports_a_child_still_running(tmp_path):
-    code = "import sys, time; print('started, waiting', flush=True); time.sleep(120)"
+    # The child says it has printed by creating a marker file AFTER the flush; the clock starts only
+    # then. Issue 11: with a bare `print` and a 0.5 s budget, a starved interpreter (release suite,
+    # load average ~48) was terminated before it had printed and the dump was empty. Not a
+    # `readline()` on the pipe: the buffered reader would swallow the text `_child_output` must find.
+    ready = tmp_path / "ready"
+    code = ("import sys, time; print('started, waiting', flush=True); "
+            f"open({str(ready)!r}, 'w').close(); time.sleep(120)")
     child = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                              start_new_session=True)
     try:
+        assert _wait(ready.exists, timeout=60), "the child never started"
         t0 = time.monotonic()
         with pytest.raises(AssertionError) as e:
             _wait_child(child, lambda: False, timeout=0.5)
