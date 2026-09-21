@@ -250,7 +250,7 @@
     $('turn-age').textContent = (HEAD && HEAD.age_s != null) ? '· ' + fmtAge(Math.round(HEAD.age_s)) : '';
   }
   function tickTurnBar() {        // called once a second by renderNowAges
-    if (HEAD && HEAD.age_s != null) { HEAD.age_s += 1; paintTurnAge(); }
+    if (HEAD && HEAD.age_s != null) { HEAD.age_s += 1; paintTurnAge(); if (NOW && NOW.headline) NOW.headline.age_s = HEAD.age_s; }
   }
 
   function watcherStartMode() { return (START && START.headless && START.headless.ok) ? 'headless' : 'notify'; }
@@ -514,7 +514,11 @@
     var launchPending = n.launch && n.launch.status === 'pending';
     var startCard = false;
     var lead = (n.agents && n.agents.lead) || 'the lead';
-    if (START && START.intent && !launchPending) {
+    // Phase 68b: since 68a a headless watcher hands an approved plan to the lead by itself, so the
+    // 'next step' can already be running when this renders — offering Start beside it contradicts the bar
+    var hlNow = (n.headline && n.headline.state) || '';
+    var busyNow = !!n.inflight || hlNow === 'working' || hlNow === 'starting' || hlNow === 'launching';
+    if (START && START.intent && !launchPending && !busyNow) {
       var it = START.intent;
       if (it.command) {
         var canStart = !!(START.headless && START.headless.ok);
@@ -574,19 +578,31 @@
       wrap.appendChild(pc); cards++;
     }
 
-    // A process that disappeared / a turn waiting with the watcher off
-    if (n.inflight && n.inflight.pid_alive === false) {
-      var sc = cardShell('stale', (n.inflight.agent || n.inflight.provider || 'The agent') + '\'s process disappeared mid-turn', fmtTs(n.inflight.started_at));
+    // A turn whose OWNER is gone / a turn waiting with the watcher off / a watcher that stopped looking.
+    // Phase 68b: these cards tell the turn bar's story (n.headline, derived server-side) — never their own.
+    // The child-pid flag is false for `pid: null`, i.e. for the whole of every pre-check and the start
+    // of every turn; only `liveness: 'lost'` (the owner is definitively gone) may offer Cancel turn.
+    var hl = n.headline || {};
+    if (n.inflight && n.inflight.liveness === 'lost') {
+      var sc = cardShell('stale', hl.text || 'A turn was abandoned — the process running it is gone', fmtTs(n.inflight.started_at));
       sc.appendChild(el('div', 'card-body', inflightKind(n) + ' · ' + n.inflight.stem + '\nThe engine normally records this itself within a moment; if it stays, Cancel turn clears the record (nothing is killed).'));
       var sr = el('div', 'row'); var cb = el('button', 'btn btn-danger', 'Cancel turn'); cb.title = 'tagteam cancel-turn';
       cb.addEventListener('click', function () { act(cb, '/api/cancel-turn', {}, { confirm: { title: 'Clear the lost turn?', body: 'Binds the recorded pid first; a stale record is removed without signalling.', labels: { ok: 'Clear it', cancel: 'Leave it', danger: true } } }); });
       var sf = el('div', 'actions-final'); sf.appendChild(cb); sr.appendChild(sf); sc.appendChild(sr);
       wrap.appendChild(sc); cards++;
-    } else if (n.owed && !n.inflight && !n.paused && !(n.watcher && n.watcher.running)) {
-      // immediately, not after two minutes: with the watcher off nobody will run this turn
-      var who = n.owed.agent || n.owed.role;
-      var wc = cardShell('stale', 'Waiting on ' + who + ', but the watcher is off', 'waiting ' + fmtAge(n.owed.age_s));
-      wc.appendChild(el('div', 'card-body', 'Nothing runs ' + who + '\'s turn until the watcher is on. Start it here, or run /handoff in ' + who + '\'s own terminal.'));
+    } else if (hl.state === 'stalled' || hl.state === 'watcher-stale') {
+      var zc = cardShell('stale', hl.text, (n.watcher && n.watcher.beat && n.watcher.beat.text) ? 'last look: ' + n.watcher.beat.text : '');
+      zc.appendChild(el('div', 'card-body', 'The watcher process is still there but has stopped checking for turns, so nothing will be handed over. Open the watcher to see what it last did, then stop and start it.'));
+      var zr = el('div', 'row'); var zf = el('div', 'actions-final');
+      var zopen = el('button', 'btn btn-primary', 'Open the watcher'); zopen.title = 'the watcher drawer: what it is, when it last looked, what it did';
+      zopen.addEventListener('click', function () { setDrawer(true); try { $('turn-bar').scrollIntoView({ block: 'start' }); } catch (e) { /* ignore */ } });
+      zf.appendChild(zopen); zr.appendChild(zf); zc.appendChild(zr);
+      wrap.appendChild(zc); cards++;
+    } else if (hl.state === 'watcher-off') {
+      // immediately, not after two minutes. The sentence says whether the turn was already delivered
+      // to a terminal (then only the NEXT hand-off is blocked) — it is not re-derived here.
+      var wc = cardShell('stale', hl.text, 'waiting ' + fmtAge(Math.round(hl.age_s || 0)));
+      wc.appendChild(el('div', 'card-body', 'Start a watcher here and turns are run and handed over by themselves.'));
       var wr2 = el('div', 'row'); var wfin = el('div', 'actions-final');
       var wstart = el('button', 'btn btn-primary', 'Start the watcher');
       var wmode = (START && START.headless && START.headless.ok) ? 'headless' : 'notify';
@@ -987,13 +1003,13 @@
     var lead = (n.agents && n.agents.lead) || 'lead', rev = (n.agents && n.agents.reviewer) || 'reviewer';
     $('lane-lead-name').textContent = lead + ' — lead';
     $('lane-reviewer-name').textContent = rev + ' — reviewer';
-    var owedRole = n.owed && n.owed.role; var inf = n.inflight || null; var infRole = inf && inf.role;
+    var owedRole = n.owed && n.owed.role;
     var cs = n.cycle && n.cycle.state;
+    // Phase 68b: the lane whose role the headline is about says the headline (one story, told once,
+    // server-side); the other lane stays quiet. Owner liveness — never the child-pid flag — decides `gone`.
+    var hl = n.headline || {};
     function laneText(role) {
-      var running = inf && infRole === role;
-      var onTurn = owedRole === role;
-      if (running) return (inf.pid_alive === false ? OUTCOME_LABEL.process_gone : 'working · ' + inflightKind(n)) + ' · ' + fmtAge(inf.age_s);
-      if (onTurn) return 'its turn · ' + ((n.watcher && n.watcher.running) ? 'the watcher will start it' : 'the watcher is off — nothing will start it') + ' · waiting ' + fmtAge(n.owed.age_s);
+      if (hl.role === role && hl.text) return hl.text + (hl.age_s != null ? ' · ' + fmtAge(Math.round(hl.age_s)) : '');
       if (pending && role === 'lead') return 'starting · ' + fmtAge(launch.age_s);
       if (cs === 'escalated' || cs === 'needs-human') return 'waiting on you';
       if (st.status === 'done' && st.phase) return (st.phase + ' — ' + typeWord(st.type) + ' ' + cycleWord(st.result || 'done'));
@@ -1001,10 +1017,11 @@
     }
     ['lead', 'reviewer'].forEach(function (role) {
       var lane = $('lane-' + role);
-      var running = inf && infRole === role;
+      var mine = hl.role === role;
       lane.classList.toggle('on-turn', owedRole === role || (pending && role === 'lead'));
-      lane.classList.toggle('running', !!running && inf.pid_alive !== false);
-      lane.classList.toggle('gone', !!running && inf.pid_alive === false);
+      lane.classList.toggle('running', mine && hl.state === 'working');
+      lane.classList.toggle('gone', mine && hl.state === 'turn-lost');
+      lane.classList.toggle('trouble', mine && (hl.tone === 'danger' || hl.tone === 'attention') && hl.state !== 'turn-lost');
       $('lane-' + role + '-state').textContent = laneText(role);
     });
     var tok = $('lane-token');
@@ -1027,7 +1044,7 @@
   function renderLaneAges() {
     if (!NOW) return;
     renderLanes(NOW);
-    [ACT, RLANE, LLANE].forEach(function (store) {
+    [ACT, RLANE, LLANE, CHECKS].forEach(function (store) {
       Object.keys(store.rows).forEach(function (id) {
         var rec = store.rows[id];
         if (isRunning(rec.item) && rec.item.age_s != null) { rec.item.age_s += 1; setActStatus(rec); }
@@ -1044,6 +1061,7 @@
   var ACT = makeStore('act', 'activity', false);
   var RLANE = makeStore('rlane', 'reviewer-timeline', true);
   var LLANE = makeStore('llane', 'lead-timeline', true);
+  var CHECKS = makeStore('checks', 'checks-log', true);   // Phase 68b: pre-checks and panels, out of the reviewer's lane
   var VERDICT_WORD = { APPROVE: 'approved', REQUEST_CHANGES: 'changes requested', ESCALATE: 'escalated', NEED_HUMAN: 'question for you', GATE_PASS: 'passed', GATE_BOUNCE: 'bounced' };
   // Phase 58: the verdict cache belongs to one cycle: {cycle, byN: round -> {reviewer, gate}} from /api/rounds.
   var ROUNDS = { cycle: null, byN: {} };
@@ -1087,18 +1105,60 @@
   function renderReviewerLaneScope() {
     var other = 0, current = 0;
     Object.keys(RLANE.rows).forEach(function (id) { if (applyLaneScope(RLANE.rows[id])) other++; else current++; });
-    var btn = $('btn-reviewer-last');
-    btn.classList.toggle('hidden', !other);
-    btn.textContent = SHOW_LAST_SESSION ? 'Hide last session' : 'Show last session';
-    btn.setAttribute && btn.setAttribute('aria-pressed', SHOW_LAST_SESSION ? 'true' : 'false');
+    // Phase 68b: the lead lane is scoped exactly like the reviewer's (it showed turns of long-finished
+    // cycles under the current cycle's header) — one "last session" switch for both
+    var leadOther = 0;
+    Object.keys(LLANE.rows).forEach(function (id) { if (applyLaneScope(LLANE.rows[id])) leadOther++; });
+    [['btn-reviewer-last', other], ['btn-lead-last', leadOther]].forEach(function (pair) {
+      var b = $(pair[0]); if (!b) return;
+      b.classList.toggle('hidden', !pair[1]);
+      b.textContent = SHOW_LAST_SESSION ? 'Hide last session' : 'Show last session';
+      b.setAttribute && b.setAttribute('aria-pressed', SHOW_LAST_SESSION ? 'true' : 'false');
+    });
     var empty = $('reviewer-empty');
     var parts = LANE_CYCLE ? LANE_CYCLE.match(/^(.*)_(plan|impl)$/) : null;
     empty.textContent = parts ? 'No reviews yet for ' + parts[1] + ' · ' + parts[2] + '.' : 'No reviews yet.';
     empty.classList.toggle('hidden', current > 0 || (SHOW_LAST_SESSION && other > 0));
     return { current: current, other: other };
   }
+  // ---- Phase 68b: the checks strip — this cycle's pre-checks / panels as chips; a chip opens its log ----
+  var CHECK_OPEN = null;          // the item id whose log is open under the strip
+  function checkChipText(it) {
+    var v = verdictFor(it);
+    var word = isRunning(it) ? 'running' : (v ? v.word : outcomeLabel(it.status));
+    var dur = isRunning(it) ? fmtAge(it.age_s) : (it.duration_ms != null ? fmtAge(Math.round(it.duration_ms / 1000)) : '');
+    return kindLabel(it).replace(' · round ', ' r') + ' — ' + word + (dur ? ' · ' + dur : '');
+  }
+  function renderChecks() {
+    var strip = $('lane-checks'), chips = $('checks-chips');
+    if (!strip || !chips) return;
+    var ids = Object.keys(CHECKS.rows).filter(function (id) { return cycleKey(CHECKS.rows[id].item) === LANE_CYCLE; });
+    ids.sort(function (a, b) { return ascSortKey(CHECKS.rows[a].item.started_at, a) < ascSortKey(CHECKS.rows[b].item.started_at, b) ? -1 : 1; });
+    while (chips.firstChild) chips.removeChild(chips.firstChild);
+    if (CHECK_OPEN && ids.indexOf(CHECK_OPEN) < 0) CHECK_OPEN = null;
+    ids.forEach(function (id) {
+      var rec = CHECKS.rows[id], it = rec.item, v = verdictFor(it);
+      var chip = el('button', 'check-chip' + (isRunning(it) ? ' running' : (v ? ' ' + v.cls : '')) + (CHECK_OPEN === id ? ' open' : ''), checkChipText(it));
+      chip.type = 'button'; chip.dataset.id = id; chip.title = 'show this run\'s log';
+      chip.setAttribute && chip.setAttribute('aria-expanded', CHECK_OPEN === id ? 'true' : 'false');
+      chip.addEventListener('click', function () { toggleCheck(id); });
+      chips.appendChild(chip);
+    });
+    Object.keys(CHECKS.rows).forEach(function (id) { CHECKS.rows[id].row.classList.toggle('hidden', id !== CHECK_OPEN); });
+    strip.classList.toggle('hidden', !ids.length);
+    $('checks-log').classList.toggle('hidden', !CHECK_OPEN);
+  }
+  function toggleCheck(id) {
+    var was = CHECK_OPEN; CHECK_OPEN = (was === id) ? null : id;
+    if (was && CHECKS.rows[was] && was !== CHECK_OPEN) foldBlock(CHECKS.rows[was]);
+    if (CHECK_OPEN) openBlock(CHECKS.rows[CHECK_OPEN]); else if (CHECKS.rows[id]) foldBlock(CHECKS.rows[id]);
+    renderChecks();
+  }
   function toggleLastSession() { SHOW_LAST_SESSION = !SHOW_LAST_SESSION; return renderReviewerLaneScope(); }
-  function inReviewerLane(it) { return (it.role === 'reviewer' || it.role === 'gatekeeper') && (it.kind === 'cycle' || it.kind === 'gate' || it.kind === 'panel' || it.kind === 'panel_lens'); }
+  // Phase 68b: a lane holds ITS AGENT's turns only. Pre-checks and panels are the machinery's, not
+  // the reviewer's — under codex's name a BOUNCED read as codex's verdict — so they go to the checks strip.
+  function inReviewerLane(it) { return it.role === 'reviewer' && it.kind === 'cycle'; }
+  function inChecks(it) { return it.kind === 'gate' || it.kind === 'panel' || it.kind === 'panel_lens'; }
   function inLeadLane(it) { return it.role === 'lead' && it.kind === 'cycle'; }
   function actSortKey(it) { return (isRunning(it) ? '1' : '0') + '|' + String(it.started_at || '') + '|' + String(it.id || ''); }
   function ascSortKey(ts, id) { return String(ts || '') + '|' + String(id || ''); }
@@ -1114,10 +1174,11 @@
         upsertRow(ACT, it);
         if (inReviewerLane(it)) upsertRow(RLANE, it);
         if (inLeadLane(it)) upsertRow(LLANE, it);
+        if (inChecks(it)) upsertRow(CHECKS, it);
       });
       // A running row whose record vanished (marker gone, nothing recorded)
       // is not "running" any more and not "finished" either — say so.
-      [ACT, RLANE, LLANE].forEach(function (store) {
+      [ACT, RLANE, LLANE, CHECKS].forEach(function (store) {
         Object.keys(store.rows).forEach(function (id) {
           var rec = store.rows[id];
           if (!seen[id] && isRunning(rec.item) && !rec.lost) {
@@ -1131,6 +1192,9 @@
       $('activity-more').classList.toggle('hidden', !b.truncated);
       $('activity-meta').textContent = items.length ? (items.length + ' turn' + (items.length === 1 ? '' : 's') + (b.truncated ? ' (newest ' + b.limit + ')' : '')) : '';
       renderReviewerLaneScope();
+      applyBlockPolicy(RLANE); applyBlockPolicy(LLANE);
+      restick($('reviewer-timeline')); restick($('lead-timeline'));
+      renderChecks();
       renderLeadEmpty();
     }).catch(function (e) { console.error('[cockpit] activity failed', e); });
   }
@@ -1140,7 +1204,7 @@
     var rec = store.rows[it.id];
     var list = $(store.containerId);
     if (!rec) {
-      rec = store.rows[it.id] = { store: store, item: it, lines: [], cursor: null, streamKey: null, opened: false };
+      rec = store.rows[it.id] = { store: store, item: it, lines: [], cursor: null, streamKey: null, opened: false, folded: true, gen: 0 };
       buildActRow(rec);
       insertRow(store, rec);
     } else {
@@ -1153,7 +1217,7 @@
       // log's last lines are drained); the stream closes on its own `end`.
       if (rec.row.dataset.key !== storeSortKey(store, it)) insertRow(store, rec);
     }
-    if (isRunning(it)) { openActLines(rec, true); attachActStream(rec); }
+    if (isRunning(it)) openBlock(rec, true);
     return rec;
   }
   function insertKeyed(list, row, key, ascending) {
@@ -1205,6 +1269,7 @@
     rec.cancelBtn.addEventListener('click', function () { actCancel(rec); });
     head.appendChild(rec.cancelBtn);
     row.appendChild(head);
+    rec.headEl = head;
     rec.detailEl = el('div', 'act-detail muted hidden'); row.appendChild(rec.detailEl);
     rec.textEl = el('div', 'act-text hidden'); row.appendChild(rec.textEl);
     rec.box = el('div', 'act-lines hidden'); row.appendChild(rec.box);
@@ -1251,34 +1316,118 @@
     rec.openBtn.textContent = rec.box.classList.contains('hidden') ? (isConv ? 'open chat' : 'log') : 'hide';
     rec.openBtn.classList.toggle('hidden', !(it.ref || rec.lines.length));
     if (!isRunning(it) && rec.lines.length && !rec.box.classList.contains('hidden')) rec.openBtn.textContent = 'hide';
-    if (rec.store === RLANE) applyLaneScope(rec);   // className was just reset
+    if (rec.store === RLANE || rec.store === LLANE) applyLaneScope(rec);   // className was just reset
   }
-  function refreshVerdicts() { Object.keys(RLANE.rows).forEach(function (id) { patchActRow(RLANE.rows[id]); }); Object.keys(ACT.rows).forEach(function (id) { patchActRow(ACT.rows[id]); }); }
+  function refreshVerdicts() { Object.keys(RLANE.rows).forEach(function (id) { patchActRow(RLANE.rows[id]); }); renderChecks(); Object.keys(ACT.rows).forEach(function (id) { patchActRow(ACT.rows[id]); }); }
   function toggleActText(rec) {
     var v = verdictFor(rec.item);
     if (!v || !v.text) return;
     if (rec.textEl.classList.contains('hidden')) { rec.textEl.textContent = v.text; rec.textEl.classList.remove('hidden'); rec.textBtn.textContent = 'hide'; }
     else { rec.textEl.classList.add('hidden'); rec.textBtn.textContent = 'what it said'; }
   }
+  // ---- Phase 68b: a turn is a terminal BLOCK — header + stream — and the LANE is the one scroller ----
+  // Policy (one for every block — running or finished, cycle, check or chat):
+  //   cap     the newest BLOCK_CAP lines; a truncated block says so and names the local log
+  //   fold    no stream DOM, the listener detached; anything that arrives late is dropped (rec.gen)
+  //   reopen  ONE consistent read: a finished block re-reads the tail; a running one replays its stream
+  //           from the start into an empty block — never a splice of kept and arriving lines
+  //   follow  the lane follows only while already at the bottom; scrolled back, the reader stays on the
+  //           same LINE (measured in the scroller's coordinates — rowTopIn — not offsetTop)
+  var BLOCK_CAP = 2000;
+  var LANE_UNREAD = {};            // containerId -> true while there is output the reader has not scrolled to
+  var LANE_FOLLOW = {};            // containerId -> false once the READER scrolled away from the foot (default: follow)
+  // A block opening, a header patch or a fold changes the lane's height without any scroll event; judging
+  // "at the bottom" by geometry then reads as "the reader scrolled back" (seen live: a cue nobody asked for).
+  function laneFollows(list) { return LANE_FOLLOW[list.id] !== false; }
+  function onLaneScroll(list) { LANE_FOLLOW[list.id] = atBottom(list); if (LANE_FOLLOW[list.id]) setLaneUnread(list, false); }
+  function restick(list) { if (list && laneFollows(list)) { list.scrollTop = list.scrollHeight; setLaneUnread(list, false); } }
+  function inLane(rec) { return rec.store === RLANE || rec.store === LLANE; }
+  function laneOf(rec) { return inLane(rec) ? $(rec.store.containerId) : null; }
+  function laneCue(list) { return list ? $(list.id === 'lead-timeline' ? 'lead-new' : 'reviewer-new') : null; }
+  function firstVisibleLine(list) {
+    var nodes = list.querySelectorAll ? list.querySelectorAll('.bl') : [];
+    for (var i = 0; i < nodes.length; i++) {
+      var top = rowTopIn(list, nodes[i]);
+      if (top + nodes[i].getBoundingClientRect().height > list.scrollTop + 0.5) return { node: nodes[i], delta: list.scrollTop - top };
+    }
+    return null;
+  }
+  // run `change` (which adds/removes lines) without moving a reader who has scrolled back
+  function holdingPlace(list, change, fallbackNode) {
+    if (!list) { change(); return; }
+    var follow = laneFollows(list);
+    var anchor = follow ? null : firstVisibleLine(list);
+    change();
+    if (follow) { list.scrollTop = list.scrollHeight; setLaneUnread(list, false); return; }
+    if (anchor && anchor.node.parentNode) list.scrollTop = rowTopIn(list, anchor.node) + anchor.delta;
+    else { var rest = fallbackNode && fallbackNode(); if (rest) list.scrollTop = rowTopIn(list, rest); }   // the anchored line was trimmed: rest on the oldest kept line
+    setLaneUnread(list, true);
+  }
+  function setLaneUnread(list, on) {
+    LANE_UNREAD[list.id] = !!on;
+    var cue = laneCue(list); if (cue) cue.classList.toggle('hidden', !on);
+  }
+  function lineNode(text) { return el('div', 'bl' + (/\[tool|tool_use|Bash|Read|Edit|Write|\[tagteam\]/.test(text) ? ' tool' : ''), text); }
+  function blockNote(rec, maybeLonger) {
+    var path = rec.logPath || (rec.item && rec.item.log_path) || '';
+    var text = 'showing the last ' + BLOCK_CAP.toLocaleString('en-US') + ' lines' + (maybeLonger ? ' (the log may be longer)' : '') + (path ? ' — the whole log: ' + path : '');
+    if (!rec.noteEl) { rec.noteEl = el('div', 'bl-note', text); rec.box.insertBefore(rec.noteEl, rec.box.firstChild); }
+    else rec.noteEl.textContent = text;
+  }
+  function firstLineOf(rec) { var k = rec.box.children; for (var i = 0; i < k.length; i++) if (k[i] !== rec.noteEl) return k[i]; return null; }
+  function resetBlockLines(rec) {
+    rec.lines = []; rec.noteEl = null;
+    while (rec.box.firstChild) rec.box.removeChild(rec.box.firstChild);
+  }
   function appendActLine(rec, text) {
-    rec.lines.push(text);
-    if (rec.lines.length > 2000) { rec.lines.shift(); if (rec.box.firstChild) rec.box.removeChild(rec.box.firstChild); }
-    var line = el('div', /\[tool|tool_use|Bash|Read|Edit|Write|\[tagteam\]/.test(text) ? 'tool' : null, text);
+    if (rec.folded) return;                                   // a folded block holds no stream DOM, whatever arrives
+    var list = laneOf(rec);
+    var put = function () {
+      rec.lines.push(text);
+      rec.box.appendChild(lineNode(text));
+      if (rec.lines.length > BLOCK_CAP) {
+        rec.lines.shift();
+        var first = firstLineOf(rec); if (first) rec.box.removeChild(first);
+        blockNote(rec, false);
+      }
+    };
+    if (list) { holdingPlace(list, put, function () { return firstLineOf(rec); }); return; }
+    // the flat "all activity" list keeps its own small scrolling box
     var stick = rec.box.scrollTop + rec.box.clientHeight >= rec.box.scrollHeight - 24;
-    rec.box.appendChild(line);
+    put();
     if (stick && !rec.hover) rec.box.scrollTop = rec.box.scrollHeight;
   }
-  function openActLines(rec, auto) {
+  function openBlock(rec, auto) {
     if (auto && rec.userClosed) return;
-    rec.box.classList.remove('hidden'); rec.opened = true;
+    if (!rec.folded && rec.opened) { if (isRunning(rec.item)) attachActStream(rec); return; }
+    rec.folded = false; rec.opened = true;
+    rec.box.classList.remove('hidden');
+    rec.row.classList.add('open');
     rec.openBtn.textContent = 'hide';
+    if (rec.row.setAttribute) rec.row.setAttribute('aria-expanded', 'true');
     if (!rec.hoverBound) {
       rec.hoverBound = true;
       rec.box.addEventListener('mouseenter', function () { rec.hover = true; });
       rec.box.addEventListener('mouseleave', function () { rec.hover = false; });
     }
-    if (!rec.lines.length && !isRunning(rec.item)) fillActLinesFromRecord(rec);
+    if (isRunning(rec.item)) attachActStream(rec);
+    else if (!rec.lines.length) fillActLinesFromRecord(rec);
+    restick(laneOf(rec));
   }
+  function foldBlock(rec, auto) {
+    if (isRunning(rec.item) && auto) return;                  // a running block is never folded by a refresh
+    rec.gen = (rec.gen || 0) + 1;                             // anything still in flight for the old read is now stale
+    rec.folded = true; rec.opened = false;
+    if (rec.streamKey) { offStream(rec.streamKey, rec.store.name + ':' + rec.item.id); rec.streamKey = null; }
+    rec.cursor = null;
+    var list = laneOf(rec);
+    var drop = function () { resetBlockLines(rec); rec.box.classList.add('hidden'); rec.row.classList.remove('open'); };
+    if (list) holdingPlace(list, drop, function () { return rec.row; }); else drop();
+    if (rec.row.setAttribute) rec.row.setAttribute('aria-expanded', 'false');
+    patchActRow(rec);
+  }
+  // Phase 43/45 names kept for callers and the harness
+  function openActLines(rec, auto) { openBlock(rec, auto); }
   function toggleActLines(rec) {
     var it = rec.item;
     var isConv = it.kind === 'conversation' || (it.kind === 'launch' && it.ref && it.ref.conversation);
@@ -1288,40 +1437,63 @@
       loadLead(true).then(function () { focusLeadTurn(it.ref && it.ref.turn); });
       return;
     }
-    if (rec.box.classList.contains('hidden')) { rec.userClosed = false; openActLines(rec, false); }
-    else { rec.box.classList.add('hidden'); rec.userClosed = true; rec.openBtn.textContent = isConv ? 'open chat' : 'log'; }
+    if (rec.folded || rec.box.classList.contains('hidden')) { rec.userClosed = false; rec.userOpened = true; openBlock(rec, false); }
+    else { rec.userClosed = true; rec.userOpened = false; foldBlock(rec, false); }
+  }
+  // in a lane: the newest block of this cycle is open, earlier ones are folded to their header —
+  // unless the arbiter opened or closed one himself, or it is running
+  function applyBlockPolicy(store) {
+    var ids = Object.keys(store.rows).filter(function (id) { return cycleKey(store.rows[id].item) === LANE_CYCLE; });
+    ids.sort(function (a, b) { return storeSortKey(store, store.rows[a].item) < storeSortKey(store, store.rows[b].item) ? -1 : 1; });
+    ids.forEach(function (id, i) {
+      var rec = store.rows[id]; var newest = i === ids.length - 1;
+      if (isRunning(rec.item) || newest) { if (!rec.userClosed) openBlock(rec, true); }
+      else if (!rec.userOpened && !rec.folded && rec.opened) foldBlock(rec, true);
+    });
   }
   function fillActLinesFromRecord(rec) {
     var it = rec.item;
     if (!it.stem) { appendActLine(rec, '(no log recorded for this turn)'); return; }
-    getJSON('/api/tail?stem=' + encodeURIComponent(it.stem) + '&lines=200').then(function (r) {
+    var gen = rec.gen || 0;
+    getJSON('/api/tail?stem=' + encodeURIComponent(it.stem) + '&lines=' + BLOCK_CAP).then(function (r) {
+      if (rec.folded || (rec.gen || 0) !== gen || rec.lines.length) return;   // folded (or re-read) while this was in flight
       var b = r.body || {};
-      if (rec.lines.length) return;
-      if (b.lines && b.lines.length) b.lines.forEach(function (l) { appendActLine(rec, l); });
-      else appendActLine(rec, b.message || '(empty log)');
-      rec.box.scrollTop = rec.box.scrollHeight;
+      if (b.path) rec.logPath = b.path;
+      if (b.lines && b.lines.length) {
+        b.lines.forEach(function (l) { appendActLine(rec, l); });
+        if (b.lines.length >= BLOCK_CAP) blockNote(rec, true);   // the tail has no truncation flag: "exactly the cap" is the only signal
+      } else appendActLine(rec, b.message || '(empty log)');
+      if (!inLane(rec)) rec.box.scrollTop = rec.box.scrollHeight;
     });
   }
   function attachActStream(rec) {
     var it = rec.item;
-    if (rec.streamKey) return;
+    if (rec.streamKey || rec.folded) return;
     var name = rec.store.name + ':' + it.id;
+    var gen = rec.gen || 0;
+    var live = function () { return !rec.folded && (rec.gen || 0) === gen; };
+    var key, path, filter;
     if (it.kind === 'conversation' && it.ref && it.ref.conversation) {
       var cid = it.ref.conversation, n = it.ref.turn;
-      rec.streamKey = 'lead:' + cid;
-      onStream(rec.streamKey, leadStreamPath(cid), name, {
-        line: function (d) { if (d.turn === n) appendActLine(rec, d.text); },
-        end: function (d) { if (d.turn === n) { detachActStream(rec); refreshAll('activity-end'); } }
-      });
-      return;
+      key = 'lead:' + cid; path = leadStreamPath(cid);
+      filter = function (d) { return d.turn === n; };          // a conversation's stream carries every turn
+    } else {
+      if (!it.stem) return;
+      key = 'log:' + it.stem; filter = function () { return true; };
+      // A stream another consumer already holds replays its shared buffer to a newcomer — from its
+      // start — so this block must start empty; a fresh connection resumes after what is on screen.
+      if (STREAMS[key]) { resetBlockLines(rec); rec.cursor = null; }
+      path = '/api/activity/log/' + encodeURIComponent(it.stem) + '/events' + (rec.cursor != null ? '?after=' + encodeURIComponent(rec.cursor) : '');
     }
-    if (!it.stem) return;
-    rec.streamKey = 'log:' + it.stem;
-    var after = rec.cursor != null ? '?after=' + encodeURIComponent(rec.cursor) : '';
-    onStream(rec.streamKey, '/api/activity/log/' + encodeURIComponent(it.stem) + '/events' + after, name, {
-      line: function (d) { rec.cursor = d.id; appendActLine(rec, d.text); },
-      end: function () { detachActStream(rec); refreshAll('activity-end'); }
+    if (it.kind === 'conversation' && STREAMS[key]) resetBlockLines(rec);
+    rec.streamKey = key;
+    var replaying = true;                                       // onStream replays synchronously, before it returns
+    onStream(key, path, name, {
+      line: function (d) { if (!live() || !filter(d)) return; if (it.kind !== 'conversation') rec.cursor = d.id; appendActLine(rec, d.text); },
+      // a REPLAYED end must not re-trigger the turn-end refresh other consumers already had
+      end: function (d) { if (!live() || !filter(d || {})) return; detachActStream(rec); if (!replaying) refreshAll('activity-end'); }
     });
+    replaying = false;
   }
   function detachActStream(rec) {
     if (!rec.streamKey) return;
@@ -1329,16 +1501,22 @@
     rec.streamKey = null;
     patchActRow(rec);
   }
+  // the lanes' scrollers: reaching the foot (or the cue) means the reader has caught up
+  ['lead-timeline', 'reviewer-timeline'].forEach(function (id) {
+    var list = $(id), cue = laneCue(list);
+    list.addEventListener('scroll', function () { onLaneScroll(list); });
+    if (cue) cue.addEventListener('click', function () { LANE_FOLLOW[id] = true; restick(list); });
+  });
   function focusWorkingLane() {
     var rec = null;
     [RLANE, LLANE].forEach(function (store) { Object.keys(store.rows).forEach(function (id) { if (!rec && isRunning(store.rows[id].item)) rec = store.rows[id]; }); });
-    var target = rec ? rec.row : ($('lead-timeline').querySelector('.lead-msg.working') || $('lanes'));
+    var target = rec ? rec.row : ($('lead-timeline').querySelector('.chat-block.working') || $('lanes'));
     try { target.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) { target.scrollIntoView(); }
     if (rec) { rec.row.classList.add('flash'); setTimeout(function () { rec.row.classList.remove('flash'); }, 1600); }
   }
   function focusLeadTurn(n) {
     if (n == null) return;
-    var m = $('lead-timeline').querySelector('.lead-msg[data-turn="' + String(n) + '"]');
+    var m = $('lead-timeline').querySelector('.chat-block[data-turn="' + String(n) + '"]');
     if (m) { try { m.scrollIntoView({ block: 'center' }); } catch (e) { /* ignore */ } m.classList.add('flash'); setTimeout(function () { m.classList.remove('flash'); }, 1600); }
   }
 
@@ -1346,7 +1524,7 @@
   // Phase 45: the panel is the lead LANE — the chat's messages are keyed rows
   // in #lead-timeline, merged in time with the lead's cycle-turn cards
   // (LLANE); nothing here wipes the container.
-  var LEAD = { list: [], current: null, conv: null, streamKey: null, cursor: {}, lines: {}, sending: false, sentAt: null, timer: null, msgRows: {} };
+  var LEAD = { list: [], current: null, conv: null, streamKey: null, cursor: {}, lines: {}, trimmed: {}, sending: false, sentAt: null, timer: null, msgRows: {} };
   function leadStreamPath(cid) { return '/api/lead/' + encodeURIComponent(cid) + '/events' + (LEAD.cursor[cid] ? '?after=' + encodeURIComponent(LEAD.cursor[cid]) : ''); }
   function leadLines(cid, n) { var c = LEAD.lines[cid] = LEAD.lines[cid] || {}; return (c[n] = c[n] || []); }
   try { LEAD.current = localStorage.getItem('tagteam.cockpit.lead') || null; } catch (e) { /* ignore */ }
@@ -1393,7 +1571,7 @@
       var agents = (NOW && NOW.agents) || {};
       var who = slot.role === 'reviewer' ? (agents.reviewer || 'the reviewer') : (cfg.agent || agents.lead || 'the lead');
       var sentence = (slot.kind === 'gate') ? 'The pre-check is running' : (slot.kind === 'panel') ? 'A review lens is running' : (slot.kind === 'briefer') ? 'The decision brief is being written' : who + ' is working on its ' + (slot.role === 'reviewer' ? 'review' : 'turn');
-      var where = slot.role === 'reviewer' || slot.kind === 'gate' || slot.kind === 'panel' ? 'in the reviewer lane' : 'above';
+      var where = (slot.kind === 'gate' || slot.kind === 'panel') ? 'in the checks strip above the lanes' : slot.role === 'reviewer' ? 'in the reviewer lane' : 'above';
       st.appendChild(document.createTextNode(sentence + (slot.round ? ' (round ' + slot.round + ')' : '') + ' — streaming ' + where + ' · '));
       var see = el('button', 'link-btn', 'watch it'); see.type = 'button'; see.addEventListener('click', focusWorkingLane);
       st.appendChild(see); st.appendChild(document.createTextNode(', wait, or '));
@@ -1415,52 +1593,103 @@
     if (LEAD.conv) leadStatus((LEAD.conv.continuity ? 'memory: ' + LEAD.conv.continuity : '') + (LEAD.conv.turns && LEAD.conv.turns.length ? ' · ' + LEAD.conv.turns.length + ' message' + (LEAD.conv.turns.length === 1 ? '' : 's') : ''));
   }
 
-  function msgNode(who, cls, ts, text) {
-    var m = el('div', 'lead-msg ' + cls);
-    var head = el('div', 'who'); head.appendChild(el('span', null, who)); head.appendChild(el('span', 'spacer')); head.appendChild(el('span', null, fmtTs(ts)));
-    m.appendChild(head);
-    var body = el('div', 'body'); body.textContent = text || ''; m.appendChild(body);
-    return m;
+  // Phase 68b: a chat turn is a turn — the same terminal block as a cycle turn, opening with the
+  // arbiter's message as a prompt line. The stream node is KEYED and appended to: a poll patches the
+  // header and the closing lines and never rebuilds the stream (the old bubbles did — their signature
+  // included the streamed line count — so a reader could not hold their place in a running chat).
+  function msgSig(cid, t) { return [t.status, (t.reply || '').length, t.finished_at || '', t.error || '', t.continuity || '', t.user_text || ''].join('|'); }
+  function chatLinesInto(rec) {                      // ONE consistent render of what is kept for this turn
+    while (rec.box.firstChild) rec.box.removeChild(rec.box.firstChild);
+    rec.noteEl = null;
+    var kept = leadLines(rec.cid, rec.turn.n);
+    kept.forEach(function (text) { rec.box.appendChild(lineNode(text)); });
+    if (LEAD.trimmed[rec.cid + ':' + rec.turn.n]) chatNote(rec);
   }
-  function linesBox(lines) {
-    var live = el('div', 'live'); live.dataset.live = '1';
-    lines.forEach(function (text) { live.appendChild(el('div', /\[tool|tool_use|Bash|Read|Edit|Write|\[tagteam\]/.test(text) ? 'tool' : null, text)); });
-    return live;
+  function chatNote(rec) {
+    var text = 'showing the last ' + BLOCK_CAP.toLocaleString('en-US') + ' lines' + (rec.turn.log_path ? ' — the whole log: ' + rec.turn.log_path : '');
+    if (!rec.noteEl) { rec.noteEl = el('div', 'bl-note', text); rec.box.insertBefore(rec.noteEl, rec.box.firstChild); } else rec.noteEl.textContent = text;
   }
-  // one keyed row per chat turn: the "you" bubble + the lead's bubble
-  function msgSig(cid, t) { return [t.status, (t.reply || '').length, t.finished_at || '', t.error || '', t.continuity || '', leadLines(cid, t.n).length].join('|'); }
-  function fillMsgRow(rec) {
+  function chatFirstLine(rec) { var k = rec.box.children; for (var i = 0; i < k.length; i++) if (k[i] !== rec.noteEl) return k[i]; return null; }
+  function openChatBlock(rec) {
+    if (!rec.folded) return;
+    rec.folded = false; rec.box.classList.remove('hidden'); rec.row.classList.add('open'); rec.openBtn.textContent = 'hide';
+    chatLinesInto(rec);
+  }
+  function foldChatBlock(rec, auto) {
+    if (rec.turn.status === 'running' && auto) return;
+    if (rec.folded) return;
+    holdingPlace($('lead-timeline'), function () {
+      rec.folded = true; rec.noteEl = null;
+      while (rec.box.firstChild) rec.box.removeChild(rec.box.firstChild);      // a folded block holds no stream DOM
+      rec.box.classList.add('hidden'); rec.row.classList.remove('open');
+    }, function () { return rec.row; });
+    rec.openBtn.textContent = 'log';
+  }
+  function appendChatLine(cid, n, text) {
+    var kept = leadLines(cid, n); kept.push(text);
+    var trimmed = kept.length > BLOCK_CAP; if (trimmed) { kept.shift(); LEAD.trimmed[cid + ':' + n] = true; }
+    var rec = LEAD.msgRows['msg:' + cid + ':' + n];
+    if (!rec || rec.folded) return;                  // kept in memory (capped); no DOM while folded
+    holdingPlace($('lead-timeline'), function () {
+      rec.box.appendChild(lineNode(text));
+      if (trimmed) { var first = chatFirstLine(rec); if (first) rec.box.removeChild(first); chatNote(rec); }
+    }, function () { return chatFirstLine(rec); });
+  }
+  function buildMsgRow(rec) {
+    var row = rec.row; row.className = 'tl-msg act-row chat-block';
+    var head = el('div', 'act-head');
+    rec.dot = el('span', 'dot'); head.appendChild(rec.dot);
+    rec.tsEl = el('span', 'ts'); head.appendChild(rec.tsEl);
+    rec.kindEl = el('span', 'kind'); head.appendChild(rec.kindEl);
+    rec.statusEl = el('span', 'status'); head.appendChild(rec.statusEl);
+    rec.contEl = el('span', 'cycle-tag'); head.appendChild(rec.contEl);
+    head.appendChild(el('span', 'spacer'));
+    rec.openBtn = el('button', 'link-btn', 'log'); rec.openBtn.type = 'button';
+    rec.openBtn.addEventListener('click', function () {
+      if (rec.folded) { rec.userOpened = true; rec.userClosed = false; openChatBlock(rec); }
+      else { rec.userClosed = true; rec.userOpened = false; foldChatBlock(rec, false); }
+    });
+    head.appendChild(rec.openBtn);
+    row.appendChild(head);
+    rec.promptEl = el('div', 'bl-prompt'); row.appendChild(rec.promptEl);
+    rec.box = el('div', 'act-lines hidden'); row.appendChild(rec.box);
+    rec.closeEl = el('div', 'bl-close hidden'); row.appendChild(rec.closeEl);
+    rec.folded = true;
+  }
+  function fillMsgRow(rec) {                          // patch — never a rebuild of the stream
     var t = rec.turn, cid = rec.cid;
-    while (rec.row.firstChild) rec.row.removeChild(rec.row.firstChild);
+    if (!rec.box) buildMsgRow(rec);
     var agent = (LEAD.cfg && LEAD.cfg.agent) || 'lead';
-    rec.row.appendChild(msgNode('you', 'you', t.ts, t.user_text));
-    var m = el('div', 'lead-msg lead'); m.dataset.turn = String(t.n); m.dataset.cid = cid;
-    var head = el('div', 'who'); head.appendChild(el('span', null, agent)); head.appendChild(el('span', 'spacer'));
+    rec.row.dataset.turn = String(t.n); rec.row.dataset.cid = cid;
+    rec.row.className = 'tl-msg act-row chat-block s-' + (t.status || 'unknown') + (rec.folded ? '' : ' open') + (t.status === 'running' ? ' working' : '');
+    rec.tsEl.textContent = fmtTime(t.ts); rec.tsEl.title = fmtTs(t.ts);
+    rec.kindEl.textContent = 'chat #' + t.n;
+    rec.statusEl.textContent = t.status === 'running' ? 'replying…' : outcomeLabel(t.status) + (t.finished_at ? ' · ' + fmtTime(t.finished_at) : '');
     var cont = t.continuity === 'resumed session' ? 'same session' : (t.continuity || '');
-    head.appendChild(el('span', null, t.status === 'running' ? 'replying…' : cont + (t.finished_at ? (cont ? ' · ' : '') + fmtTs(t.finished_at) : '')));
-    m.appendChild(head);
-    // the streamed activity lines are KEPT — a re-render mid-turn refills the
-    // live box, and a finished turn keeps them under a collapsed disclosure
-    var kept = leadLines(cid, t.n);
-    if (t.status === 'running') { m.classList.add('working'); var live = linesBox(kept); m.appendChild(live); live.scrollTop = live.scrollHeight; }
-    else {
-      if (t.status === 'ok') { var b = el('div', 'body'); b.textContent = t.reply || '(no text reply)'; m.appendChild(b); }
-      else {
-        var f = el('div', 'fail');
-        var when = t.finished_at ? ' at ' + fmtTs(t.finished_at) : '';
-        var why = t.error ? plainError(t.error).replace(/^cancelled /, '') : '';
-        var lead = why.indexOf('by you') === 0 ? 'Cancelled ' + why + when : (outcomeLabel(t.status).charAt(0).toUpperCase() + outcomeLabel(t.status).slice(1) + (why ? ' — ' + why : '') + when);
-        f.textContent = lead + '. No reply came' + (kept.length ? ' — the activity below shows what ' + agent + ' did before that.' : '.');
-        if (t.log_path) { f.title = 'log: ' + t.log_path; }
-        m.appendChild(f);
-      }
-      if (kept.length) {
-        var det = el('details', 'activity'); det.appendChild(el('summary', null, 'activity (' + kept.length + ' line' + (kept.length === 1 ? '' : 's') + ')'));
-        det.appendChild(linesBox(kept)); m.appendChild(det);
-      }
+    rec.contEl.textContent = cont; rec.contEl.classList.toggle('hidden', !cont);
+    rec.promptEl.textContent = 'you ▸ ' + (t.user_text || '');
+    // the closing lines: the recorded reply, or what went wrong
+    rec.closeEl.className = 'bl-close' + (t.status === 'running' ? ' hidden' : (t.status === 'ok' ? '' : ' fail'));
+    if (t.status === 'ok') rec.closeEl.textContent = agent + ' ▸ ' + (t.reply || '(no text reply)');
+    else if (t.status !== 'running') {
+      var when = t.finished_at ? ' at ' + fmtTs(t.finished_at) : '';
+      var why = t.error ? plainError(t.error).replace(/^cancelled /, '') : '';
+      var lead = why.indexOf('by you') === 0 ? 'Cancelled ' + why + when : (outcomeLabel(t.status).charAt(0).toUpperCase() + outcomeLabel(t.status).slice(1) + (why ? ' — ' + why : '') + when);
+      rec.closeEl.textContent = lead + '. No reply came' + (leadLines(cid, t.n).length ? ' — the output above shows what ' + agent + ' did before that.' : '.');
+      rec.closeEl.title = t.log_path ? 'log: ' + t.log_path : '';
     }
-    rec.row.appendChild(m);
+    // self-healing: an open block's stream must be exactly what is kept for the turn (lines can reach the
+    // kept array before the row exists — a replay on (re)subscribe); one consistent re-render, same node
+    if (!rec.folded) { var shown = rec.box.children.length - (rec.noteEl ? 1 : 0); if (shown !== leadLines(cid, t.n).length) chatLinesInto(rec); }
     rec.sig = msgSig(cid, t);
+  }
+  function applyChatPolicy() {                        // newest chat block open, earlier folded — unless the arbiter chose
+    var keys = Object.keys(LEAD.msgRows).sort(function (a, b) { return LEAD.msgRows[a].turn.n - LEAD.msgRows[b].turn.n; });
+    keys.forEach(function (key, i) {
+      var rec = LEAD.msgRows[key]; var newest = i === keys.length - 1;
+      if (rec.turn.status === 'running' || newest) { if (!rec.userClosed) openChatBlock(rec); }
+      else if (!rec.userOpened) foldChatBlock(rec, true);
+    });
   }
   function upsertLeadMessage(cid, t) {
     var key = 'msg:' + cid + ':' + t.n;
@@ -1473,7 +1702,8 @@
       insertKeyed(list, rec.row, ascSortKey(t.ts, key), true);
     } else {
       rec.turn = t;
-      if (rec.sig !== msgSig(cid, t)) { var stick = list.scrollTop + list.clientHeight >= list.scrollHeight - 40; fillMsgRow(rec); if (stick) list.scrollTop = list.scrollHeight; }
+      var stale = !rec.folded && (rec.box.children.length - (rec.noteEl ? 1 : 0)) !== leadLines(cid, t.n).length;
+      if (rec.sig !== msgSig(cid, t) || stale) holdingPlace(list, function () { fillMsgRow(rec); }, function () { return rec.row; });
       if (rec.row.dataset.key !== ascSortKey(t.ts, key)) insertKeyed(list, rec.row, ascSortKey(t.ts, key), true);
     }
   }
@@ -1486,6 +1716,8 @@
       if (rec.cid !== cid) { if (rec.row.parentNode) rec.row.parentNode.removeChild(rec.row); delete LEAD.msgRows[key]; }
     });
     (conv && conv.turns || []).forEach(function (t) { upsertLeadMessage(cid, t); });
+    applyChatPolicy();
+    restick($('lead-timeline'));
     renderLeadEmpty();
   }
   function renderLeadEmpty() {
@@ -1493,7 +1725,8 @@
     // has no messages — even when the lead's cycle-turn cards are already in
     // the timeline (the watcher worked before you said anything)
     var hasMessages = !!(LEAD.conv && LEAD.conv.turns && LEAD.conv.turns.length);
-    $('lead-empty').classList.toggle('hidden', hasMessages);
+    var hasTurns = Object.keys(LLANE.rows).some(function (id) { return !LLANE.rows[id].row.classList.contains('hidden'); });
+    $('lead-empty').classList.toggle('hidden', hasMessages || hasTurns);   // Phase 68b: it took the stream's room
   }
 
   function loadConversation(cid, force) {
@@ -1518,11 +1751,7 @@
     onStream(key, leadStreamPath(cid), 'lead', {
       line: function (d) {
         LEAD.cursor[cid] = d.id;
-        var kept = leadLines(cid, d.turn); kept.push(d.text);
-        var box = $('lead-timeline').querySelector('.lead-msg[data-turn="' + String(d.turn) + '"][data-cid="' + cid + '"] .live');
-        if (!box) return;
-        var line = el('div', /\[tool|tool_use|Bash|Read|Edit|Write|\[tagteam\]/.test(d.text) ? 'tool' : null, d.text);
-        box.appendChild(line); box.scrollTop = box.scrollHeight;
+        appendChatLine(cid, d.turn, d.text);         // capped, keyed, holds the reader's place
       },
       end: function (d) {
         LEAD.cursor[cid] = d.id;
@@ -1538,6 +1767,7 @@
     loadConversation(LEAD.current, true);
   });
   $('btn-reviewer-last').addEventListener('click', function () { toggleLastSession(); });
+  $('btn-lead-last').addEventListener('click', function () { toggleLastSession(); });
   $('btn-lead-new').addEventListener('click', function () {
     postJSON('/api/lead/new', {}).then(function (r) {
       if (!r.ok) { toast('err', (r.body && r.body.message) || 'Could not start a chat'); return; }
