@@ -302,7 +302,9 @@
     row.dataset.kind = ev.kind || 'info';
     row.appendChild(el('span', 't', fmtTime(ev.ts)));
     row.appendChild(el('span', 'k', ev.kind || 'info'));
-    row.appendChild(el('span', 'm', String(ev.msg == null ? '' : ev.msg).replace(/^\s+/, '')));
+    var msg = String(ev.msg == null ? '' : ev.msg).replace(/^\s+/, '');
+    if (ev.repeat > 1) msg += '   (×' + ev.repeat + ', until ' + fmtTime(ev.last_ts) + ')';
+    row.appendChild(el('span', 'm', msg));
     return row;
   }
   function atBottom(box) { return box.scrollHeight - box.scrollTop - box.clientHeight < 8; }
@@ -329,7 +331,7 @@
   }
   function loadWatcherEvents() {
     if (!DRAWER.open) return Promise.resolve();   // nothing is fetched while the drawer is closed
-    return getJSON('/api/watcher/events?n=200').then(function (r) {
+    return getJSON('/api/watcher/events?n=200&chatter=' + (DRAWER.all ? '1' : '0')).then(function (r) {
       if (r.ok && r.body && DRAWER.open) renderDrawerRows(r.body.events || []);
     });
   }
@@ -351,7 +353,7 @@
     if (typeof fitLanes === 'function') fitLanes();
   }
   $('turn-bar').addEventListener('click', function () { setDrawer(!DRAWER.open); });
-  $('wd-all').addEventListener('change', function () { DRAWER.all = !!$('wd-all').checked; renderDrawerRows(DRAWER.events); });
+  $('wd-all').addEventListener('change', function () { DRAWER.all = !!$('wd-all').checked; renderDrawerRows(DRAWER.events); loadWatcherEvents(); });
   $('wd-new').addEventListener('click', function () { var box = $('wd-rows'); box.scrollTop = box.scrollHeight; $('wd-new').classList.add('hidden'); });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && DRAWER.open && !document.querySelector('.modal-overlay:not(.hidden)')) setDrawer(false); });
   // ---------- end Phase 68 ----------

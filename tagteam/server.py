@@ -586,7 +586,11 @@ class CockpitRouter:
             if path == "/api/now":
                 h._send_json(capi.now_payload(self.project_dir))
             elif path == "/api/watcher/events":
-                h._send_json(capi.watcher_events_payload(self.project_dir, (q.get("n") or ["50"])[0]))
+                # `_qs` already returns one string per key (Phase 68 fix: 3.14.5 indexed it
+                # again, so n=200 meant 2)
+                h._send_json(capi.watcher_events_payload(
+                    self.project_dir, q.get("n") or "50",
+                    chatter=(q.get("chatter") or "1") not in ("0", "false", "no")))
             elif path == "/api/interjections":
                 phase, ctype = self._cycle_from_qs(q)
                 h._send_json(capi.interjections_payload(self.project_dir, phase, ctype))

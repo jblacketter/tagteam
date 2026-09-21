@@ -95,3 +95,19 @@ to the lead chat, then scroll back up to see the activity after it starts." Vert
 strip + Start card + lane header + a 46 vh timeline + composer > 800 px. Fixed on `cockpit-ux-3`
 (3.8.1): the lanes block fits the viewport (timelines scroll inside their lane; the composer and both
 streams share the first screen; tabs below the fold) and the Start card is compact (one row).
+
+## 2026-09-20 — "I can't see the watcher", and which agent is active — ADDRESSED by Phases 67 / 68a / 68
+Arbiter: "it should be very clear at all times which agent is active. right now I can't see the watcher…
+it doesn't show the history, or whose turn it is, it just shows if it's running." Live look the same night
+(screens and a full findings table in `docs/phases/headless-watcher-hands-an-approved-plan-to-the-lead.md`):
+up to seven equal pills; `watcher: on` with nothing behind it; the notify-mode fallback giving no reason.
+- Phase 67 (3.14.5): the watcher keeps a history and a heartbeat.
+- Phase 68a (3.14.6): a headless cycle runs through by itself.
+- Phase 68: the turn bar (one server-derived sentence) and the watcher drawer.
+
+Still open, for **Phase 68b**: the lanes (reviewer = a card with a small log box, lead = chat bubbles; gate
+runs under the reviewer's name; the lead lane not scoped to the current cycle), and two things the Phase 68
+live look showed — *Needs you* stays calm while the bar says **Stalled**, and the reviewer lane still says
+"the watcher will start it" under a stalled watcher. For **Phase 69**: the Start card proposes one phase when
+several are startable. Separate: codex's idle prompt is not recognised by the terminal watcher's idle
+patterns, so every dispatch to it waits the full 10 s (visible in `tagteam watch log`).

@@ -52,7 +52,8 @@ code, pre, .cli, .tail { font-family: var(--mono); font-size: 12.5px; }
 .now-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 
 /* Phase 68: the turn bar — the ONE dominant element of the header — and the watcher drawer under it */
-.turn-bar { display: inline-flex; align-items: center; gap: 10px; flex: 1 1 340px; min-width: 0; padding: 7px 12px; border-radius: var(--radius);
+.turn-row { padding-top: 0; }
+.turn-bar { display: flex; align-items: center; gap: 10px; flex: 1 1 100%; width: 100%; min-width: 0; padding: 7px 12px; border-radius: var(--radius);
   background: var(--bg-3); border: 1px solid var(--line); border-left: 4px solid var(--muted); color: var(--text); font: inherit; font-size: 15px;
   font-weight: 600; text-align: left; cursor: pointer; }
 .turn-bar:hover, .turn-bar:focus-visible { border-color: var(--accent); outline: none; }
@@ -93,8 +94,8 @@ code, pre, .cli, .tail { font-family: var(--mono); font-size: 12.5px; }
 .wd-history { position: relative; min-width: 0; }
 .wd-rows { max-height: 15em; overflow-y: auto; font-family: var(--mono); font-size: 12px; line-height: 1.55; background: var(--bg-2); border: 1px solid var(--line);
   border-radius: var(--radius); padding: 6px 8px; }
-.wd-row { display: grid; grid-template-columns: 5.2em 7.2em 1fr; gap: 8px; white-space: pre-wrap; word-break: break-word; }
-.wd-row .t { color: var(--muted); }
+.wd-row { display: grid; grid-template-columns: 7.6em 6.6em 1fr; gap: 8px; white-space: pre-wrap; word-break: break-word; }
+.wd-row .t { color: var(--muted); white-space: nowrap; }
 .wd-row .k { color: var(--text-dim); }
 .wd-row.f-dispatch .k { color: var(--accent); }
 .wd-row.f-check .k { color: var(--reviewer); }

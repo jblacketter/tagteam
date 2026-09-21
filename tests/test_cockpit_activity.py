@@ -585,8 +585,9 @@ class TestSourceGuards:
             assert gone not in html and gone not in js68, gone
         bar = html[html.index('id="turn-bar"') - 40:html.index("</button>", html.index('id="turn-bar"'))]
         assert "<button" in bar and 'aria-expanded="false"' in bar and 'aria-controls="watcher-drawer"' in bar
-        assert html.index('id="turn-bar"') < html.index('id="now-chips"') < html.index('id="watcher-drawer"') \
-            < html.index('id="needs-you"')
+        # the bar has a full-width row of its own (seen live: beside the phase chip the sentence was cut off)
+        assert html.index('id="now-chips"') < html.index('class="now-row turn-row"') < html.index('id="turn-bar"') \
+            < html.index('id="watcher-drawer"') < html.index('id="needs-you"')
         # Phase 45: the flat list and its support elements live inside the Rounds-tab disclosure
         disc = html[html.index('id="all-activity"'):html.index("</details>", html.index('id="all-activity"'))]
         for id_ in ("activity", "activity-empty", "activity-more", "activity-meta"):
@@ -1097,19 +1098,24 @@ class TestTurnBarAndDrawer:
                             fetches: FETCHED.slice(), rows: rows() };
             $('wd-all').checked = true; DRAWER.all = true; renderDrawerRows(DRAWER.events);
             RESULT.all = rows().length;
+            return loadWatcherEvents().then(function () { RESULT.allFetch = FETCHED[FETCHED.length - 1]; });
+          }).then(function () {
+            renderDrawerRows([{ ts: '2026-09-21T06:50:19+00:00', kind: 'turn', msg: ">> codex's turn", repeat: 46, last_ts: '2026-09-21T06:57:50+00:00' }]);
+            RESULT.folded = rows()[0];
             setDrawer(false);
             RESULT.closed = { hidden: $('watcher-drawer').classList.contains('hidden'), expanded: $('turn-bar').attrs['aria-expanded'] };
           });
         """)
         assert r["closedFetches"] == []
         assert r["open"]["hidden"] is False and r["open"]["expanded"] == "true"
-        assert r["open"]["fetches"] == ["/api/watcher/events?n=200"]
+        assert r["open"]["fetches"] == ["/api/watcher/events?n=200&chatter=0"]      # the server drops chatter BEFORE counting
         assert r["open"]["rows"] == [
             "wd-row f-dispatch | 06:33:46 | start | Watching handoff-state.json",
             "wd-row f-dispatch | 06:33:47 | turn | >> codex's turn",
             "wd-row f-problem | 06:33:48 | send-failed | FAILED: Could not send <b>x</b>",     # text, never markup
             "wd-row f-check | 06:34:00 | gate | gate: bounced"]
-        assert r["all"] == 5
+        assert r["all"] == 5 and r["allFetch"] == "/api/watcher/events?n=200&chatter=1"
+        assert r["folded"] == "wd-row f-dispatch | 06:50:19 | turn | >> codex's turn   (×46, until 06:57:50)"
         assert r["closed"] == {"hidden": True, "expanded": "false"}
 
     def test_drawer_empty_states(self):

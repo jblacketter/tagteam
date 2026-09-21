@@ -19,13 +19,6 @@
       <span class="brand-name" id="now-project" title="project directory">…</span>
       <span class="brand-sub">Tagteam cockpit <span class="version" id="now-version"></span></span>
     </div>
-    <button class="turn-bar tone-idle" id="turn-bar" type="button" aria-expanded="false" aria-controls="watcher-drawer"
-            title="who has the ball — select to see what the watcher is doing">
-      <span class="turn-dot" id="turn-dot"></span>
-      <span class="turn-text" id="turn-text">…</span>
-      <span class="turn-age" id="turn-age"></span>
-      <span class="turn-cue">watcher <span id="turn-caret">▾</span></span>
-    </button>
     <div class="now-chips" id="now-chips">
       <span class="chip" id="chip-cycle" title="the phase in progress: name — plan or implementation, round — and its state">—</span>
       <span class="chip hidden" id="chip-gate" title="pre-checks (gatekeeper) before each review">—</span>
@@ -36,6 +29,15 @@
       <span class="conn" id="conn" data-mode="connecting"><span class="conn-dot"></span><span id="conn-text">Connecting…</span></span>
       <a class="theme-link" href="/?theme=saloon" title="the Saloon theme">Saloon ↗</a>
     </div>
+  </div>
+  <div class="now-row turn-row">
+    <button class="turn-bar tone-idle" id="turn-bar" type="button" aria-expanded="false" aria-controls="watcher-drawer"
+            title="who has the ball — select to see what the watcher is doing">
+      <span class="turn-dot" id="turn-dot"></span>
+      <span class="turn-text" id="turn-text">…</span>
+      <span class="turn-age" id="turn-age"></span>
+      <span class="turn-cue">watcher <span id="turn-caret">▾</span></span>
+    </button>
   </div>
   <!-- WATCHER DRAWER (Phase 68): not a modal and not a tab — the lanes stay in
        view while it is open. Facts on the left, what the watcher did on the
