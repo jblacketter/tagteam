@@ -953,7 +953,7 @@ class TestWatcherIntegration:
         h.write_pause(project, {"reason": "earlier failure", "log_path": "x"})
         logs = []
         orig = watcher._log
-        watcher._log = logs.append
+        watcher._log = lambda m, **_kw: logs.append(m)   # Phase 67: _log takes kind=/context
         try:
             proc = watcher._build_processor(
                 mode="headless", lead_pane="a", reviewer_pane="b", confirm=False,
