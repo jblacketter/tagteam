@@ -309,7 +309,13 @@ def _working_text(facts: dict) -> tuple[str, str | None, str | None]:
         return f"{agent} is answering you", "lead", agent
     if role == "reviewer":
         return f"{agent} is reviewing" + rnd, role, agent
-    ctype = str(inf.get("target_type") or inf.get("type") or "")
+    ctype = str(inf.get("type") or "")
+    # A `start <phase> impl` turn runs under the PLAN cycle's marker (the impl cycle does not exist
+    # until the turn creates it) — seen live as "claude is working on the plan" while it was
+    # implementing. The state's command says which it is.
+    cmd = str((facts.get("state") or {}).get("command") or "")
+    if role == "lead" and _re.search(r"\bstart\s+\S+\s+impl\b", cmd):
+        ctype = "impl"
     verb = "is implementing" if ctype == "impl" else "is working on the plan" if ctype == "plan" else "is working"
     return f"{agent} {verb}" + rnd, role, agent
 
@@ -1494,11 +1500,12 @@ def run_action(action: str, params: dict, project_dir: str | Path,
     return _run(fn, args, project_dir)
 
 
-def watcher_events_payload(project_dir: str | Path, n: int = 50) -> dict:
-    """GET /api/watcher/events — the newest `n` watcher events, oldest first."""
+def watcher_events_payload(project_dir: str | Path, n: int = 50, chatter: bool = True) -> dict:
+    """GET /api/watcher/events — the newest `n` watcher events, oldest first.
+    `chatter=0` (Phase 68) leaves the routine `info` lines out before counting."""
     from tagteam import watchlog
     try:
         n = int(n)
     except (TypeError, ValueError):
         n = 50
-    return {"events": watchlog.read(project_dir, max(1, min(n, 500)))}
+    return {"events": watchlog.read(project_dir, max(1, min(n, 500)), include_info=bool(chatter))}

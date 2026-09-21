@@ -781,6 +781,20 @@ class TestHeadline:
         assert (hl["state"], hl["tone"], hl["text"], hl["age_of"]) == (state, tone, text, age_of)
         assert set(hl) == {"state", "tone", "text", "age_s", "age_of", "role", "agent"}
 
+    def test_a_start_impl_turn_is_implementing_although_its_marker_says_plan(self):
+        """Seen live (trial3): the marker of the lead's `start <phase> impl` turn carries type=plan."""
+        inf = {"kind": "cycle", "role": "lead", "agent": "claude", "round": 1, "type": "plan", "liveness": "running",
+               "age_s": 2.0}
+        hl = capi.headline(_facts(turn="lead", type="plan", inflight=inf, command="/tagteam:handoff start slugify impl"))
+        assert hl["text"] == "claude is implementing · round 1"
+        assert capi.headline(_facts(turn="lead", type="plan", inflight=inf,
+                                    command="Read the handoff contract … then act on your turn"))["text"] \
+            == "claude is working on the plan · round 1"
+        # the reviewer is never relabelled by the lead's command
+        rev = {**inf, "role": "reviewer", "agent": "codex"}
+        assert capi.headline(_facts(inflight=rev, command="/tagteam:handoff start slugify impl"))["text"] \
+            == "codex is reviewing · round 1"
+
     def test_priorities(self):
         busy = {"kind": "cycle", "role": "reviewer", "agent": "Codex", "round": 2, "type": "impl",
                 "liveness": "running", "age_s": 9.0}

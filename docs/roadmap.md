@@ -47,7 +47,7 @@ the top. Each phase is engine + CLI first, cockpit surface second. tagteam stays
 - **Depends on:** Phase 68
 
 ### Phase 68: Cockpit turn bar and watcher drawer
-- **Status:** In progress — plan cycle opened 2026-09-21. See `docs/phases/cockpit-turn-bar-and-watcher-drawer.md`.
+- **Status:** In progress — plan approved round 2 (2026-09-21); implementation in review. See `docs/phases/cockpit-turn-bar-and-watcher-drawer.md`.
 - **Description:** The Now strip is up to seven pills of equal weight; `watcher: on` has nothing behind it, and the heartbeat and event history that Phase 67 put in `/api/now` and `/api/watcher/events` are read by nothing. One dominant sentence says who has the ball ("codex is reviewing · round 2 · 1m02s", "Waiting on you", "Stalled: codex is owed a turn — the watcher last looked 6m ago", "Waiting on codex — the watcher is off"), derived server-side so the CLI and other dashboards can say the same thing; selecting it opens the watcher drawer: what the watcher is, when it last looked, and what it did. When the cockpit cannot run turns itself it says why.
 - **Depends on:** Phase 68a
 

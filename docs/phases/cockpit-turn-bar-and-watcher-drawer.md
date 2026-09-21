@@ -1,10 +1,64 @@
 # Phase 68: Cockpit turn bar and watcher drawer
 
 ## Status
-- [ ] Planning
-- [ ] Implementation: branch `phase/cockpit-turn-bar-and-watcher-drawer`
+- [x] Planning: approved round 2 (2026-09-21) at `a7dae2b`
+- [x] Implementation: branch `phase/cockpit-turn-bar-and-watcher-drawer`
 - [ ] Implementation Review
 - [ ] Complete
+
+## Implementation notes — what looking at it for real changed
+The unit tests were green before the first look in a browser. Five things
+then turned out wrong or missing, none of which a test had caught:
+
+1. **The sentence was cut off.** Beside the phase chip the bar had ~400 px
+   ("Approved — cockpit-turn-bar-and-watcher-d…"). It now has a full-width row
+   of its own under the brand row; the chips stay small beside the brand.
+2. **The drawer said "only routine lines so far"** on this repo although the
+   watcher had dispatched ten turns. Cause: a bug of mine shipped in **3.14.5**
+   — `/api/watcher/events` indexed `_qs()`'s already-scalar value, so `n=200`
+   meant `2` and `n=37` meant `3`; Phase 67's endpoint test used `n=5`, which
+   hides it. Fixed; the test now uses 37 and 200.
+3. **Chatter buries the story.** Of 150 records in this repo's log, 89 were
+   `info` (idle probes every 2–3 s). `watchlog.read(..., include_info=False)`
+   / `?chatter=0` now drops `info` **before** taking the newest `n`; the
+   drawer asks for `chatter=0` and re-asks with `chatter=1` for "show
+   everything". (Plan: filter client-side. Wrong place — the window is
+   counted server-side.)
+4. **48 identical `turn` lines for one pre-check.** While a gate run holds the
+   turn slot the watcher re-announces the owed turn on every tick. Story mode
+   folds a run of the same `(kind, msg, seq)` into one record with `repeat` and
+   `last_ts`; the drawer shows `(×46, until 06:57:50)`. A view only — the log
+   on disk is untouched and the full listing is not folded.
+5. **"claude is working on the plan" while it was implementing.** The marker
+   of a `start <phase> impl` turn carries the *plan* cycle's type (the impl
+   cycle does not exist until that turn creates it). The verb now follows the
+   state's command for a lead turn. Test built from the real marker shape.
+
+Also: the time column wrapped (`12:20:38` / `AM`) — widened, `nowrap`.
+Deviation from the plan: while the drawer is open it re-reads `/api/now` and
+the events every 5 s instead of waiting for the page's 30 s tick, because
+"last look: 7s ago" is a sentence with an age in it and must not sit frozen.
+Approval notes: `turn_delivered()` accepts only a terminal watcher's `sent`
+with a non-null matching `seq`; a pause after delivery reads "… has its turn;
+further hand-offs are held"; liveness `unknown` (no evidence) reads as plain
+working, never as `finishing`.
+
+### Criterion 7 — seen, not assumed (2026-09-21, `.playwright-mcp/p68-*.png`, git-ignored)
+| Shot | State, produced for real |
+|---|---|
+| `p68-2-this-repo-drawer` | this repo under its iTerm2 watcher: `Approved — …, plan`; drawer: `running — iterm2, pid 35417`, the terminals note, 16 story lines for the night (150 raw) |
+| `p68-3-watcher-off` | scratch project, plan waiting: "Waiting on codex — the watcher is off, nothing will start its turn · 10s", empty-history state |
+| `p68-4-reviewer-working` | watcher started **from the drawer** (headless): "codex is reviewing · round 1 · 1s" in the reviewer's colour; drawer filling live |
+| `p68-5-lead-working` | after the automatic hand-off: the lead's turn (this shot still shows finding 5's wrong verb; fixed after it was taken, verified by test only) |
+| `p68-6-approved-with-history` | "Approved — slugify, implementation"; `python3 test_slug.py` → 7 passed (run by hand) |
+| `p68-7-stalled` | the scratch watcher **SIGSTOP-ped**, a new turn owed: red "Stalled: codex is owed a turn and the watcher has stopped looking · 36s"; drawer `STALE: 34s ago, expected every 10s…`; `tagteam watch status` printed the same sentence |
+
+Not seen: `waiting` under a terminal watcher with a turn actually owed (this
+repo's cycle was `done` during the session — it will be visible while the
+reviewer holds this submission), `needs-you`, `turn-lost`, `paused`,
+`launching` (table-tested only). Seen and left for Phase 68b: *Needs you*
+stays calm while the bar says Stalled; the reviewer lane still says "the
+watcher will start it".
 
 ## Summary
 The arbiter's first ask for the cockpit (2026-09-20): "it should be very clear

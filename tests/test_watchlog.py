@@ -116,6 +116,31 @@ class TestEventLog:
         assert watchlog.last_event(root)["kind"] == "gate"
         assert watchlog.last_event(root, watchlog.DISPATCH_KINDS)["seq"] == 9
 
+    def test_story_mode_filters_chatter_before_counting_and_folds_runs(self, root):
+        """Phase 68, seen live: a terminal watcher's idle-probe chatter pushed
+        every dispatch out of a newest-200 window, and one 8-minute pre-check
+        produced 48 identical `turn` lines."""
+        s = Sink(root, "iterm2", every_s=10)
+        s.event(">> Codex's turn", "turn", seq=4); s.event("   Sent to Codex", "sent", seq=4)
+        for i in range(300):
+            s.event(f"   (not idle yet, probe {i})")
+        for _ in range(48):
+            s.event(">> Codex's turn", "turn", seq=5); s.event("   gate: turn slot busy")
+        s.event("   Sent to Codex", "sent", seq=5)
+        assert [e["kind"] for e in watchlog.read(root, 200)][:3] == ["info", "info", "info"]        # the old window
+        story = watchlog.read(root, 200, include_info=False)
+        assert [(e["kind"], e.get("seq"), e.get("repeat")) for e in story] == [
+            ("turn", 4, None), ("sent", 4, None), ("turn", 5, 48), ("sent", 5, None)]
+        assert story[2]["last_ts"] >= story[2]["ts"]
+        assert len(watchlog.read(root, 2, include_info=False)) == 2
+        # folding is a view: nothing on disk changes, and the full log is not folded
+        assert sum(1 for e in watchlog.read(root, 10_000) if e["kind"] == "turn") == 49
+
+    def test_a_different_seq_or_message_is_not_folded(self, root):
+        s = Sink(root, "iterm2", every_s=10)
+        s.event("x", "turn", seq=1); s.event("x", "turn", seq=2); s.event("y", "turn", seq=2); s.event("y", "sent", seq=2)
+        assert [e.get("repeat") for e in watchlog.read(root, 10, include_info=False)] == [None] * 4
+
     def test_concurrent_callers_across_rotation(self, root, monkeypatch):
         """watch_with_events calls the processor from two threads."""
         monkeypatch.setattr(watchlog, "MAX_BYTES", 4_000)
@@ -684,3 +709,11 @@ class TestApi:
             assert r["status"] == 200 and r["json"]["events"][0]["kind"] == "sent"
             assert s.client.get("/api/watcher/events?n=abc")["status"] == 200
             assert s.client.get("/api/now")["json"]["watcher"]["last_event"]["seq"] == 4
+            # 3.14.5 took the first CHARACTER of n (n=200 → 2, n=37 → 3); single digits hid it
+            sink = Sink(proj, "iterm2", every_s=10)
+            for i in range(40):
+                sink.event(f"e{i}", "sent" if i % 2 else "info", seq=i)
+            assert len(s.client.get("/api/watcher/events?n=37")["json"]["events"]) == 37
+            assert len(s.client.get("/api/watcher/events?n=200")["json"]["events"]) == 41
+            story = s.client.get("/api/watcher/events?n=200&chatter=0")["json"]["events"]
+            assert len(story) == 21 and all(e["kind"] != "info" for e in story)

@@ -249,14 +249,41 @@ def _records(root: Path, rel: str) -> list[dict]:
     return out
 
 
-def read(root: str | Path, n: int = 50) -> list[dict]:
-    """The newest ``n`` events, oldest first. Malformed lines are skipped."""
+def read(root: str | Path, n: int = 50, include_info: bool = True) -> list[dict]:
+    """The newest ``n`` events, oldest first. Malformed lines are skipped.
+    With ``include_info=False`` the routine ``info`` lines are dropped BEFORE
+    the newest ``n`` are taken — a terminal watcher writes idle-probe chatter
+    by the hundred, and a window counted in lines would lose the dispatches
+    (seen live, Phase 68: 200 lines, not one of them the 00:22 `sent`)."""
     root = Path(root)
     n = max(1, int(n))
-    live = _records(root, EVENTS_REL)
+
+    def keep(recs):
+        return recs if include_info else [r for r in recs if (r.get("kind") or "info") != "info"]
+    live = keep(_records(root, EVENTS_REL))
     if len(live) < n:
-        live = _records(root, ROTATED_REL) + live
+        live = keep(_records(root, ROTATED_REL)) + live
+    if not include_info:
+        live = _collapse(live)
     return live[-n:]
+
+
+def _collapse(recs: list[dict]) -> list[dict]:
+    """Fold a run of the same event into one record with `repeat` and
+    `last_ts`. While a gate or another turn holds the slot, the watcher
+    re-announces the owed turn on every tick — 48 identical `turn` lines
+    during one 8-minute pre-check (seen live, Phase 68). The story is "it kept
+    trying for 8 minutes", once."""
+    out: list[dict] = []
+    for r in recs:
+        prev = out[-1] if out else None
+        if prev is not None and (prev.get("kind"), prev.get("msg"), prev.get("seq")) == \
+                (r.get("kind"), r.get("msg"), r.get("seq")):
+            prev["repeat"] = prev.get("repeat", 1) + 1
+            prev["last_ts"] = r.get("ts")
+        else:
+            out.append(dict(r))
+    return out
 
 
 def last_event(root: str | Path, kinds: tuple[str, ...] | None = None) -> dict | None:
