@@ -1,8 +1,8 @@
 # Phase 66: Roadmap dependency problems name their line
 
 ## Status
-- [ ] Planning
-- [ ] Implementation: branch `phase/roadmap-dependency-problems-name-their-line`
+- [x] Planning: approved round 1 (2026-09-20) at `340cb32`
+- [x] Implementation: branch `phase/roadmap-dependency-problems-name-their-line`
 - [ ] Implementation Review
 - [ ] Complete
 
@@ -36,8 +36,9 @@ added in Phases 60 and 63 already carry `(line N)`; the fatal problems do not.
    line.
 3. `validate_graph()` appends ` (line N)` to `unknown dependency` and
    `depends on itself` problems when the line is known (`> 0`). A phase built
-   by hand without line data — as several tests and `worktree.py`'s text path
-   do — produces exactly today's strings.
+   by hand without line data — as several tests do — produces exactly today's
+   strings. (`worktree._phases_from_text` goes through `parse_roadmap()`, so it
+   gets lines; it is not a hand-built case — corrected at plan approval.)
 4. Everything that relays problems inherits it unchanged: `roadmap check` /
    `ready` / `queue` / `graph`, `RoadmapGraphError`, and the watcher's
    `pause_reason` (`roadmap invalid: b: unknown dependency 'ghost' (line 7)`).
@@ -59,8 +60,13 @@ added in Phases 60 and 63 already carry `(line N)`; the fatal problems do not.
   so `dep line = heading_line + offset`.
 - Second pass: `dep_lines[value] = line` alongside `depends_on.append(value)`,
   keyed by the same value (`target.slug` or the verbatim ref).
-- `validate_graph()`: `where = f" (line {n})" if (n := p.dep_lines.get(dep, 0))
-  else ""`.
+- `validate_graph()`: `n = p.dep_lines.get(dep, 0)`; the suffix is added only
+  when `n > 0`.
+- `line` and `dep_lines` are `field(compare=False)` (`dep_lines` with
+  `default_factory=dict`): location is diagnostic, not part of a phase's
+  identity — a parsed phase still equals the same phase built by hand.
+- `dep_lines.setdefault(value, line)` at the moment a *resolved* value is first
+  appended, so `Phase 1`, its name and its slug keep the first line too.
 
 ## Files
 - `tagteam/roadmap.py`, `tests/test_roadmap.py`
@@ -84,3 +90,12 @@ added in Phases 60 and 63 already carry `(line N)`; the fatal problems do not.
    repo and for the registered projects that were ok before (the two Northstar
    repos are not run).
 8. Gate: full suite green via `on_submit`.
+
+## Implementation notes
+- Two existing expectations changed, both because they parse a roadmap from
+  text and now know the line: `TestGraphValidation::test_unknown_self_cycle_all_listed`
+  (`… 'ghost' (line 3)`, `depends on itself (line 3)`) and
+  `TestDynamicAdvance::test_invalid_roadmap_pauses` (`pause_reason … (line 5)`).
+  The plan predicted one.
+- Criterion 7, read-only, 2026-09-20: `tagteam roadmap check` over the 39
+  registered projects outside Northstar — all `ok`, as before.
