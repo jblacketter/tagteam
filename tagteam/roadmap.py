@@ -43,6 +43,13 @@ class RoadmapPhase:
     # pair: `Phase 5` and `Phase 5b` are different phases, and neither is a
     # duplicate of the other.
     suffix: str = ""
+    # Phase 66: where things are, for problem messages only — the 1-based
+    # line of the heading, and for each entry of `depends_on` the line of the
+    # `Depends on:` that first carried it. Appended last (the Phase 59 rule)
+    # and excluded from comparison: two phases are the same phase wherever a
+    # blank line moved them. 0 / missing = unknown (a hand-built phase).
+    line: int = field(default=0, compare=False)
+    dep_lines: dict[str, int] = field(default_factory=dict, compare=False)
 
 
 class RoadmapGraphError(ValueError):
@@ -143,7 +150,7 @@ def parse_roadmap(roadmap_path: Path) -> list[RoadmapPhase]:
         )
 
     phases: list[RoadmapPhase] = []
-    raw_deps: list[list[str]] = []
+    raw_deps: list[list[tuple[str, int]]] = []
     for i, match in enumerate(headings):
         number = int(match.group(1))
         suffix = (match.group(2) or "").lower()
@@ -161,9 +168,12 @@ def parse_roadmap(roadmap_path: Path) -> list[RoadmapPhase]:
         status_match = _STATUS_RE.search(section)
         status = status_match.group(1).strip() if status_match else "Unknown"
 
+        # The section starts at the end of the heading, i.e. still on the
+        # heading's line, so a section offset is a document offset from it.
+        heading_line = content.count("\n", 0, match.start()) + 1
         phases.append(RoadmapPhase(slug=slug, name=name, status=status,
-                                   number=number, suffix=suffix))
-        raw_deps.append(_split_dep_refs(section))
+                                   number=number, suffix=suffix, line=heading_line))
+        raw_deps.append([(ref, heading_line + off) for ref, off in _split_dep_refs(section)])
 
     if not phases:
         raise ValueError(
@@ -174,26 +184,34 @@ def parse_roadmap(roadmap_path: Path) -> list[RoadmapPhase]:
     # Second pass: resolve dependency references against the full phase list.
     for phase, refs in zip(phases, raw_deps):
         resolved: list[str] = []
-        for ref in refs:
+        for ref, dep_line in refs:
             target = _resolve_ref(ref, phases)
             value = target.slug if target is not None else ref
             if value not in resolved:
                 resolved.append(value)
+                # First line wins after resolution too: `Phase 1`, its name
+                # and its slug are one dependency.
+                phase.dep_lines.setdefault(value, dep_line)
         phase.depends_on = resolved
 
     return phases
 
 
-def _split_dep_refs(section: str) -> list[str]:
-    """All `Depends on:` references in a phase section, in order, de-duplicated."""
-    refs: list[str] = []
+def _split_dep_refs(section: str) -> list[tuple[str, int]]:
+    """All `Depends on:` references in a phase section, in order, de-duplicated,
+    each with the 0-based line offset (within the section) of the line that
+    first carried it."""
+    refs: list[tuple[str, int]] = []
+    seen: set[str] = set()
     for m in _DEPENDS_RE.finditer(section):
+        offset = section.count("\n", 0, m.start())
         for part in re.split(r"[,;]", m.group(1)):
             ref = part.strip().strip("`\"'").strip()
             if ref.casefold() in _DEP_NONE_WORDS:
                 continue
-            if ref not in refs:
-                refs.append(ref)
+            if ref not in seen:
+                seen.add(ref)
+                refs.append((ref, offset))
     return refs
 
 
@@ -365,10 +383,12 @@ def validate_graph(phases: list[RoadmapPhase]) -> list[str]:
     by_slug = {p.slug: p for p in phases}
     for p in phases:
         for dep in p.depends_on:
+            n = p.dep_lines.get(dep, 0)
+            where = f" (line {n})" if n > 0 else ""       # Phase 66; unknown for a hand-built phase
             if dep == p.slug:
-                problems.append(f"{p.slug}: depends on itself")
+                problems.append(f"{p.slug}: depends on itself{where}")
             elif dep not in by_slug:
-                problems.append(f"{p.slug}: unknown dependency '{dep}'")
+                problems.append(f"{p.slug}: unknown dependency '{dep}'{where}")
     # Cycle detection (DFS, three colours), only over resolvable edges.
     WHITE, GREY, BLACK = 0, 1, 2
     colour = {p.slug: WHITE for p in phases}

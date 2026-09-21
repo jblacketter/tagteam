@@ -9,7 +9,7 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 
 ## Phases
 ### Phase 66: Roadmap dependency problems name their line
-- **Status:** Planning — plan cycle opened 2026-09-20. Branch `phase/roadmap-dependency-problems-name-their-line`. See `docs/phases/roadmap-dependency-problems-name-their-line.md`.
+- **Status:** In review — plan approved round 1 (2026-09-20); impl cycle opened 2026-09-20. Branch `phase/roadmap-dependency-problems-name-their-line`. See `docs/phases/roadmap-dependency-problems-name-their-line.md`.
 - **Description:** `roadmap check` reports `unknown dependency '…'` and `depends on itself` without a location; on 2026-09-20 two projects (bugalizer, designwing) each needed a grep to find one bad `Depends on:` line. `RoadmapPhase` gains `line` and `dep_lines`, `parse_roadmap()` fills them, and `validate_graph()` appends `(line N)` when the line is known — hand-built phases keep today's exact strings. Identity and cycle problems are unchanged.
 - **Depends on:** Phase 63
 

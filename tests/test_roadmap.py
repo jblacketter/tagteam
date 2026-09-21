@@ -623,8 +623,8 @@ class TestGraphValidation:
                 "### Phase 2: B\n- **Status:** Not Started\n- **Depends on:** a\n")
         phases = _phases(tmp_path, text)
         problems = validate_graph(phases)
-        assert "a: unknown dependency 'ghost'" in problems
-        assert "a: depends on itself" in problems
+        assert "a: unknown dependency 'ghost' (line 3)" in problems        # Phase 66: parsed phases know their lines
+        assert "a: depends on itself (line 3)" in problems
         assert any(p.startswith("cycle: ") and "a" in p and "b" in p for p in problems)
         with pytest.raises(RoadmapGraphError) as ei:
             check_graph(tmp_path / "docs" / "roadmap.md")
@@ -859,7 +859,7 @@ class TestDynamicAdvance:
         state = _roadmap_state(tmp_path, phase="a", queue=["a", "b"], index=0, completed=[])
         new = _try_roadmap_advance(state, str(tmp_path))
         assert new["status"] == "escalated"
-        assert new["roadmap"]["pause_reason"] == "roadmap invalid: b: unknown dependency 'ghost'"
+        assert new["roadmap"]["pause_reason"] == "roadmap invalid: b: unknown dependency 'ghost' (line 5)"
 
     def test_missing_roadmap_file_behaves_like_before(self, tmp_path):
         state = _roadmap_state(tmp_path, phase="a", queue=["a", "b"], index=0, completed=[])
@@ -1346,3 +1346,73 @@ class TestPlaceholderPhases:
                 graph_problems(root / "docs" / "roadmap.md")           # what the watcher catches
             with pytest.raises(ValueError, match="No phases found"):
                 parse_roadmap(root / "docs" / "roadmap.md")
+
+
+# ---------------------------------------------------------------------------
+# Phase 66 — `unknown dependency` and `depends on itself` say which line
+# ---------------------------------------------------------------------------
+
+class TestDependencyProblemLines:
+    BUGALIZER = (
+        "# Roadmap\n\n## Phases\n\n"                                                    # lines 1-4
+        "### Phase 8: open-pr (B2)\n- **Status:** Implemented\n\n"                       # 5-7
+        "### Phase 9: private-repo-access (proposed)\n- **Status:** Proposed\n"           # 8-9
+        "- **Open question:** one repo only\n"                                            # 10
+        "- **Depends on:** Phase 8 (credential code), Dan's token for acceptance\n")       # 11
+
+    def test_the_line_that_cost_a_grep(self, tmp_path, monkeypatch, capsys):
+        path = _write_roadmap(tmp_path, self.BUGALIZER)
+        phases = parse_roadmap(path)
+        assert [p.line for p in phases] == [5, 8]
+        assert validate_graph(phases) == [
+            "private-repo-access-proposed: unknown dependency 'Phase 8 (credential code)' (line 11)",
+            "private-repo-access-proposed: unknown dependency 'Dan's token for acceptance' (line 11)"]
+        monkeypatch.chdir(tmp_path)
+        assert roadmap_command(["check"]) == 1
+        out = capsys.readouterr().out
+        assert out.count("(line 11)") == 2 and "roadmap invalid (2 problem(s)):" in out
+
+    def test_self_dependency_and_resolved_references_carry_their_lines(self, tmp_path):
+        text = ("### Phase 1: Alpha\n- **Status:** Not Started\n\n- **Depends on:** Phase 1\n"
+                "### Phase 2: Beta\n- **Status:** Not Started\n- **Depends on:** alpha\n")
+        phases = parse_roadmap(_write_roadmap(tmp_path, text))
+        assert validate_graph(phases) == ["alpha: depends on itself (line 4)"]
+        assert phases[1].depends_on == ["alpha"] and phases[1].dep_lines == {"alpha": 7}
+
+    def test_first_line_wins_for_repeats_and_for_aliases_of_one_phase(self, tmp_path):
+        text = ("### Phase 1: Alpha\n- **Status:** Done\n"
+                "### Phase 2: Beta\n- **Status:** Not Started\n"
+                "- **Depends on:** ghost, Phase 1\n"            # line 5
+                "- **Depends on:** ghost\n"                     # line 6: repeated verbatim
+                "- **Depends on:** Alpha, alpha, other\n")      # line 7: two more spellings of Phase 1
+        beta = parse_roadmap(_write_roadmap(tmp_path, text))[1]
+        assert beta.depends_on == ["ghost", "alpha", "other"]
+        assert beta.dep_lines == {"ghost": 5, "alpha": 5, "other": 7}
+        assert validate_graph(parse_roadmap(tmp_path / "docs" / "roadmap.md")) == [
+            "beta: unknown dependency 'ghost' (line 5)", "beta: unknown dependency 'other' (line 7)"]
+
+    def test_crlf_and_placeholder_headings_do_not_shift_the_numbers(self, tmp_path):
+        text = ("### Phase 1: Alpha\n- **Status:** Done\n"
+                "### Phase 2: [Name]\n- **Status:** Not Started\n- **Depends on:** nowhere\n"   # a placeholder: no phase, no problem
+                "### Phase 3: Gamma\n- **Status:** Not Started\n- **Depends on:** ghost\n")     # line 8
+        for body in (text, text.replace("\n", "\r\n")):
+            path = tmp_path / "docs" / "roadmap.md"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(body.encode("utf-8"))
+            phases = parse_roadmap(path)
+            assert [(p.slug, p.line) for p in phases] == [("alpha", 1), ("gamma", 6)]
+            assert validate_graph(phases) == ["gamma: unknown dependency 'ghost' (line 8)"]
+
+    def test_hand_built_phases_keep_the_exact_old_strings(self):
+        a = RoadmapPhase("a", "A", "Not Started", 1, ["ghost", "a"], "")          # positional, as before Phase 66
+        assert a.line == 0 and a.dep_lines == {}
+        assert validate_graph([a]) == ["a: unknown dependency 'ghost'", "a: depends on itself"]
+        b = RoadmapPhase("b", "B", "Not Started", 2, ["ghost"], dep_lines={"ghost": 0})
+        assert validate_graph([b]) == ["b: unknown dependency 'ghost'"]          # 0 = unknown, never "(line 0)"
+
+    def test_location_is_not_part_of_a_phases_identity(self, tmp_path):
+        one = parse_roadmap(_write_roadmap(tmp_path / "one", "### Phase 1: A\n- **Depends on:** ghost\n"))
+        two = parse_roadmap(_write_roadmap(tmp_path / "two", "\n\n### Phase 1: A\n\n- **Depends on:** ghost\n"))
+        assert one == two and (one[0].line, two[0].line) == (1, 3)
+        assert one[0].dep_lines != two[0].dep_lines
+        assert one[0] == RoadmapPhase(slug="a", name="A", status="Unknown", number=1, depends_on=["ghost"])

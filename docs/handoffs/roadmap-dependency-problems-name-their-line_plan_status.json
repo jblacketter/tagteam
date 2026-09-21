@@ -1,0 +1,25 @@
+{
+  "state": "approved",
+  "ready_for": null,
+  "round": 1,
+  "phase": "roadmap-dependency-problems-name-their-line",
+  "type": "plan",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-21",
+  "baseline": {
+    "sha": "340cb3222a655735ea390ea9185c54ebdc3fef34",
+    "dirty_paths": [],
+    "captured_at": "2026-09-21T03:16:44.178361+00:00",
+    "source": "plan-init"
+  },
+  "impl_boundary": {
+    "sha": "7b4b4e8e5f42e9195a1ff37ca1fd5dde9c40b0ca",
+    "dirty": {
+      "docs/handoffs/roadmap-dependency-problems-name-their-line_plan_rounds.jsonl": "7a6a7a67bd05fcc8e91b77e3bbb7f5987bf4c05e0f80e8a03863263018a37edc",
+      "docs/handoffs/roadmap-dependency-problems-name-their-line_plan_status.json": "7502d9b3d61321c20928f502d7ab852ebdbce3ac5971cb8e607d1bcd3b964b41"
+    },
+    "captured_at": "2026-09-21T03:17:39.007110+00:00",
+    "source": "plan-approve"
+  }
+}

@@ -125,7 +125,7 @@ full-roadmap mode until the owner renames the phases.
 bracketed placeholder headings as "not a phase yet" in `roadmap check`. A code
 change — needs a cycle.
 
-### 9. Other roadmap findings from the per-project pass (2026-09-20)
+### 9. Other roadmap findings from the per-project pass (2026-09-20) — line numbers FIXED in Phase 66
 - Free text in `Depends on:` is read as phase references. Fixed by hand in
   bugalizer (`Phase 8 (credential code), Dan's token …` → `Phase 8` + a
   `Needs:` line) and designwing (`homepage-fixes and about-page-fixes
