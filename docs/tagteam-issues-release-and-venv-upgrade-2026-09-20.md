@@ -159,3 +159,17 @@ is not captured, so there is nothing to read after the fact.
 *Suggestion:* have `_start_watch` keep the child's stdout/stderr and print it
 when the wait fails, so the next occurrence says whether the child was slow,
 refused, or crashed.
+
+### 11. Flaky under heavy load: `test_wait_child_terminates_and_reports_a_child_still_running` — OPEN (cause not established)
+2026-09-21, the 3.14.7 release-tree suite: run 1 → 1 failed / 2,274 passed (this test); run 2, minutes later,
+same tree → 2,275 passed. Load average during run 1 was ~48 (1-minute), ~15 at the start of run 2. The test
+exercises `_wait_child` / `_child_output` — helpers inside `tests/test_watcher_lock.py` — and no product code;
+nothing in 3.14.7 touches it. **The failure message was not captured** (the run was tailed to two lines), so
+the cause is a hypothesis, not a finding: the test gives the spawned `python -c "print('started, waiting');
+sleep"` 0.5 s before terminating it and then asserts the text is in the captured output; under that load the
+interpreter may not have printed yet. Its sibling (`…kills_a_child_that_ignores_sigterm`) avoids exactly this
+by reading the child's first line before signalling. Not reproduced: 5/5 alone, and 12/12 under eight busy
+CPU loops (load ~10). Two of the solo runs took ~5 s instead of ~0.6 s — also unexplained.
+*Suggestion:* have the child emit `ready\nstarted, waiting` in one write and read the first line before
+calling `_wait_child`; when it next fails, read the assertion text first. Needs a cycle (test change).
+Release-suite logs from now on are saved whole, not tailed.
