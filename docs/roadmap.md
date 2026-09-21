@@ -8,6 +8,11 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 **Workflow:** Lead / Reviewer with Human Arbiter
 
 ## Phases
+### Phase 65: Hardening: shadow installs, quiet upgrades, clean test runs
+- **Status:** Planning — plan cycle opened 2026-09-20. Branch `phase/hardening-shadow-installs-quiet-upgrades-clean-test-runs`. See `docs/phases/hardening-shadow-installs-quiet-upgrades-clean-test-runs.md`.
+- **Description:** Four small fixes from the 2026-09-20 issues log. (1) `doctor` and `tagteam state` report a tagteam installed in the project's own `.venv` / `venv` whose version differs from the running one — six such copies had gone unnoticed and one pre-3.14 copy can still re-create the retired `templates/`. (2) `_same_manifest()` ignores the top-level version stamp, so a release that changes no framework file no longer rewrites the manifest in every project. (3) The `wheel_venv` test fixture builds from a copy, so the suite stops leaving `build/` and `tagteam.egg-info/` in the checkout. (4) The watcher-lock tests print the spawned watcher's output when a wait times out, so the flake seen once in a gate run can explain itself next time.
+- **Depends on:** Phase 64
+
 ### Phase 64: Version from the source tree
 - **Status:** ✅ Complete — plan approved round 1, impl approved round 3 (2026-09-20); gate: 2,112 passed, 5 skipped at `57088cf`. Branch `phase/version-from-the-source-tree`, rebased onto `main` after PR #47 merged (tree byte-identical to the gated `57088cf`); PR #48 merged 2026-09-20. See `docs/phases/version-from-the-source-tree.md`.
 - **Description:** `tagteam.__version__` comes from `importlib.metadata`, which an editable install writes once and never updates: on 2026-09-20 the arbiter's CLI ran 3.14.0 code while reporting 3.13.0 (a sweep would have stamped 41 manifests wrongly), this repo's `.venv` reported 3.12.0 (two environmental `upgrade_smoke` failures, twice misdiagnosed), rankr's link reported 0.5.0. `__version__` now prefers the `pyproject.toml` beside the package when it declares `name = "tagteam"` — true only for a source tree — and falls back to metadata exactly as before for every wheel install. Adds `tagteam --version` (version + the directory it was imported from).
