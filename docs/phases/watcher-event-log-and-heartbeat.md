@@ -3,8 +3,23 @@
 ## Status
 - [x] Planning: approved round 2 (2026-09-20) at `dcf4f2e`
 - [x] Implementation: branch `phase/watcher-event-log-and-heartbeat`
-- [ ] Implementation Review
-- [ ] Complete
+- [x] Implementation Review: approved round 4 (2026-09-20) at `b0ee363`; gate 2,202 passed, 5 skipped
+- [ ] Complete: PR open; merge is the arbiter's
+- [ ] **Criterion 10 on this repo — NOT DONE.** The iTerm2 watcher running here predates the change. After the merge: restart the watcher tab, run one real handoff round, compare `tagteam watch log` with the tab. The reviewer's approval explicitly does not cover this.
+
+## Closeout
+```
+Phase report: watcher-event-log-and-heartbeat — plan approved r2 · impl approved r4
+  plan   2 rounds · 1 change request · 0 bounces
+  impl   4 rounds · 1 change request · 2 bounces · gate 4 runs, 31m 31s
+  time   start→approve 53m 56s · implementation before first submit 9m 16s
+         lead 8m 28s (4 spans, 2 unknown) · reviewer 4m 40s (4 spans) · gate 31m 32s (4 spans)  (elapsed; includes relay wait)
+  usage  no usage rows stored under this phase
+  turns  matched 0 of 10 · no token data 0 · unmatched 8 · unknown 2
+```
+Bounces: r1 two test stand-ins for `watcher._log` could not take `kind=` (real); r2 the issue-10 watcher-lock
+flake, whose cause was found and fixed here (the test's lock probe raced the child). Review r3 found two real
+defects (a 400-record window in `last_event`; no `stop` on the event loop's normal shutdown path).
 
 ## Implementation notes (where the code differs from the plan text below)
 - **`in-turn` is wider than planned, on purpose.** The plan exempted only a
