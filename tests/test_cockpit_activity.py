@@ -575,8 +575,18 @@ class TestSourceGuards:
         for id_ in ("lanes", "lane-lead", "lane-reviewer", "lane-token", "lane-lead-name", "lane-reviewer-name",
                     "lead-timeline", "reviewer-timeline", "all-activity", "activity",
                     "activity-empty", "activity-more", "activity-meta",
-                    "chip-owed", "chip-inflight", "chip-watcher", "now-version"):
+                    "turn-bar", "turn-text", "turn-age", "watcher-drawer", "wd-facts", "wd-rows", "wd-all", "wd-new",
+                    "btn-watcher", "chip-cycle", "now-version"):
             assert f'id="{id_}"' in html, id_
+        # Phase 68: four pills became ONE sentence (the turn bar) + the watcher drawer. They must not
+        # creep back — seven equal pills was the problem. (Changed on purpose; was a required-id list.)
+        js68 = (WEB / "cockpit.js").read_text(encoding="utf-8")
+        for gone in ("chip-owed", "chip-inflight", "chip-paused", "chip-watcher"):
+            assert gone not in html and gone not in js68, gone
+        bar = html[html.index('id="turn-bar"') - 40:html.index("</button>", html.index('id="turn-bar"'))]
+        assert "<button" in bar and 'aria-expanded="false"' in bar and 'aria-controls="watcher-drawer"' in bar
+        assert html.index('id="turn-bar"') < html.index('id="now-chips"') < html.index('id="watcher-drawer"') \
+            < html.index('id="needs-you"')
         # Phase 45: the flat list and its support elements live inside the Rounds-tab disclosure
         disc = html[html.index('id="all-activity"'):html.index("</details>", html.index('id="all-activity"'))]
         for id_ in ("activity", "activity-empty", "activity-more", "activity-meta"):
@@ -780,9 +790,30 @@ class TestUxPassWords:
                     "Dispatch is on hold", "nothing is dispatching", "In-flight pointer", "Talk to the lead"):
             assert bad not in js and bad not in html, bad
         # and the words that replace them
-        for good in ("is working", "waiting on", "watcher: on", "watcher: off", "Start the watcher", "Turns are paused",
-                     "Chat with", "Leave note", "Rounds"):
+        for good in ("Start the watcher", "Turns are paused", "Chat with", "Leave note", "Rounds"):
             assert good in js or good in html, good
+        # Phase 68: who-has-the-ball is worded ONCE, server-side (cockpit_api.headline) — in the same plain
+        # words, with none of the engine's. (Was: "is working" / "waiting on" / "watcher: on|off" in the JS.)
+        import itertools
+        from tagteam import cockpit_api as capi
+        texts = set()
+        for status, inflight, paused, running, mode, beat in itertools.product(
+                ("ready", "escalated", "needs-human", "done"),
+                (None, {"kind": "cycle", "role": "reviewer", "agent": "codex", "round": 1, "type": "impl",
+                        "liveness": "running"}, {"kind": "gate", "round": 1, "liveness": "lost"}),
+                (None, {"by": "you"}), (True, False), ("headless", "iterm2", "notify", None), ("fresh", "stale", "none")):
+            facts = {"state": {"status": status, "turn": "reviewer" if status == "ready" else None, "seq": 1,
+                               "phase": "p", "type": "impl", "result": "approved"},
+                     "agents": {"lead": "claude", "reviewer": "codex"}, "inflight": inflight,
+                     "turn_kind": (inflight or {}).get("kind"), "paused": paused,
+                     "owed": {"role": "reviewer", "agent": "codex", "age_s": 1.0} if status == "ready" else None,
+                     "watcher": {"running": running, "mode": mode, "beat": {"state": beat, "age_s": 1.0}}}
+            texts.add(capi.headline(facts)["text"])
+        joined = "\n".join(sorted(texts))
+        for good in ("Waiting on codex", "codex is reviewing", "the watcher is off", "Paused by you", "Waiting on you"):
+            assert good in joined, good
+        for bad in ("in flight", "in-flight", "owed to", "dispatch", "slot", "marker", "seq", "pid"):
+            assert bad not in joined.lower(), (bad, joined)
 
     def test_version_meta_is_injected_in_cockpit_mode(self, project):
         from tagteam import __version__
@@ -899,7 +930,8 @@ class TestViewportFit:
         js = (WEB / "cockpit.js").read_text(encoding="utf-8")
         css = (WEB / "cockpit.css").read_text(encoding="utf-8")
         assert "function fitLanes(" in js and "window.addEventListener('resize', fitLanes)" in js
-        assert "fitLanes();" in js[js.index("function renderNow("):js.index("function renderOwedChip(")]
+        # Phase 68: renderOwedChip is gone; renderNow now ends at the watcher-button handler
+        assert "fitLanes();" in js[js.index("function renderNow("):js.index("$('btn-watcher').addEventListener(")]
         assert "scard.classList.add('compact')" in js
         assert ".card.start.compact" in css and ".lanes .lane { min-height: 0; overflow: hidden; }" in css
 
@@ -976,3 +1008,166 @@ var RESULT = { appliedA: appliedA, aChip: aChip, beforeB: beforeB, aAfterSwitch:
         assert 'id="btn-reviewer-last"' in html and "Show last session" in html
         assert "ROUNDS_BY_N" not in js
         assert "$('btn-reviewer-last').addEventListener('click'" in js
+
+
+# ---------------------------------------------------------------------------
+# Phase 68 — the turn bar and the watcher drawer, run for real under node
+# ---------------------------------------------------------------------------
+
+_P68_PRELUDE = r"""
+Node.prototype.setAttribute = function (k, v) { this.attrs = this.attrs || {}; this.attrs[k] = String(v); };
+document.addEventListener = function () {};
+var START = null;
+var FETCHED = [];
+var EVENTS_BODY = { events: [] };
+getJSON = function (path) { FETCHED.push(path); return Promise.resolve({ ok: true, body: path.indexOf('/api/watcher/events') === 0 ? EVENTS_BODY : {} }); };
+function setInterval() { return 1; }
+function clearInterval() {}
+function fitLanes() {}
+function lastTurnText(lt) { return 'last: ' + lt.kind; }
+fmtAge = function (s) { return s + 's'; };
+function texts(node) { return node.children.map(function (c) { return c.textContent; }); }
+function rows() { return $('wd-rows').children.map(function (r) { return r.className + ' | ' + (r.children.length ? texts(r).join(' | ') : r.textContent); }); }
+var DONE = null;   // a test that needs to wait sets DONE to a promise
+"""
+
+
+def _run_p68(js_body: str) -> dict:
+    import shutil
+    import subprocess
+    import tempfile
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not installed — the behavioural turn-bar test needs it")
+    js = (WEB / "cockpit.js").read_text(encoding="utf-8")
+    block = js[js.index("// ---------- Phase 68: Turn bar + watcher drawer"):js.index("// ---------- end Phase 68")]
+    prog = (_DOM_STUB + _P68_PRELUDE + "\n" + block + "\n" + js_body
+            + "\nPromise.resolve(DONE).then(function () { process.stdout.write(JSON.stringify(RESULT)); });\n")
+    with tempfile.TemporaryDirectory() as d:
+        f = Path(d) / "p68.js"
+        f.write_text(prog, encoding="utf-8")
+        r = subprocess.run([node, str(f)], capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+    return json.loads(r.stdout)
+
+
+class TestTurnBarAndDrawer:
+    def test_the_slice_is_self_contained_and_never_uses_innerhtml(self):
+        js = (WEB / "cockpit.js").read_text(encoding="utf-8")
+        block = js[js.index("// ---------- Phase 68: Turn bar + watcher drawer"):js.index("// ---------- end Phase 68")]
+        assert "innerHTML" not in block and "insertAdjacentHTML" not in block
+        # the bar presents the server's sentence; it must not work out who has the ball itself
+        for derived in ("n.owed.agent", "inflight.agent", "is working", "waiting on", "Waiting on"):
+            assert derived not in block, derived
+        assert "n.headline" in block and "/api/watcher/events" in block
+
+    def test_bar_shows_the_servers_sentence_its_tone_and_one_ticking_age(self):
+        r = _run_p68(r"""
+          renderTurnBar({ headline: { state: 'working', tone: 'working', text: 'codex is reviewing · round 2', age_s: 61.4, role: 'reviewer' } });
+          var a = { cls: $('turn-bar').className, state: $('turn-bar').dataset.state, text: $('turn-text').textContent, age: $('turn-age').textContent };
+          tickTurnBar(); tickTurnBar();
+          var ticked = $('turn-age').textContent;
+          renderTurnBar({ headline: { state: 'approved', tone: 'ok', text: 'Approved — p1, plan', age_s: null, role: null } });
+          tickTurnBar();
+          var b = { cls: $('turn-bar').className, age: $('turn-age').textContent, text: $('turn-text').textContent };
+          renderTurnBar({});
+          var RESULT = { a: a, ticked: ticked, b: b, none: $('turn-bar').className };
+        """)
+        assert r["a"] == {"cls": "turn-bar tone-working role-reviewer", "state": "working",
+                          "text": "codex is reviewing · round 2", "age": "· 61s"}
+        assert r["ticked"] == "· 63s"                                  # the age lives in one place and ticks locally
+        assert r["b"] == {"cls": "turn-bar tone-ok", "age": "", "text": "Approved — p1, plan"}
+        assert r["none"] == "turn-bar tone-idle"
+
+    def test_drawer_hides_chatter_until_asked_and_fetches_nothing_while_closed(self):
+        r = _run_p68(r"""
+          EVENTS_BODY = { events: [
+            { ts: '2026-09-21T06:33:46+00:00', kind: 'start', msg: 'Watching handoff-state.json' },
+            { ts: '2026-09-21T06:33:46+00:00', kind: 'info', msg: 'Lead: claude | Reviewer: codex' },
+            { ts: '2026-09-21T06:33:47+00:00', kind: 'turn', msg: ">> codex's turn" },
+            { ts: '2026-09-21T06:33:48+00:00', kind: 'send-failed', msg: '   FAILED: Could not send <b>x</b>' },
+            { ts: '2026-09-21T06:34:00+00:00', kind: 'gate', msg: '   gate: bounced' } ] };
+          var RESULT = {};
+          DONE = loadWatcherEvents().then(function () {
+            RESULT.closedFetches = FETCHED.slice();
+            setDrawer(true);
+            return Promise.resolve().then(function () { return Promise.resolve(); });
+          }).then(function () {
+            RESULT.open = { hidden: $('watcher-drawer').classList.contains('hidden'), expanded: $('turn-bar').attrs['aria-expanded'],
+                            fetches: FETCHED.slice(), rows: rows() };
+            $('wd-all').checked = true; DRAWER.all = true; renderDrawerRows(DRAWER.events);
+            RESULT.all = rows().length;
+            setDrawer(false);
+            RESULT.closed = { hidden: $('watcher-drawer').classList.contains('hidden'), expanded: $('turn-bar').attrs['aria-expanded'] };
+          });
+        """)
+        assert r["closedFetches"] == []
+        assert r["open"]["hidden"] is False and r["open"]["expanded"] == "true"
+        assert r["open"]["fetches"] == ["/api/watcher/events?n=200"]
+        assert r["open"]["rows"] == [
+            "wd-row f-dispatch | 06:33:46 | start | Watching handoff-state.json",
+            "wd-row f-dispatch | 06:33:47 | turn | >> codex's turn",
+            "wd-row f-problem | 06:33:48 | send-failed | FAILED: Could not send <b>x</b>",     # text, never markup
+            "wd-row f-check | 06:34:00 | gate | gate: bounced"]
+        assert r["all"] == 5
+        assert r["closed"] == {"hidden": True, "expanded": "false"}
+
+    def test_drawer_empty_states(self):
+        r = _run_p68(r"""
+          DRAWER.open = true;
+          renderDrawerRows([]);
+          var none = rows();
+          renderDrawerRows([{ ts: '', kind: 'info', msg: 'chatter' }]);
+          var RESULT = { none: none, onlyInfo: rows() };
+        """)
+        assert "No watcher history yet" in r["none"][0] and "3.14.5" in r["none"][0]
+        assert "show everything" in r["onlyInfo"][0]
+
+    def test_drawer_follows_new_rows_only_while_at_the_bottom(self):
+        r = _run_p68(r"""
+          var box = $('wd-rows'); box.clientHeight = 100;
+          // like a browser: the box grows as rows are appended (100px a row)
+          Object.defineProperty(box, 'scrollHeight', { get: function () { return box.children.length * 100; } });
+          function ev(i) { return { ts: '', kind: 'sent', msg: 'e' + i }; }
+          renderDrawerRows([ev(1), ev(2)]);
+          renderDrawerRows([ev(1), ev(2), ev(3)]);                                    // was at the bottom → follows
+          var followed = { top: box.scrollTop, cue: $('wd-new').classList.contains('hidden') };
+          box.scrollTop = 40;                                                         // the arbiter scrolls back
+          renderDrawerRows([ev(1), ev(2), ev(3), ev(4)]);
+          var held = { top: box.scrollTop, cueHidden: $('wd-new').classList.contains('hidden') };
+          renderDrawerRows([ev(1), ev(2), ev(3), ev(4)]);                             // nothing new → no cue
+          var RESULT = { followed: followed, held: held, quiet: $('wd-new').classList.contains('hidden') };
+        """)
+        assert r["followed"] == {"top": 300, "cue": True}
+        assert r["held"] == {"top": 40, "cueHidden": False}
+        assert r["quiet"] is True
+
+    def test_facts_and_the_reason_the_page_cannot_run_turns(self):
+        r = _run_p68(r"""
+          function facts() { var d = $('wd-facts').children, o = {}; for (var i = 0; i < d.length; i += 2) o[d[i].textContent] = d[i + 1].textContent + (d[i + 1].className ? ' [' + d[i + 1].className + ']' : ''); return o; }
+          START = { headless: { ok: false, errors: ['not set up: no docs/roadmap.md'] } };
+          renderDrawerFacts({ owed: { role: 'reviewer' }, watcher: { running: false, beat: { state: 'none', text: 'never (no heartbeat recorded)' } } });
+          var off = { facts: facts(), btn: $('btn-watcher').textContent, title: $('btn-watcher').title, note: $('wd-note').textContent,
+                      body: watcherStartBody(watcherStartMode()) };
+          START = { headless: { ok: true, errors: [] } };
+          renderDrawerFacts({ paused: { by: 'jack', reason: 'reading the plan' }, last_turn: { kind: 'gate' },
+            watcher: { running: true, mode: 'iterm2', pid: 35417, source: 'scan', started_at: '2026-09-21T06:15:24+00:00',
+                       beat: { state: 'stale', text: 'STALE: 6m ago, expected every 10s' } } });
+          var on = { facts: facts(), btnHidden: $('btn-watcher').classList.contains('hidden'), note: $('wd-note').textContent,
+                     body: watcherStartBody(watcherStartMode()) };
+          renderDrawerFacts({ watcher: { running: true, mode: 'headless', pid: 9, source: 'pidfile', beat: { state: 'fresh', text: '2s ago' } } });
+          var RESULT = { off: off, on: on, headless: { note: $('wd-note').textContent, noteHidden: $('wd-note').classList.contains('hidden'),
+                                                         btn: $('btn-watcher').textContent, btnHidden: $('btn-watcher').classList.contains('hidden') } };
+        """)
+        off, on = r["off"], r["on"]
+        assert off["facts"] == {"watcher": "not running [warn]", "last look": "never (no heartbeat recorded)", "turns": "not paused"}
+        assert off["btn"] == "Start the watcher" and off["title"].endswith("--mode notify --pidfile")
+        assert off["note"] == "This page cannot run the agents itself yet: not set up: no docs/roadmap.md."
+        assert "only NOTIFIES" in off["body"] and "not set up: no docs/roadmap.md" in off["body"]
+        assert on["facts"] == {"watcher": "running — iterm2, pid 35417, since 06:15:24",
+                               "last look": "STALE: 6m ago, expected every 10s [danger]",
+                               "turns": "paused by jack — reading the plan [warn]", "last turn": "gate"}
+        assert on["btnHidden"] is True                       # not ours to stop: found by the process scan
+        assert on["note"] == "Agents are running in their terminals (iterm2). The lanes show only turns the cockpit runs itself."
+        assert on["body"].startswith("From then on each waiting turn runs by itself")
+        assert r["headless"] == {"note": "", "noteHidden": True, "btn": "Stop the watcher", "btnHidden": False}
