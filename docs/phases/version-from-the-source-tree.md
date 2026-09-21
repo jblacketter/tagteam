@@ -2,7 +2,7 @@
 
 ## Status
 - [x] Planning: approved round 1 (2026-09-20) at `61765be`
-- [x] Implementation: branch `phase/version-from-the-source-tree` (stacked on `phase/roadmap-placeholders-are-not-phases` until PR #47 merges; to be rebased onto `main` then)
+- [x] Implementation: branch `phase/version-from-the-source-tree` (was stacked on Phase 63's branch; rebased onto `main` after PR #47 merged — same tree as the gated commit)
 - [x] Implementation Review: approved round 3 (2026-09-20) at `57088cf`; gate 2,112 passed, 5 skipped. Round 1: two reviewer findings in the narrow reader (header comment under DOTALL; indented duplicate keys). Round 2: gate bounce on an unrelated watcher-lock timing test, not reproduced, cause not established (issue 10).
 - [ ] Complete: PR open, merge pending (after PR #47)
 
