@@ -1940,6 +1940,33 @@ class TestChecksStayClosed:
         assert r["cycleChange"] == {"open": None, "gateFolded": True, "gateDom": 0, "stripHidden": True}
 
 
+class TestAGateNeverAsksForALog:
+    def test_repeated_refreshes_of_an_open_running_gate_in_checks_and_in_the_flat_list(self):
+        """impl review r2: the no-turn-log line guarded one path; the next refresh
+        took openBlock's already-open fast path (and the flat list its own) and
+        requested /api/activity/log/<gate stem>/events — a 404."""
+        r = _run_68b(TestTurnBlocks.SETUP + r"""
+          var gate = item('turn:gate-r1', 'gatekeeper', 'gate', 'running', '2026-01-01T00:01:00+00:00', 1);
+          upsertRow(CHECKS, gate); upsertRow(ACT, gate); renderChecks();
+          toggleCheck('turn:gate-r1');
+          var first = { sources: SOURCES.length, fetches: FETCHES.length, checks: streamOf(CHECKS.rows['turn:gate-r1']).length };
+          for (var i = 0; i < 4; i++) { upsertRow(CHECKS, gate); upsertRow(ACT, gate); renderChecks(); }      // the next activity refreshes
+          openBlock(ACT.rows['turn:gate-r1'], false); openBlock(ACT.rows['turn:gate-r1'], false);             // and the flat list's own open
+          var running = { sources: SOURCES.map(function (x) { return x.url; }), fetches: FETCHES.slice(),
+                          checks: streamOf(CHECKS.rows['turn:gate-r1']), act: streamOf(ACT.rows['turn:gate-r1']) };
+          // it finishes: still no tail request, still exactly one line
+          var done = item('turn:gate-r1', 'gatekeeper', 'gate', 'finished', '2026-01-01T00:01:00+00:00', 1, { raw_status: 'pass' });
+          upsertRow(CHECKS, done); upsertRow(ACT, done); renderChecks(); openBlock(ACT.rows['turn:gate-r1'], false);
+          var RESULT = { first: first, running: running, finished: { sources: SOURCES.length, fetches: FETCHES.slice(), checks: streamOf(CHECKS.rows['turn:gate-r1']).length,
+                                                                      act: streamOf(ACT.rows['turn:gate-r1']).length, key: CHECKS.rows['turn:gate-r1'].streamKey } };
+        """)
+        assert r["first"] == {"sources": 0, "fetches": 0, "checks": 1}
+        assert r["running"]["sources"] == [] and r["running"]["fetches"] == []
+        assert len(r["running"]["checks"]) == 1 and "keeps no turn log" in r["running"]["checks"][0]
+        assert len(r["running"]["act"]) == 1 and "keeps no turn log" in r["running"]["act"][0]
+        assert r["finished"] == {"sources": 0, "fetches": [], "checks": 1, "act": 1, "key": None}
+
+
 class TestLeadLaneTurnoverInARealBrowser:
     def test_a_long_finished_chat_folds_to_one_line_under_a_newer_chat_and_a_newer_cycle_turn(self):
         r = _run_lanes_in_chromium(TestLanesInARealBrowser.MEASURE + r"""

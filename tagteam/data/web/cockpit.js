@@ -1387,6 +1387,7 @@
     rec.lines = []; rec.noteEl = null;
     while (rec.box.firstChild) rec.box.removeChild(rec.box.firstChild);
   }
+  function noGateLog(rec) { if (!rec.folded && !rec.lines.length) appendActLine(rec, NO_GATE_LOG); }   // exactly one line, once
   function appendActLine(rec, text) {
     if (rec.folded) return;                                   // a folded block holds no stream DOM, whatever arrives
     var list = laneOf(rec);
@@ -1420,7 +1421,7 @@
     }
     // A pre-check writes no turn log (seen live: its stream URL is a 404 and the block sat empty). Say where
     // its output is instead of asking for a log that cannot exist.
-    if (rec.item.kind === 'gate') { if (!rec.lines.length) appendActLine(rec, NO_GATE_LOG); }
+    if (rec.item.kind === 'gate') noGateLog(rec);
     else if (isRunning(rec.item)) attachActStream(rec);
     else if (!rec.lines.length) fillActLinesFromRecord(rec);
     restick(laneOf(rec));
@@ -1464,6 +1465,7 @@
   }
   function fillActLinesFromRecord(rec) {
     var it = rec.item;
+    if (it.kind === 'gate') { noGateLog(rec); return; }
     if (!it.stem) { appendActLine(rec, '(no log recorded for this turn)'); return; }
     var gen = rec.gen || 0;
     getJSON('/api/tail?stem=' + encodeURIComponent(it.stem) + '&lines=' + BLOCK_CAP).then(function (r) {
@@ -1480,6 +1482,9 @@
   function attachActStream(rec) {
     var it = rec.item;
     if (rec.streamKey || rec.folded) return;
+    // A pre-check keeps no turn log: never ask for one — from ANY path (the already-open fast path of
+    // openBlock and the flat list both came through here on the next refresh and drew a 404).
+    if (it.kind === 'gate') { noGateLog(rec); return; }
     var name = rec.store.name + ':' + it.id;
     var gen = rec.gen || 0;
     var live = function () { return !rec.folded && (rec.gen || 0) === gen; };
