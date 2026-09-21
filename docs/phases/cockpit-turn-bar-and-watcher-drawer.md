@@ -3,8 +3,22 @@
 ## Status
 - [x] Planning: approved round 2 (2026-09-21) at `a7dae2b`
 - [x] Implementation: branch `phase/cockpit-turn-bar-and-watcher-drawer`
-- [ ] Implementation Review
-- [ ] Complete
+- [x] Implementation Review: approved round 3 (2026-09-21) at `1132e1f`; gate 2,275 passed, 5 skipped
+- [ ] Complete: PR open; merge is the arbiter's
+
+## Closeout
+```
+Phase report: cockpit-turn-bar-and-watcher-drawer — plan approved r2 · impl approved r3
+  plan   2 rounds · 1 change request · 0 bounces
+  impl   3 rounds · 2 change requests · 0 bounces · gate 3 runs, 23m 09s
+  time   start→approve 58m 40s · implementation before first submit 20m 18s
+         lead 7m 37s (3 spans, 2 unknown) · reviewer 7m 34s (5 spans) · gate 23m 11s (3 spans)  (elapsed; includes relay wait)
+  usage  no usage rows stored under this phase
+  turns  matched 0 of 10 · no token data 0 · unmatched 8 · unknown 2
+```
+Plan r1: three corrections (a gate's `pid: None` would have read as a lost turn; owed-turn rows not exhaustive; a read-only CLI path). Impl r1: story history sized before folding; drawer news detected by length. Impl r2: scroll anchor measured from the offsetParent — caught by the reviewer in a real browser, in the one place the lead had said the evidence was a node model only.
+
+**Verification limits kept on the record.** Seen in a browser, for real: `approved`, `watcher-off`, `working` (reviewer and lead), `stalled` (SIGSTOP-ped watcher), the drawer with real history, this repo under its iTerm2 watcher. Seen in the CLI only (`tagteam watch status` on this repo while the reviewer held r1): `waiting` — "its turn was sent to its terminal". **Table tests only, never seen rendered:** `needs-you`, `turn-lost`, `paused`, `launching`, `watcher-stale`, `starting`, and the `start … impl` verb fix (made after its screenshot). The drawer's scroll anchoring has a real-Chromium regression; its sticky cue and content-based news detection are node-model tests. Nobody has used the drawer by hand since the r1 fixes.
 
 ## Implementation notes — what looking at it for real changed
 The unit tests were green before the first look in a browser. Five things
