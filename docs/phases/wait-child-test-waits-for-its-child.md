@@ -3,8 +3,10 @@
 ## Status
 - [x] Planning: none — a fix made first; impl cycle opened directly (arbiter's rule for small already-made fixes)
 - [x] Implementation: branch `phase/wait-child-test-waits-for-its-child`
-- [ ] Implementation Review
-- [ ] Complete
+- [x] Implementation Review: approved round 1 (2026-09-21) at `638558e`; gate 2,275 passed, 5 skipped (scope not enforced — no plan boundary; the reviewer read the whole commit)
+- [ ] Complete: PR open; merge is the arbiter's
+
+Closeout: at the reviewer's note, the test's comment now calls the starved-child race the *demonstrated mechanism and likely but unproven cause*, as this document does — a comment-only edit after approval.
 
 ## Summary
 Issue 11 in `docs/tagteam-issues-release-and-venv-upgrade-2026-09-20.md`. On

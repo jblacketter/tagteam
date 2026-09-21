@@ -491,8 +491,9 @@ def test_wait_child_reports_a_child_that_already_exited(tmp_path):
 
 def test_wait_child_terminates_and_reports_a_child_still_running(tmp_path):
     # The child says it has printed by creating a marker file AFTER the flush; the clock starts only
-    # then. Issue 11: with a bare `print` and a 0.5 s budget, a starved interpreter (release suite,
-    # load average ~48) was terminated before it had printed and the dump was empty. Not a
+    # then. Issue 11: with a bare `print` and a 0.5 s budget, a starved interpreter can be terminated
+    # before it has printed, leaving an empty dump — the demonstrated mechanism, and the likely but
+    # unproven cause of one failure in a release suite at load average ~48 (message not kept). Not a
     # `readline()` on the pipe: the buffered reader would swallow the text `_child_output` must find.
     ready = tmp_path / "ready"
     code = ("import sys, time; print('started, waiting', flush=True); "

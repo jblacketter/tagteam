@@ -42,7 +42,7 @@ the top. Each phase is engine + CLI first, cockpit surface second. tagteam stays
 - **Depends on:** Phase 68
 
 ### Phase 68c: Wait-child test waits for its child
-- **Status:** In review — implementation submitted 2026-09-21 (a fix made first, so an impl cycle directly). See `docs/phases/wait-child-test-waits-for-its-child.md`.
+- **Status:** In review — impl approved round 1 (2026-09-21); gate: 2,275 passed, 5 skipped at `638558e`. PR open, merge pending. See `docs/phases/wait-child-test-waits-for-its-child.md`.
 - **Description:** Issue 11. `test_wait_child_terminates_and_reports_a_child_still_running` failed once in the 3.14.7 release-tree suite (load average ~48) and passed on the rerun. It gives a spawned interpreter 0.5 s and then expects its output in the failure dump; a starved interpreter has not printed yet. The child now signals — with a marker file written after its flush — that it has printed, and the clock starts then. Test only; no product code.
 
 ### Phase 68b: Cockpit lanes read as terminals
