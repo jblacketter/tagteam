@@ -15,7 +15,7 @@ pre-check sits in codex's lane; codex's lane header says "its turn · the watche
 is off". Payload at that moment: `pid: None, pid_alive: False, liveness:
 'no-child'`.
 
-**Built as planned:** turn blocks in both lanes (`openBlock` / `foldBlock`, a
+**Built (criterion 4 partial — see the r1 notes below):** turn blocks in both lanes (`openBlock` / `foldBlock`, a
 fold generation `rec.gen` that discards late SSE frames and late tail responses,
 `BLOCK_CAP = 2000` for cycle, check and chat blocks with the honest note,
 reopen = one consistent read); `applyBlockPolicy` (newest open, earlier folded,
@@ -80,6 +80,38 @@ pre-check in `CHECKS` and a chip, not a lane row (counts 5/3/2 → 5/2/2); the
 chat-merge test asserts the block's prompt / stream / closing line and that the
 stream node survives a re-render; "prompt stays with cards" reversed (above).
 
+**Impl review r1 — two defects, both where I had said I had not looked.**
+(a) *The lead lane did not fold.* `foldChatBlock` hid only the stream: the prompt
+and the whole reply stayed (the reviewer measured an auto-folded chat with a
+99-line reply at 1,957 px), and the chat blocks and the cycle blocks each kept
+their own "newest" open, so a finished chat stayed open under a newer cycle
+turn. Now ONE chronological policy over the merged lead timeline
+(`leadBlocks` / `applyLeadPolicy`: newest or running open, earlier folded, the
+arbiter's own choices kept), and a folded chat is one header line — CSS hides its
+prompt, stream and closing line, which are kept for reopening, and the header
+carries a one-line excerpt of what was asked. (b) *A closed running check came
+back.* `upsertRow` opened every running item, including an unselected check, on
+each refresh, and it then filled hidden DOM. A check's block is open only while
+its chip is selected; unselected checks are folded (stream detached) on every
+render; switching chips and a cycle change fold the previous one. Four
+regressions — two node, one for checks (close → three refreshes + late frames →
+still folded, no DOM, no stream key; switch; cycle change), one in real Chromium
+(the long chat folds to < 45 px under a newer chat *and* under a newer cycle turn,
+reply `display: none`, reopen restores all 99 lines) — all fail on the r1 code.
+
+**Found in the r2 live pass:** opening a pre-check's block asked for
+`/api/activity/log/<gate stem>/events` → **404**, and the block sat empty: a gate
+keeps no turn log. The block now says so in one line and points at the
+gatekeeper's entry in Rounds / `tagteam gate status`, and asks the server for
+nothing. **Criterion 4 is therefore PARTIAL:** a panel lens chip opens its log;
+a pre-check chip cannot — showing the gate's report there needs a server change
+and is deferred, not done.
+
+**Chat retention differs from the plan's wording:** a folded chat block drops
+its stream DOM but its lines stay in memory (capped at 2,000 per turn) rather
+than being re-read, because a conversation's stream can only be replayed whole;
+reopening renders the kept lines once.
+
 ### Criterion 9 — seen, not assumed (2026-09-21, `.playwright-mcp/p68b-*.png`, git-ignored)
 | Shot | What it shows, produced for real (scratch project, headless watcher) |
 |---|---|
@@ -91,12 +123,15 @@ stream node survives a re-render; "prompt stays with cards" reversed (above).
 | `p68b-5-stalled-trio` | SIGSTOP-ped watcher: red bar, Needs-you card with **Open the watcher**, and codex's lane — one sentence; lead lane scoped, "Show last session" |
 | `p68b-6-chat-block` | a real chat turn as a block: `you ▸ …`, its stream, `claude ▸ …` closing line (this shot still shows `cost=$…`: the scratch server had been started before the renderer change; that fix is verified by its test only) |
 
-**Not seen:** an earlier block folding as a new turn starts *in the same cycle*
-(both scratch cycles had one turn per lane — node-tested); the "new output ↓"
-cue by hand; a chip for a bounced run; `turn-lost`; the watcher-stale
-(delivered) card; a block past 2,000 lines. No browser pass was made after the
-very last change (the trim loop and whole-pixel anchor), which the real-Chromium
-tests exercise.
+| `p68b-7-chat-then-cycle-turn` | **r2 pass, full page lifecycle** (scratch project 5: a chat, then a plan scripted to need a second round): the finished chat is ONE header line (`chat #1 · ok · new session · you ▸ Do no…`) above the lead's cycle turn streaming; codex's round 1 shows CHANGES REQUESTED |
+| `p68b-8-successive-turns-same-lane` | successive turns in one lane: codex's round 1 folded to a line with its verdict, round 2 open and streaming; the lead's finished turn followed to the foot — and its result line has **no `cost=`** (this server ran the new renderer) |
+| `p68b-9-check-closed-across-refresh` | a running pre-check's chip opened, closed, and still closed ~15 s and several refreshes later; bar "Pre-check running", Needs you calm |
+
+**Not seen:** the "new output ↓" cue used by hand; a chip for a bounced run; a
+panel lens chip opening a real log; `turn-lost`; the watcher-stale (delivered)
+card; a block past 2,000 lines; the arbiter re-opening a folded block in the
+page. The pre-check "no turn log" line was written after the last browser
+session and is verified by test only.
 
 ## Summary
 The arbiter, 2026-09-20: the cockpit "should emulate the terminals to a certain
