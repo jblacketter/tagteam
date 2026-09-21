@@ -8,6 +8,48 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 **Workflow:** Lead / Reviewer with Human Arbiter
 
 ## Phases
+<!-- Phases 67–74: the cockpit arc agreed with the arbiter on 2026-09-20. Goal: the cockpit replaces the three
+iTerm2 tabs (lead | watcher | reviewer) — lead lane left, reviewer lane right, the watcher behind a turn bar at
+the top. Each phase is engine + CLI first, cockpit surface second. tagteam stays a standalone package; superdash
+(a separate project) consumes it (Phase 74). -->
+### Phase 74: Versioned read API for other dashboards
+- **Status:** Not started — arbiter decision 2026-09-20: tagteam stays here and is a package superdash uses; the cockpit is the first step towards that larger UI, not a part of it.
+- **Description:** The hub and cockpit read endpoints (`/api/hub`, `/api/now`, `/api/roadmap`, `/api/watcher/events`, …) are consumed today only by tagteam's own pages, so nothing promises their shape. Declare the read surface another dashboard may rely on: an `api_version` in `/api/hub/info` and `/api/cockpit/info`, a documented list of stable endpoints and fields, and a test that pins them. No new data, no Aegis- or superdash-specific glue.
+- **Depends on:** Phase 69
+
+### Phase 73: Subagent kit
+- **Status:** Not started — proposed in `docs/research/2026-09-14-better-tagteam/` (02, steps 3–4), never scheduled. Reopens the question Phase 57 deferred, from the need side.
+- **Description:** Ship `plugin/agents/` with a small kit of cheap, tool-restricted helpers the lead delegates to — `test-runner` (focused runs, returns a digest instead of raw output), `verifier` (no write tools), `explore` — all run with `TAGTEAM_READ_ONLY=1`. The top model orchestrates and analyses; helpers absorb verbose output. Claude-side only (Codex has no equivalent; reviewer savings come from gate / panel / effort). Savings are measured with Phase 55's usage data before and after, in tokens and window state, never dollars.
+- **Depends on:** Phase 72
+
+### Phase 72: Jobs: background tasks and ci-watch
+- **Status:** Not started
+- **Description:** Deterministic first, cheap model second, top model last. A `tagteam job` concept: a recorded background task with a status, a log and a short result delivered to the lead — first job `ci-watch` (poll a GitHub Actions run / a PyPI version with `gh`, no model; on 2026-09-20 the lead polled five release runs by hand in the top model). A model is involved only to summarise a failure. The cockpit shows a Jobs strip.
+- **Depends on:** Phase 68
+
+### Phase 71: Cockpit Rules tab
+- **Status:** Not started
+- **Description:** A Rules tab that shows, in plain language, what governs this project's runs: the effective `tagteam.yaml` (gate, panel, briefer, resend minutes, round cap) and the standing orders of Phase 70. Rules the engine enforces and orders the agents are merely told are kept visually apart. Read-only first; then editing of a small safe set through the CLI with a dry-run diff (targeted line edits — a PyYAML rewrite would drop the file's comments). Presets with a recommended default, plus one free-text box.
+- **Depends on:** Phase 70, Phase 68
+
+### Phase 70: Standing orders
+- **Status:** Not started
+- **Description:** The arbiter's run-level instructions live in chat today ("go to the end of all phases unless you have a question", "commit at phase end but hold the PR for my approval" / "open the PR when you are done"). Make them durable: per-project standing orders with a per-run override, delivered to both agents in every turn (headless prompt, `cycle rounds`), like an interjection that is not consumed. Two kinds, kept distinct: **enforced** — when the run stops for the arbiter (after each phase · at the end of the roadmap · only on questions), a switch over the existing single-phase / full-roadmap machinery; **advisory** — git and PR conduct, which tagteam delivers but cannot enforce (it runs no git). Engine + CLI only.
+
+### Phase 69: Cockpit roadmap board
+- **Status:** Not started
+- **Description:** The cockpit shows only the next phase (the Start card). Add `GET /api/roadmap` over `parse_roadmap()` / `ready_phases()` / `roadmap check` and a Roadmap tab: Done · In progress · Up next, with Up next split into ready and blocked-by-dependency and `roadmap check` problems shown inline. Start lives on a ready phase; the separate Start card goes away. Tabs are regrouped by intent: Now · Roadmap · Rules · History (rounds + diff) · Usage.
+- **Depends on:** Phase 68
+
+### Phase 68: Cockpit turn bar, watcher drawer, terminal-like lanes
+- **Status:** Not started
+- **Description:** The Now strip is seven chips of equal weight and the watcher chip says only running / stopped — not whose turn it is, not what it last did. Replace it with one dominant status sentence ("Codex is reviewing · round 2 · 4m", "Waiting on you", "Stalled: claude is owed a turn, last dispatch 22m ago") that is also the link to the watcher: selecting it expands a drawer with the watcher's history from Phase 67. Lanes read as the two terminals they replace: live output of the running turn, active lane highlighted, idle lane dimmed. The lead lane keeps the only composer (arbiter, 2026-09-20: the reviewer side needs activity and status, not input — may change later).
+- **Depends on:** Phase 67
+
+### Phase 67: Watcher event log and heartbeat
+- **Status:** In progress — plan cycle opened 2026-09-20. See `docs/phases/watcher-event-log-and-heartbeat.md`.
+- **Description:** The watcher narrates everything it does (116 `_log()` calls: whose turn, sent / failed, paused, resumed, watchdog re-send, gate, panel, done) to its own stdout and nowhere else — visible in an iTerm2 tab, invisible to the cockpit and lost when the tab closes. Nothing records when it last looked at the state. Add a bounded per-project event log and a heartbeat, written by every watcher mode, with `tagteam watch status` / `tagteam watch log` and two read endpoints. No UI.
+
 ### Phase 66: Roadmap dependency problems name their line
 - **Status:** ✅ Complete — plan approved round 1, impl approved round 1 (2026-09-20); gate: 2,148 passed, 5 skipped at `6295abf`. PR #50 merged 2026-09-20. See `docs/phases/roadmap-dependency-problems-name-their-line.md`.
 - **Description:** `roadmap check` reports `unknown dependency '…'` and `depends on itself` without a location; on 2026-09-20 two projects (bugalizer, designwing) each needed a grep to find one bad `Depends on:` line. `RoadmapPhase` gains `line` and `dep_lines`, `parse_roadmap()` fills them, and `validate_graph()` appends `(line N)` when the line is known — hand-built phases keep today's exact strings. Identity and cycle problems are unchanged.
