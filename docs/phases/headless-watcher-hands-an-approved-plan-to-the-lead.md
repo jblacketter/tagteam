@@ -4,7 +4,7 @@
 - [x] Planning: approved round 1 (2026-09-20) at `3a54c92`
 - [x] Implementation: branch `phase/headless-watcher-hands-an-approved-plan-to-the-lead`
 - [x] Implementation Review: approved round 1 (2026-09-20) at `b01183f`; gate 2,219 passed, 5 skipped
-- [ ] Complete: PR open; merge is the arbiter's
+- [x] Complete: PR #52 merged 2026-09-21 (rebase).
 
 ## Closeout
 ```

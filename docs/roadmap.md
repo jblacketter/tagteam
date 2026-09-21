@@ -47,7 +47,7 @@ the top. Each phase is engine + CLI first, cockpit surface second. tagteam stays
 - **Depends on:** Phase 68a
 
 ### Phase 68a: Headless watcher hands an approved plan to the lead
-- **Status:** In review — plan approved round 1, impl approved round 1 (2026-09-20); gate: 2,219 passed, 5 skipped at `b01183f`. PR open, merge pending. See `docs/phases/headless-watcher-hands-an-approved-plan-to-the-lead.md`.
+- **Status:** ✅ Complete — plan approved round 1, impl approved round 1 (2026-09-20); gate: 2,219 passed, 5 skipped at `b01183f`. PR #52 merged 2026-09-21 (rebase). See `docs/phases/headless-watcher-hands-an-approved-plan-to-the-lead.md`.
 - **Description:** Found by running a real cycle through the cockpit (2026-09-20, scratch project, headless): when a plan is approved the watcher logs `Sending completion notice to claude...` and, in headless mode, sends nothing — `_handle_done` has branches for tab, tmux and notify modes only. In iTerm2 that notice is what makes the lead implement; headless, the loop stops and the cockpit waits for a Start click. In single-phase mode a headless watcher now does what full-roadmap mode already does at that point: it makes the `start <phase> impl` turn the lead's owed turn, which the engine already knows how to run and verify. Also fixes a Phase 67 defect the same trial exposed: the heartbeat is written only before a tick, so `watch status` reads STALE for up to one poll interval after every long turn.
 - **Depends on:** Phase 67
 
