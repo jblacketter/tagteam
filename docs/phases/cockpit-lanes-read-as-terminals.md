@@ -3,8 +3,22 @@
 ## Status
 - [x] Planning: approved round 2 (2026-09-21) at `1988723`
 - [x] Implementation: branch `phase/cockpit-lanes-read-as-terminals`
-- [ ] Implementation Review
-- [ ] Complete
+- [x] Implementation Review: approved round 3 (2026-09-21) at `15eefdf`; gate 2,295 passed, 5 skipped
+- [ ] Complete: PR open; merge is the arbiter's
+
+## Closeout
+```
+Phase report: cockpit-lanes-read-as-terminals — plan approved r2 · impl approved r3
+  plan   2 rounds · 1 change request · 0 bounces
+  impl   3 rounds · 2 change requests · 0 bounces · gate 3 runs, 23m 20s
+  time   start→approve 1h 16m · implementation before first submit 24m 44s
+         lead 16m 45s (3 spans, 2 unknown) · reviewer 11m 54s (5 spans) · gate 23m 21s (3 spans)  (elapsed; includes relay wait)
+  usage  no usage rows stored under this phase
+  turns  matched 0 of 10 · no token data 0 · unmatched 8 · unknown 2
+```
+Plan r1: the watcher-off card would still have contradicted the bar; the "whole log" link pointed at a view that no longer exists. Impl r1: the lead lane did not fold (two "newest" policies; a folded chat kept its whole reply) and a closed running check reopened on refresh. Impl r2: my no-turn-log fix guarded one path only. Every one of the three implementation rounds turned on something a real page or a real refresh showed and a green unit test had not.
+
+**Limitations kept on the record** (reviewer's closeout note): criterion 4 is PARTIAL — a pre-check chip cannot open a log (a gate keeps none; showing its report needs a server change, deferred); chat history follows the selected conversation, with bounded retained output per turn; the unobserved visual states are listed under criterion 9.
 
 ## Implementation notes — what was built, and what looking at it changed
 **Seen before the fix (criterion 9).** `p68b-0-before-false-cancel-card.png`: a
@@ -146,7 +160,7 @@ reopening renders the kept lines once.
 **Not seen:** the "new output ↓" cue used by hand; a chip for a bounced run; a
 panel lens chip opening a real log; `turn-lost`; the watcher-stale (delivered)
 card; a block past 2,000 lines; the arbiter re-opening a folded block in the
-page. 
+page.
 
 ## Summary
 The arbiter, 2026-09-20: the cockpit "should emulate the terminals to a certain
