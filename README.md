@@ -338,7 +338,7 @@ tagteam serve --dir .
 tagteam tui                            # optional Textual TUI (pip install 'tagteam[tui]')
 tagteam upgrade [--preview]            # migrate every registered project to the installed package (never accepts; prints the per-path accept line)
 tagteam --version                      # version, and the directory this tagteam was imported from (also -V, version)
-tagteam doctor [dir] [--json]          # read-only: legacy workflow findings, per-role executables (desktop/headless), instruction sources, tool config names
+tagteam doctor [dir] [--json]          # read-only: another tagteam in the project's .venv (version differs → warn), legacy workflow findings, per-role executables (desktop/headless), instruction sources, tool config names
 tagteam --help
 ```
 

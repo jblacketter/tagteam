@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -209,6 +210,9 @@ def test_harness_default_interpreter_reports_checkout_package(tmp_path):
 # Phase 52: the built distribution, not the source tree
 # ---------------------------------------------------------------------------
 
+_BUILD_LEFTOVERS = ("build", "dist", "tagteam.egg-info")
+
+
 @pytest.fixture(scope="module")
 def wheel_venv(tmp_path_factory) -> dict:
     """The checkout built into a wheel and installed (with its dependencies)
@@ -216,8 +220,22 @@ def wheel_venv(tmp_path_factory) -> dict:
     the offline install is not possible here — never silently."""
     root = tmp_path_factory.mktemp("wheelvenv")
     wheels = root / "wheels"
-    r = subprocess.run([sys.executable, "-m", "pip", "wheel", "-q", "-w", str(wheels), str(REPO)],
-                       capture_output=True, text=True)
+    # Phase 65: build from a copy. `pip wheel <repo>` leaves build/ and
+    # tagteam.egg-info/ in the checkout on every run, and a stale egg-info is
+    # the documented cause of misleading failures here. The copy carries the
+    # working tree as it is (uncommitted work included), minus what a build
+    # must not see. The check below runs whatever happens to the build.
+    before = {n: (REPO / n).exists() for n in _BUILD_LEFTOVERS}
+    src = root / "src"
+    shutil.copytree(REPO, src, symlinks=True, ignore=shutil.ignore_patterns(
+        ".git", ".venv", "venv", "build", "dist", "*.egg-info", ".tagteam", "node_modules",
+        "__pycache__", ".pytest_cache", ".ruff_cache", ".idea", "tagteam-backups"))
+    try:
+        r = subprocess.run([sys.executable, "-m", "pip", "wheel", "-q", "-w", str(wheels), str(src)],
+                           capture_output=True, text=True)
+    finally:
+        created = [n for n in _BUILD_LEFTOVERS if (REPO / n).exists() and not before[n]]
+        assert not created, f"the wheel build dirtied the checkout: {created}"
     if r.returncode != 0:
         pytest.skip(f"environmental: wheel build failed: {r.stderr.strip()[-300:]}")
     whl = sorted(wheels.glob("tagteam-*.whl"))
@@ -235,7 +253,8 @@ def wheel_venv(tmp_path_factory) -> dict:
         pytest.skip(f"environmental: offline install into the venv failed: {r.stderr.strip()[-300:]}")
     version = subprocess.run([str(py), "-I", "-c", "import tagteam; print(tagteam.__version__)"],
                              capture_output=True, text=True, check=True).stdout.strip()
-    return {"python": str(py), "version": version, "wheel": str(whl[-1])}
+    return {"python": str(py), "version": version, "wheel": str(whl[-1]),
+            "clean_before": not any(before.values())}
 
 
 def _old_project(root: Path) -> dict[str, bytes]:
@@ -415,3 +434,13 @@ def test_installed_wheel_version_comes_from_metadata_not_a_source_tree(wheel_ven
     assert str(REPO) not in out["file"]                          # imported from the venv, not the checkout
     r = subprocess.run([wheel_venv["python"], "-I", "-m", "tagteam", "--version"], capture_output=True, text=True)
     assert r.returncode == 0 and r.stdout.splitlines()[0] == f"tagteam {built}"
+
+
+def test_the_wheel_build_left_nothing_in_the_checkout(wheel_venv):
+    """Phase 65: runs after the module-scoped fixture has built and installed
+    the wheel. The wheel is tagteam's, built from the copy, not the repo."""
+    assert Path(wheel_venv["wheel"]).is_file() and str(REPO) not in wheel_venv["wheel"]
+    git = subprocess.run(["git", "-C", str(REPO), "status", "--porcelain", "--ignored", "--",
+                          "build", "dist", "tagteam.egg-info"], capture_output=True, text=True)
+    if git.returncode == 0 and wheel_venv.get("clean_before"):
+        assert git.stdout.strip() == "", git.stdout
