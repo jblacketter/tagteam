@@ -1356,3 +1356,498 @@ class TestDrawerScrollInARealBrowser:
         assert r["again"] == r["after"] and r["rows"] == 200
         assert r["scrollTop"] == 30                                       # event 0's height is gone from above the reader
         assert r["cue"] is True
+
+
+# ---------------------------------------------------------------------------
+# Phase 68b — lanes read as terminals: turn blocks, the checks strip, one story
+# ---------------------------------------------------------------------------
+
+_P68B_PRELUDE = r"""
+// the Phase 43 slice now leans on two helpers of the Phase 68 slice (same closure in the page)
+function atBottom(box) { return box.scrollHeight - box.scrollTop - box.clientHeight < 8; }
+function rowTopIn(box, row) { return row.getBoundingClientRect().top - box.getBoundingClientRect().top - (box.clientTop || 0) + box.scrollTop; }
+function setDrawer(open) { DRAWER_OPENED = !!open; }
+var DRAWER_OPENED = false;
+Node.prototype.setAttribute = function (k, v) { this.attrs = this.attrs || {}; this.attrs[k] = String(v); };
+Node.prototype.querySelectorAll = function (sel) {
+  var cls = sel.replace(/^\./, ''), out = [];
+  (function walk(n) { n.children.forEach(function (c) { if (c.classList.contains(cls)) out.push(c); walk(c); }); })(this);
+  return out;
+};
+// a toy layout: every leaf line / header is 20px, stacked in document order inside its timeline
+function flat(list) { var out = []; (function walk(n) { n.children.forEach(function (c) { if (c.classList.contains('hidden')) return; if (c.children.length) walk(c); else out.push(c); }); })(list); return out; }
+function timelineOf(n) { while (n && !(n.id === 'lead-timeline' || n.id === 'reviewer-timeline')) n = n.parentNode; return n; }
+Node.prototype.getBoundingClientRect = function () {
+  var list = timelineOf(this);
+  if (!list || list === this) return { top: 0, height: this.clientHeight || 0 };
+  var leaves = flat(list), me = this;
+  while (me.children.length) me = me.children[0];
+  var i = leaves.indexOf(me); if (i < 0) i = 0;
+  return { top: i * 20 - list.scrollTop, height: 20 };
+};
+function grow(list) { Object.defineProperty(list, 'scrollHeight', { configurable: true, get: function () { return flat(list).length * 20; } }); list.clientHeight = 200; }
+var TAILS = {};            // stem -> {lines, path} | a function returning a promise
+var FETCHES = [];
+getJSON = function (path) {
+  FETCHES.push(path);
+  var m = /stem=([^&]+)/.exec(path); var t = m && TAILS[decodeURIComponent(m[1])];
+  if (typeof t === 'function') return t();
+  return Promise.resolve({ ok: true, body: t || { lines: [] } });
+};
+// a scriptable EventSource: window.EventSource instances are recorded; emit(key, type, data) drives them
+var SOURCES = [];
+window.EventSource = function (u) { this.url = u; this.ls = {}; this.closed = false; SOURCES.push(this); };
+window.EventSource.prototype.addEventListener = function (t, fn) { (this.ls[t] = this.ls[t] || []).push(fn); };
+window.EventSource.prototype.close = function () { this.closed = true; };
+var EventSource = window.EventSource;     // the page constructs the bare global
+function emit(src, type, data) { (src.ls[type] || []).forEach(function (fn) { fn({ data: JSON.stringify(data) }); }); }
+var REFRESHES = []; refreshAll = function (why) { REFRESHES.push(why); };
+function item(id, role, kind, status, started, round, extra) {
+  var o = { id: id, kind: kind, role: role, agent: role === 'reviewer' ? 'Codex' : (role === 'lead' ? 'Claude' : null), status: status,
+            started_at: started, round: round, phase: 'feat', type: 'impl', stem: id.replace('turn:', ''), ref: { log: id }, age_s: 1, duration_ms: 1000 };
+  for (var k in (extra || {})) o[k] = extra[k]; return o;
+}
+function streamOf(rec) { return rec.box.children.map(function (c) { return c.textContent; }); }
+NOW = { agents: { lead: 'Claude', reviewer: 'Codex' } };
+"""
+
+
+def _run_68b(js_body: str) -> dict:
+    import shutil
+    import subprocess
+    import tempfile
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not installed — the behavioural lane tests need it")
+    js = (WEB / "cockpit.js").read_text(encoding="utf-8")
+    block = js[js.index("// ---------- Phase 43: Cycle region + Activity log"):js.index("// ---------- Live connection: SSE with polling fallback")]
+    prog = (_DOM_STUB + _P68B_PRELUDE + "\n" + block + "\nvar DONE = null;\n" + js_body
+            + "\nPromise.resolve(DONE).then(function () { process.stdout.write(JSON.stringify(RESULT)); });\n")
+    with tempfile.TemporaryDirectory() as d:
+        f = Path(d) / "p68b.js"
+        f.write_text(prog, encoding="utf-8")
+        r = subprocess.run([node, str(f)], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-3000:]
+    return json.loads(r.stdout)
+
+
+class TestTurnBlocks:
+    SETUP = r"""
+      CYCLE_ID = 'feat_impl'; setVerdictCycle(CYCLE_ID); setLaneCycle(CYCLE_ID);
+      var rl = $('reviewer-timeline'), ll = $('lead-timeline'); grow(rl); grow(ll);
+    """
+
+    def test_newest_block_open_earlier_folded_and_a_running_block_is_never_folded(self):
+        r = _run_68b(self.SETUP + r"""
+          TAILS['rev-r1'] = { lines: ['old 1', 'old 2'], path: '/p/.tagteam/turns/rev-r1.log' };
+          TAILS['rev-r2'] = { lines: ['new 1'], path: '/p/.tagteam/turns/rev-r2.log' };
+          upsertRow(RLANE, item('turn:rev-r1', 'reviewer', 'cycle', 'finished', '2026-01-01T00:05:00+00:00', 1));
+          upsertRow(RLANE, item('turn:rev-r2', 'reviewer', 'cycle', 'finished', '2026-01-01T00:20:00+00:00', 2));
+          applyBlockPolicy(RLANE);
+          var RESULT = {};
+          DONE = Promise.resolve().then(function () { return Promise.resolve(); }).then(function () {
+            var a = RLANE.rows['turn:rev-r1'], b = RLANE.rows['turn:rev-r2'];
+            RESULT.first = { r1: [a.folded, streamOf(a)], r2: [b.folded, streamOf(b)] };
+            // a third turn starts: it opens and streams; the one before it folds and drops its stream
+            upsertRow(RLANE, item('turn:rev-r3', 'reviewer', 'cycle', 'running', '2026-01-01T00:30:00+00:00', 3));
+            applyBlockPolicy(RLANE);
+            var c = RLANE.rows['turn:rev-r3'];
+            emit(SOURCES[SOURCES.length - 1], 'line', { id: 10, text: 'live 1' });
+            RESULT.then = { r2: [b.folded, b.box.children.length, b.lines.length], r3: [c.folded, streamOf(c)] };
+            foldBlock(c, true);                                    // a refresh-driven fold of a RUNNING block: refused
+            RESULT.runningStays = [c.folded, streamOf(c)];
+            // the arbiter opens an earlier one: it stays open through the next policy pass
+            toggleActLines(a); applyBlockPolicy(RLANE);
+            return Promise.resolve().then(function () { RESULT.userOpened = [a.folded, streamOf(a)]; });
+          });
+        """)
+        assert r["first"] == {"r1": [True, []], "r2": [False, ["new 1"]]}
+        assert r["then"] == {"r2": [True, 0, 0], "r3": [False, ["live 1"]]}
+        assert r["runningStays"] == [False, ["live 1"]]
+        assert r["userOpened"] == [False, ["old 1", "old 2"]]
+
+    def test_fold_drops_the_stream_and_late_arrivals_and_reopen_is_one_clean_read(self):
+        r = _run_68b(self.SETUP + r"""
+          // (a) a finished block whose tail answers only AFTER it was folded
+          var release; TAILS['rev-r1'] = function () { return new Promise(function (ok) { release = function () { ok({ ok: true, body: { lines: ['late a', 'late b'], path: '/p/x.log' } }); }; }); };
+          upsertRow(RLANE, item('turn:rev-r1', 'reviewer', 'cycle', 'finished', '2026-01-01T00:05:00+00:00', 1));
+          var a = RLANE.rows['turn:rev-r1'];
+          openBlock(a, false); foldBlock(a, false);
+          var RESULT = {};
+          DONE = Promise.resolve().then(function () { release(); return Promise.resolve().then(function () { return Promise.resolve(); }); }).then(function () {
+            RESULT.lateTail = [a.folded, a.box.children.length, a.lines.length];
+            // fold → open → fold → open: the tail is rendered once each time
+            TAILS['rev-r1'] = { lines: ['t1', 't2', 't3'], path: '/p/x.log' };
+            openBlock(a, false);
+            return Promise.resolve().then(function () { return Promise.resolve(); });
+          }).then(function () {
+            RESULT.open1 = streamOf(a); foldBlock(a, false); RESULT.folded = a.box.children.length; openBlock(a, false);
+            return Promise.resolve().then(function () { return Promise.resolve(); });
+          }).then(function () {
+            RESULT.open2 = streamOf(a);
+            // (b) a running block: a line and the end frame that arrive after the fold change nothing
+            upsertRow(RLANE, item('turn:rev-r2', 'reviewer', 'cycle', 'running', '2026-01-01T00:20:00+00:00', 2));
+            var b = RLANE.rows['turn:rev-r2']; var src = SOURCES[SOURCES.length - 1];
+            emit(src, 'line', { id: 1, text: 'one' }); emit(src, 'line', { id: 2, text: 'two' });
+            var handlers = STREAMS['log:rev-r2'].handlers.line['rlane:turn:rev-r2'];     // a frame already dispatched to the old handler
+            foldBlock(b, false);
+            handlers({ id: 3, text: 'three (late)' });
+            RESULT.lateLine = [b.folded, b.box.children.length, b.lines.length];
+            // reopen: a FRESH read from the start into an empty block — no splice, no duplicates
+            var before = SOURCES.length; openBlock(b, false);
+            var src2 = SOURCES[SOURCES.length - 1];
+            RESULT.reopenUrl = [SOURCES.length - before, src2.url.indexOf('after=') < 0];
+            ['one', 'two', 'three'].forEach(function (t, i) { emit(src2, 'line', { id: i + 1, text: t }); });
+            RESULT.reopened = streamOf(b);
+          });
+        """)
+        assert r["lateTail"] == [True, 0, 0]
+        assert r["open1"] == ["t1", "t2", "t3"] and r["folded"] == 0 and r["open2"] == ["t1", "t2", "t3"]
+        assert r["lateLine"] == [True, 0, 0]
+        assert r["reopenUrl"] == [1, True]
+        assert r["reopened"] == ["one", "two", "three"]
+
+    def test_reopen_with_another_consumer_attached_replays_the_shared_buffer_once(self):
+        """plan approval note: STREAMS is shared with the all-activity list. A
+        reopen must not reset that consumer, must not duplicate lines, and a
+        REPLAYED end must not re-trigger the turn-end refresh."""
+        r = _run_68b(self.SETUP + r"""
+          var it = item('turn:rev-r2', 'reviewer', 'cycle', 'running', '2026-01-01T00:20:00+00:00', 2);
+          upsertRow(ACT, it); upsertRow(RLANE, it);
+          var act = ACT.rows['turn:rev-r2'], b = RLANE.rows['turn:rev-r2'];
+          var n0 = SOURCES.length, src = SOURCES[SOURCES.length - 1];
+          emit(src, 'line', { id: 1, text: 'one' }); emit(src, 'line', { id: 2, text: 'two' });
+          foldBlock(b, false);
+          emit(src, 'line', { id: 3, text: 'three' });                     // the other consumer keeps receiving
+          var mid = { act: act.lines.slice(), lane: b.lines.slice(), sources: SOURCES.length - n0, closed: src.closed };
+          openBlock(b, false);                                             // replays the SHARED buffer from its start
+          var reopened = { lane: streamOf(b), act: act.lines.slice(), sources: SOURCES.length - n0 };
+          emit(src, 'end', { id: '9:end' });
+          var ended = REFRESHES.slice();
+          foldBlock(b, false); REFRESHES.length = 0;
+          var RESULT = { mid: mid, reopened: reopened, ended: ended };
+        """)
+        assert r["mid"] == {"act": ["one", "two", "three"], "lane": [], "sources": 0, "closed": False}
+        assert r["reopened"] == {"lane": ["one", "two", "three"], "act": ["one", "two", "three"], "sources": 0}
+        assert r["ended"].count("activity-end") >= 1
+
+    def test_a_replayed_end_does_not_retrigger_the_refresh(self):
+        r = _run_68b(self.SETUP + r"""
+          var it = item('turn:rev-r2', 'reviewer', 'cycle', 'running', '2026-01-01T00:20:00+00:00', 2);
+          upsertRow(ACT, it); upsertRow(RLANE, it);
+          var b = RLANE.rows['turn:rev-r2'], src = SOURCES[SOURCES.length - 1];
+          emit(src, 'line', { id: 1, text: 'one' });
+          foldBlock(b, false);
+          STREAMS['log:rev-r2'].buffer.push({ type: 'end', data: { id: '1:end' } });   // the stream ended while folded; ACT keeps the key alive
+          REFRESHES.length = 0;
+          b.item.status = 'running'; openBlock(b, false);
+          var RESULT = { lane: streamOf(b), refreshes: REFRESHES.slice(), attached: !!b.streamKey };
+        """)
+        assert r == {"lane": ["one"], "refreshes": [], "attached": False}
+
+    def test_cap_for_a_running_cycle_block_with_the_honest_note(self):
+        r = _run_68b(self.SETUP + r"""
+          var it = item('turn:rev-r2', 'reviewer', 'cycle', 'running', '2026-01-01T00:20:00+00:00', 2, { log_path: '/p/.tagteam/turns/rev-r2.log' });
+          upsertRow(RLANE, it); var b = RLANE.rows['turn:rev-r2'], src = SOURCES[SOURCES.length - 1];
+          for (var i = 0; i < 2050; i++) emit(src, 'line', { id: i, text: 'L' + i });
+          var kids = b.box.children;
+          var RESULT = { kept: b.lines.length, dom: kids.length, note: kids[0].textContent, noteCls: kids[0].className,
+                         first: kids[1].textContent, last: kids[kids.length - 1].textContent };
+        """)
+        assert r["kept"] == 2000 and r["dom"] == 2001
+        assert r["noteCls"] == "bl-note" and r["note"] == "showing the last 2,000 lines — the whole log: /p/.tagteam/turns/rev-r2.log"
+        assert (r["first"], r["last"]) == ("L50", "L2049")
+
+    def test_a_finished_tail_at_exactly_the_cap_says_it_may_be_longer(self):
+        r = _run_68b(self.SETUP + r"""
+          var lines = []; for (var i = 0; i < 2000; i++) lines.push('T' + i);
+          TAILS['rev-r1'] = { lines: lines, path: '/p/.tagteam/turns/rev-r1.log' };
+          upsertRow(RLANE, item('turn:rev-r1', 'reviewer', 'cycle', 'finished', '2026-01-01T00:05:00+00:00', 1));
+          var a = RLANE.rows['turn:rev-r1']; openBlock(a, false);
+          var RESULT = {};
+          DONE = Promise.resolve().then(function () { return Promise.resolve(); }).then(function () {
+            RESULT = { url: FETCHES[FETCHES.length - 1], note: a.box.children[0].textContent, dom: a.box.children.length };
+          });
+        """)
+        assert r["url"].endswith("&lines=2000") and r["dom"] == 2001
+        assert r["note"] == "showing the last 2,000 lines (the log may be longer) — the whole log: /p/.tagteam/turns/rev-r1.log"
+
+    def test_following_is_the_readers_intent_and_scrolling_back_holds_their_line(self):
+        r = _run_68b(self.SETUP + r"""
+          upsertRow(RLANE, item('turn:rev-r2', 'reviewer', 'cycle', 'running', '2026-01-01T00:20:00+00:00', 2));
+          var b = RLANE.rows['turn:rev-r2'], src = SOURCES[SOURCES.length - 1];
+          function cue() { return !$('reviewer-new').classList.contains('hidden'); }
+          function top() { var f = firstVisibleLine(rl); return f ? f.node.textContent + '+' + f.delta : null; }
+          for (var i = 0; i < 30; i++) emit(src, 'line', { id: i, text: 'L' + i });
+          var following = { atFoot: rl.scrollTop === rl.scrollHeight, cue: cue() };
+          // a block opening / a header patch changes the height with NO scroll event: still following, no cue
+          patchActRow(b); emit(src, 'line', { id: 30, text: 'L30' });
+          var stillFollowing = { atFoot: rl.scrollTop === rl.scrollHeight, cue: cue() };
+          // the reader scrolls back (a real scroll event): held on their line while output arrives
+          rl.scrollTop = 205; onLaneScroll(rl); var before = top();
+          for (var j = 31; j < 40; j++) emit(src, 'line', { id: j, text: 'L' + j });
+          var held = { before: before, after: top(), cue: cue(), follows: laneFollows(rl) };
+          rl.scrollTop = rl.scrollHeight - rl.clientHeight; onLaneScroll(rl);          // back at the foot
+          var RESULT = { following: following, stillFollowing: stillFollowing, held: held, caughtUp: { cue: cue(), follows: laneFollows(rl) } };
+        """)
+        assert r["following"] == {"atFoot": True, "cue": False}
+        assert r["stillFollowing"] == {"atFoot": True, "cue": False}
+        assert r["held"]["before"] == r["held"]["after"] and r["held"]["cue"] is True and r["held"]["follows"] is False
+        assert r["caughtUp"] == {"cue": False, "follows": True}
+
+    def test_when_the_cap_trims_the_readers_line_the_view_rests_on_the_oldest_kept_line(self):
+        r = _run_68b(self.SETUP + r"""
+          upsertRow(RLANE, item('turn:rev-r2', 'reviewer', 'cycle', 'running', '2026-01-01T00:20:00+00:00', 2));
+          var b = RLANE.rows['turn:rev-r2'], src = SOURCES[SOURCES.length - 1];
+          for (var i = 0; i < 2000; i++) emit(src, 'line', { id: i, text: 'L' + i });
+          function top() { var f = firstVisibleLine(rl); return f ? f.node.textContent : null; }
+          rl.scrollTop = rowTopIn(rl, b.box.children[5]); onLaneScroll(rl);          // reading L5
+          var reading = top();
+          for (var j = 2000; j < 2003; j++) emit(src, 'line', { id: j, text: 'L' + j });   // L0..L2 trimmed: L5 survives
+          var survived = top();
+          for (var k = 2003; k < 2020; k++) emit(src, 'line', { id: k, text: 'L' + k });   // now L5 itself is trimmed
+          var RESULT = { reading: reading, survived: survived, rests: top(), oldest: firstLineOf(b).textContent,
+                         atFoot: rl.scrollTop >= rl.scrollHeight - rl.clientHeight, cue: !$('reviewer-new').classList.contains('hidden') };
+        """)
+        assert r["reading"] == "L5" and r["survived"] == "L5"
+        assert r["rests"] == r["oldest"] == "L20" and r["atFoot"] is False and r["cue"] is True
+
+
+class TestChatBlocks:
+    SETUP = r"""
+      LEAD.cfg = { ok: true, agent: 'Claude' };
+      var ll = $('lead-timeline'); grow(ll);
+      function turn(n, status, extra) { var t = { n: n, ts: '2026-01-01T00:' + (10 + n) + ':00+00:00', user_text: 'message ' + n, status: status }; for (var k in (extra || {})) t[k] = extra[k]; return t; }
+    """
+
+    def test_a_chat_turn_is_a_block_and_polling_never_rebuilds_its_stream(self):
+        r = _run_68b(self.SETUP + r"""
+          LEAD.conv = { id: 'c-1', turns: [turn(1, 'ok', { reply: 'done', finished_at: '2026-01-01T00:11:30+00:00', continuity: 'resumed session' }), turn(2, 'running')] };
+          renderLeadTimeline();
+          var rec = LEAD.msgRows['msg:c-1:2'], box = rec.box;
+          appendChatLine('c-1', 2, '→ Bash: ls'); appendChatLine('c-1', 2, '← README.md');
+          var first = box.children[0];
+          renderLeadTimeline(); renderLeadTimeline();                       // polls while it runs
+          var polled = { sameBox: LEAD.msgRows['msg:c-1:2'].box === box, sameLineNode: box.children[0] === first, stream: box.children.map(function (c) { return c.textContent; }) };
+          LEAD.conv.turns[1] = turn(2, 'failed', { error: 'exit 1', finished_at: '2026-01-01T00:13:00+00:00', log_path: '/p/chat.log' });
+          renderLeadTimeline();
+          var one = LEAD.msgRows['msg:c-1:1'];
+          var RESULT = { polled: polled, head: [rec.kindEl.textContent, rec.promptEl.textContent], close: rec.closeEl.textContent, closeCls: rec.closeEl.className,
+                         keptAfterFail: box.children.length, earlier: [one.folded, one.box.children.length, one.contEl.textContent, one.closeEl.textContent] };
+        """)
+        assert r["polled"] == {"sameBox": True, "sameLineNode": True, "stream": ["→ Bash: ls", "← README.md"]}
+        assert r["head"] == ["chat #2", "you ▸ message 2"]
+        assert "No reply came" in r["close"] and "the output above shows what Claude did" in r["close"] and "fail" in r["closeCls"]
+        assert r["keptAfterFail"] == 2
+        assert r["earlier"] == [True, 0, "same session", "Claude ▸ done"]              # reply and continuity kept
+
+    def test_a_running_chat_block_is_capped_and_a_folded_one_holds_no_dom(self):
+        r = _run_68b(self.SETUP + r"""
+          LEAD.conv = { id: 'c-1', turns: [turn(1, 'running', { log_path: '/p/chat-1.log' })] };
+          renderLeadTimeline();
+          var rec = LEAD.msgRows['msg:c-1:1'];
+          for (var i = 0; i < 2050; i++) appendChatLine('c-1', 1, 'C' + i);
+          var capped = { kept: leadLines('c-1', 1).length, dom: rec.box.children.length, note: rec.box.children[0].textContent,
+                         first: rec.box.children[1].textContent, last: rec.box.children[rec.box.children.length - 1].textContent };
+          LEAD.conv.turns[0] = turn(1, 'ok', { reply: 'ok', finished_at: '2026-01-01T00:12:00+00:00', log_path: '/p/chat-1.log' });
+          renderLeadTimeline();
+          foldChatBlock(rec, false);
+          appendChatLine('c-1', 1, 'late');                                  // arrives after the fold
+          var folded = { dom: rec.box.children.length, kept: leadLines('c-1', 1).length };
+          openChatBlock(rec); var n1 = rec.box.children.length; foldChatBlock(rec, false); openChatBlock(rec);
+          var RESULT = { capped: capped, folded: folded, reopen: [n1, rec.box.children.length, rec.box.children[rec.box.children.length - 1].textContent] };
+        """)
+        assert r["capped"] == {"kept": 2000, "dom": 2001, "note": "showing the last 2,000 lines — the whole log: /p/chat-1.log",
+                               "first": "C50", "last": "C2049"}
+        assert r["folded"] == {"dom": 0, "kept": 2000}
+        assert r["reopen"] == [2001, 2001, "late"]                           # one consistent render, no duplicates
+
+
+class TestOneStory:
+    def test_lanes_say_the_headline_and_liveness_decides_gone(self):
+        r = _run_68b(r"""
+          function lanes(n) { renderLanes(n); return { lead: [$('lane-lead-state').textContent, $('lane-lead').className], rev: [$('lane-reviewer-state').textContent, $('lane-reviewer').className] }; }
+          var base = { agents: { lead: 'Claude', reviewer: 'Codex' }, state: { phase: 'feat', type: 'impl', status: 'ready' }, owed: { role: 'reviewer', agent: 'Codex', age_s: 5 } };
+          function withH(h, extra) { var n = JSON.parse(JSON.stringify(base)); n.headline = h; for (var k in (extra || {})) n[k] = extra[k]; return n; }
+          var RESULT = {
+            working: lanes(withH({ state: 'working', tone: 'working', role: 'reviewer', text: 'Codex is reviewing · round 2', age_s: 61 })),
+            // a pre-check: the child-pid flag is false for its whole run — and nothing may read it
+            gate: lanes(withH({ state: 'working', tone: 'working', role: 'gatekeeper', text: 'Pre-check running · round 1', age_s: 9 }, { inflight: { kind: 'gate', role: 'gatekeeper', pid: null, pid_alive: false, liveness: 'no-child' } })),
+            starting: lanes(withH({ state: 'working', tone: 'working', role: 'lead', text: 'Claude is implementing · round 1', age_s: 1 }, { inflight: { kind: 'cycle', role: 'lead', pid: null, pid_alive: false, liveness: 'starting' } })),
+            lost: lanes(withH({ state: 'turn-lost', tone: 'danger', role: 'lead', text: "Claude's turn was abandoned — the process running it is gone", age_s: 300 }, { inflight: { role: 'lead', liveness: 'lost' } })),
+            stalled: lanes(withH({ state: 'stalled', tone: 'danger', role: 'reviewer', text: 'Stalled: Codex is owed a turn and the watcher has stopped looking', age_s: 36 }))
+          };
+        """)
+        assert r["working"]["rev"][0] == "Codex is reviewing · round 2 · 61s" and "running" in r["working"]["rev"][1]
+        assert r["working"]["lead"][0] == "waiting"
+        for lane in (r["gate"]["lead"], r["gate"]["rev"], r["starting"]["rev"]):
+            assert "gone" not in lane[1] and "disappeared" not in lane[0]
+        assert "running" in r["starting"]["lead"][1] and "gone" not in r["starting"]["lead"][1]
+        assert "gone" in r["lost"]["lead"][1] and r["lost"]["lead"][0].startswith("Claude's turn was abandoned")
+        assert r["stalled"]["rev"][0].startswith("Stalled: Codex is owed a turn") and "trouble" in r["stalled"]["rev"][1]
+
+    def test_cockpit_js_never_reads_the_child_pid_flag(self):
+        js = (WEB / "cockpit.js").read_text(encoding="utf-8")
+        assert "pid_alive" not in js
+        assert "liveness === 'lost'" in js
+
+    def test_checks_strip_routes_and_opens_a_run(self):
+        r = _run_68b(TestTurnBlocks.SETUP + r"""
+          TAILS['gate-r1'] = { lines: ['1 failed'], path: '/p/g1.log' };
+          [item('turn:gate-r1', 'gatekeeper', 'gate', 'finished', '2026-01-01T00:01:00+00:00', 1, { raw_status: 'bounce' }),
+           item('turn:gate-r2', 'gatekeeper', 'gate', 'running', '2026-01-01T00:09:00+00:00', 2),
+           item('turn:gate-old', 'gatekeeper', 'gate', 'finished', '2025-12-01T00:00:00+00:00', 4, { raw_status: 'pass', phase: 'other' }),
+           item('turn:lens', 'reviewer', 'panel_lens', 'finished', '2026-01-01T00:05:00+00:00', 1, { detail: 'scope' })].forEach(function (it) {
+            if (inReviewerLane(it)) upsertRow(RLANE, it); if (inLeadLane(it)) upsertRow(LLANE, it); if (inChecks(it)) upsertRow(CHECKS, it);
+          });
+          renderChecks();
+          function chips() { return $('checks-chips').children.map(function (c) { return c.className + ' | ' + c.textContent; }); }
+          var before = { chips: chips(), lane: rl.children.length, log: $('checks-log').classList.contains('hidden') };
+          toggleCheck('turn:gate-r1');
+          var RESULT = {};
+          DONE = Promise.resolve().then(function () { return Promise.resolve(); }).then(function () {
+            RESULT = { before: before, open: { chips: chips(), log: $('checks-log').classList.contains('hidden'), stream: streamOf(CHECKS.rows['turn:gate-r1']) } };
+            toggleCheck('turn:gate-r1');
+            RESULT.closed = { log: $('checks-log').classList.contains('hidden'), dom: CHECKS.rows['turn:gate-r1'].box.children.length };
+          });
+        """)
+        assert r["before"]["lane"] == 0 and r["before"]["log"] is True                   # nothing of the machinery's in the reviewer's lane
+        assert r["before"]["chips"] == ["check-chip warn | pre-check r1 — bounced · 1s", "check-chip | review lens (scope) r1 — done · 1s",
+                                        "check-chip running | pre-check r2 — running · 1s"]          # this cycle only, oldest first
+        assert r["open"]["log"] is False and r["open"]["stream"] == ["1 failed"] and r["open"]["chips"][0].startswith("check-chip warn open")
+        assert r["closed"] == {"log": True, "dom": 0}
+
+
+_LANE_BROWSER_SHIMS = r"""
+function $(id) { return document.getElementById(id); }
+function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function esc(s) { return String(s == null ? '' : s); }
+function fmtAge(s) { return s + 's'; }
+function fmtTs(ts) { return String(ts || ''); }
+function fmtTime(ts) { return String(ts || '').slice(11, 19); }
+function url(p) { return p; }
+function getJSON() { return Promise.resolve({ ok: true, body: { lines: [] } }); }
+function postJSON() { return Promise.resolve({ ok: false }); }
+function toast() {} function act() {} function refreshAll() {} function showTab() {} function fitLanes() {}
+function lastTurnText() { return ''; }
+var START = null, NOW = { agents: { lead: 'Claude', reviewer: 'Codex' } }, CYCLE_ID = null;
+var SOURCES = [];
+window.EventSource = function (u) { this.url = u; this.ls = {}; SOURCES.push(this); };
+window.EventSource.prototype.addEventListener = function (t, fn) { (this.ls[t] = this.ls[t] || []).push(fn); };
+window.EventSource.prototype.close = function () {};
+function emit(src, type, data) { (src.ls[type] || []).forEach(function (fn) { fn({ data: JSON.stringify(data) }); }); }
+"""
+
+
+def _run_lanes_in_chromium(scenario_js: str) -> dict:
+    import html as _html
+    import re
+    import subprocess
+    import tempfile
+    chrome = _find_chromium()
+    if not chrome:
+        pytest.skip("no Chromium/Chrome found (set TAGTEAM_TEST_CHROME) — the real-layout lane test needs one")
+    html = (WEB / "cockpit.html").read_text(encoding="utf-8")
+    css = (WEB / "cockpit.css").read_text(encoding="utf-8")
+    js = (WEB / "cockpit.js").read_text(encoding="utf-8")
+    body = html[html.index('<header class="now" id="now">'):html.index("<script")]           # the shipped header + main markup
+    p68 = js[js.index("// ---------- Phase 68: Turn bar + watcher drawer"):js.index("// ---------- end Phase 68")]
+    lanes = js[js.index("// ---------- Phase 43: Cycle region + Activity log"):js.index("// ---------- Live connection: SSE with polling fallback")]
+    page = ("<!DOCTYPE html><html><head><meta charset='utf-8'><style>" + css + "</style></head><body>" + body
+            + "<pre id='RESULT'></pre><script>var RESULT = null;\ntry {\n" + _LANE_BROWSER_SHIMS + p68 + "\n" + lanes + "\n" + scenario_js
+            + "\n} catch (e) { RESULT = { scriptError: String(e && e.stack || e) }; }"
+            + "\ndocument.getElementById('RESULT').textContent = JSON.stringify(RESULT);</script></body></html>")
+    with tempfile.TemporaryDirectory() as d:
+        f = Path(d) / "lanes.html"
+        f.write_text(page, encoding="utf-8")
+        r = subprocess.run([chrome, "--headless", "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
+                            "--window-size=1300,900", f"--user-data-dir={d}/profile", "--dump-dom", f.as_uri()],
+                           capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr[-2000:]
+    m = re.search(r"<pre id=\"RESULT\">(.*?)</pre>", r.stdout, re.S)
+    assert m and m.group(1).strip(), "the page produced no RESULT — a script error? " + r.stderr[-1500:]
+    out = json.loads(_html.unescape(m.group(1)))
+    assert not (isinstance(out, dict) and out.get("scriptError")), out
+    return out
+
+
+class TestLanesInARealBrowser:
+    """Phase 68b: the lane is the ONE scroller and follows like a terminal. Run
+    with the shipped CSS + markup, because the node model cannot know what the
+    layout engine does (Phase 68's scroll anchor was wrong for exactly that reason)."""
+
+    MEASURE = r"""
+      $('lanes').style.height = '520px';
+      var LONG = ' ' + new Array(30).join('a long line of agent output that wraps in the lane ');
+      function text(i) { return 'L' + i + (i % 3 === 1 ? LONG : ''); }
+      // measured independently of the code under test: the first line whose bottom is below the scroller's top edge
+      function firstSeen(list) {
+        var edge = list.getBoundingClientRect().top + list.clientTop, nodes = list.querySelectorAll('.bl');
+        for (var i = 0; i < nodes.length; i++) { var rc = nodes[i].getBoundingClientRect(); if (rc.bottom > edge + 0.5) return { line: nodes[i].textContent.split(' ')[0], into: Math.round(edge - rc.top) }; }
+        return null;
+      }
+      function atFoot(list) { return Math.abs(list.scrollHeight - list.clientHeight - list.scrollTop) < 2; }
+      function cueShown(id) { return !$(id).classList.contains('hidden'); }
+    """
+
+    def test_a_cycle_block_follows_holds_and_survives_the_cap(self):
+        r = _run_lanes_in_chromium(self.MEASURE + r"""
+          CYCLE_ID = 'feat_impl'; setVerdictCycle(CYCLE_ID); setLaneCycle(CYCLE_ID);
+          var list = $('reviewer-timeline');
+          upsertRow(RLANE, { id: 'turn:rev-r1', kind: 'cycle', role: 'reviewer', agent: 'Codex', status: 'running', started_at: '2026-01-01T00:05:00+00:00',
+                             round: 1, phase: 'feat', type: 'impl', stem: 'rev-r1', ref: { log: 'x' }, age_s: 1 });
+          var rec = RLANE.rows['turn:rev-r1'], src = SOURCES[SOURCES.length - 1];
+          for (var i = 0; i < 80; i++) emit(src, 'line', { id: i, text: text(i) });
+          var cs = getComputedStyle(rec.box);
+          var layout = { boxMax: cs.maxHeight, boxOverflow: cs.overflowY, laneScrolls: list.scrollHeight > list.clientHeight + 200,
+                         boxScrolls: rec.box.scrollHeight > rec.box.clientHeight + 2 };
+          var following = { foot: atFoot(list), cue: cueShown('reviewer-new') };
+          // the reader scrolls back into the middle of a WRAPPED line; output keeps arriving
+          var target = list.querySelectorAll('.bl')[40];
+          list.scrollTop = rowTopIn(list, target) + 17; onLaneScroll(list);            // what the scroll event does
+          var before = firstSeen(list);
+          for (var j = 80; j < 110; j++) emit(src, 'line', { id: j, text: text(j) });
+          var held = { before: before, after: firstSeen(list), cue: cueShown('reviewer-new'), foot: atFoot(list) };
+          // the cap rolls over while they read: older lines are trimmed ABOVE them — same line, same offset
+          BLOCK_CAP = 100;
+          for (var k = 110; k < 125; k++) emit(src, 'line', { id: k, text: text(k) });
+          var rolled = { after: firstSeen(list), kept: rec.lines.length, note: rec.box.firstChild.className };
+          // …until their own line is trimmed: the view rests on the oldest kept line, not at the foot
+          for (var m = 125; m < 200; m++) emit(src, 'line', { id: m, text: text(m) });
+          var oldest = firstLineOf(rec).textContent.split(' ')[0];
+          var trimmed = { seen: firstSeen(list), oldest: oldest, foot: atFoot(list), cue: cueShown('reviewer-new') };
+          $('reviewer-new').click();
+          var RESULT = { layout: layout, following: following, held: held, rolled: rolled, trimmed: trimmed,
+                         caughtUp: { foot: atFoot(list), cue: cueShown('reviewer-new') } };
+        """)
+        assert r["layout"] == {"boxMax": "none", "boxOverflow": "visible", "laneScrolls": True, "boxScrolls": False}   # one scroller
+        assert r["following"] == {"foot": True, "cue": False}
+        assert r["held"]["before"] == {"line": "L40", "into": 17}
+        assert r["held"]["after"] == r["held"]["before"] and r["held"]["cue"] is True and r["held"]["foot"] is False
+        assert r["rolled"] == {"after": {"line": "L40", "into": 17}, "kept": 100, "note": "bl-note"}
+        assert r["trimmed"]["seen"]["line"] == r["trimmed"]["oldest"] == "L100"
+        assert r["trimmed"]["foot"] is False and r["trimmed"]["cue"] is True
+        assert r["caughtUp"] == {"foot": True, "cue": False}
+
+    def test_a_chat_block_follows_and_holds_the_same_way(self):
+        r = _run_lanes_in_chromium(self.MEASURE + r"""
+          LEAD.cfg = { ok: true, agent: 'Claude' };
+          LEAD.conv = { id: 'c-1', turns: [{ n: 1, ts: '2026-01-01T00:10:00+00:00', user_text: 'start the phase', status: 'running' }] };
+          renderLeadTimeline();
+          var list = $('lead-timeline'), rec = LEAD.msgRows['msg:c-1:1'];
+          for (var i = 0; i < 80; i++) appendChatLine('c-1', 1, text(i));
+          var following = { foot: atFoot(list), cue: cueShown('lead-new'), prompt: rec.promptEl.textContent };
+          var target = list.querySelectorAll('.bl')[40];
+          list.scrollTop = rowTopIn(list, target) + 9; onLaneScroll(list);
+          var before = firstSeen(list), keptNode = target;
+          for (var j = 80; j < 110; j++) appendChatLine('c-1', 1, text(j));
+          renderLeadTimeline();                                                        // a poll while it runs
+          var held = { before: before, after: firstSeen(list), sameNode: list.querySelectorAll('.bl')[40] === keptNode, cue: cueShown('lead-new') };
+          BLOCK_CAP = 100;
+          for (var k = 110; k < 125; k++) appendChatLine('c-1', 1, text(k));
+          var RESULT = { following: following, held: held, rolled: { after: firstSeen(list), kept: leadLines('c-1', 1).length } };
+        """)
+        assert r["following"] == {"foot": True, "cue": False, "prompt": "you ▸ start the phase"}
+        assert r["held"]["before"] == {"line": "L40", "into": 9}
+        assert r["held"]["after"] == r["held"]["before"] and r["held"]["sameNode"] is True and r["held"]["cue"] is True
+        assert r["rolled"] == {"after": {"line": "L40", "into": 9}, "kept": 100}
