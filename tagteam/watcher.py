@@ -173,7 +173,7 @@ def send_tmux_keys(
     5. Retry on failure
     """
     if not pane_exists(pane_target):
-        _log(f"   ERROR: Pane '{pane_target}' does not exist")
+        _log(f"   ERROR: Pane '{pane_target}' does not exist", kind="error")
         return False
 
     for attempt in range(1, max_retries + 1):
@@ -273,7 +273,7 @@ def send_tab_command(
     is handled inside the driver's write_text_to_session().
     """
     if not driver.session_id_is_valid(session_id):
-        _log(f"   ERROR: Session '{session_id}' does not exist")
+        _log(f"   ERROR: Session '{session_id}' does not exist", kind="error")
         return False
 
     for attempt in range(1, max_retries + 1):
@@ -368,7 +368,7 @@ def _try_roadmap_advance(state: dict, project_dir: str = ".") -> dict | None:
             _log("   SKIP: state changed since approval detected (seq mismatch)")
             return None
         _log(f"   AUTO-ADVANCE: plan approved → lead implements"
-             f" (phase: {phase})")
+             f" (phase: {phase})", kind="advance")
         return new_state
 
     if current_type == "impl":
@@ -462,7 +462,7 @@ def _select_next_phase(queue: list, idx: int, completed: list, seq: int,
         if new_state is None:
             _log("   SKIP: state changed since approval detected (seq mismatch)")
             return None
-        _log(f"   ROADMAP PAUSED: {reason}")
+        _log(f"   ROADMAP PAUSED: {reason}", kind="paused")
         _log("   Unblock (merge the dependency / fix docs/roadmap.md), then:"
              " tagteam roadmap resume")
         return new_state
@@ -512,7 +512,7 @@ def _select_next_phase(queue: list, idx: int, completed: list, seq: int,
         if new_state is None:
             _log("   SKIP: state changed since approval detected (seq mismatch)")
             return None
-        _log("   ROADMAP COMPLETE: all phases finished!")
+        _log("   ROADMAP COMPLETE: all phases finished!", kind="done")
         return new_state
 
     blocked: list[str] = []
@@ -544,7 +544,7 @@ def _select_next_phase(queue: list, idx: int, completed: list, seq: int,
             _log("   SKIP: state changed since approval detected (seq mismatch)")
             return None
         _log(f"   AUTO-ADVANCE: impl approved → lead starts next phase"
-             f" ({slug})")
+             f" ({slug})", kind="advance")
         return new_state
 
     return _pause("blocked: " + "; ".join(blocked))
@@ -599,9 +599,32 @@ def roadmap_resume(project_dir: str = ".") -> int:
     return 0
 
 
-def _log(msg: str) -> None:
-    """Print with timestamp and flush (required for tmux pane output)."""
+# Phase 67: the running watcher's `watchlog.Sink`, installed by
+# `_watch_locked()` for its lifetime. None everywhere else (tests, library
+# callers), where `_log` only prints, exactly as before.
+_SINK = None
+
+
+def _log(msg: str, kind: str = "info", **ctx) -> None:
+    """Print with timestamp and flush (required for tmux pane output). With a
+    sink installed the same line is recorded in the watcher's event log,
+    tagged with `kind` (`watchlog.KINDS`) and any phase/round/turn/seq given."""
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
+    sink = _SINK
+    if sink is not None:
+        sink.event(msg, kind, **ctx)
+
+
+def _beat(state: dict | None) -> None:
+    sink = _SINK
+    if sink is not None:
+        sink.beat(state)
+
+
+def _state_ctx(state: dict | None) -> dict:
+    st = state or {}
+    return {"phase": st.get("phase"), "type": st.get("type"), "round": st.get("round"),
+            "turn": st.get("turn"), "seq": st.get("seq")}
 
 
 def _ts() -> str:
@@ -733,7 +756,7 @@ class _StateProcessor:
         if force or now - self._last_pause_log > 60:
             self._last_pause_log = now
             from tagteam.headless import describe_pause
-            _log(f"!! {describe_pause(info)}")
+            _log(f"!! {describe_pause(info)}", kind="paused")
             _log("   resume with: tagteam resume")
 
     def try_repair(self) -> None:
@@ -798,7 +821,7 @@ class _StateProcessor:
                     and state.get("status") == "ready"):
                 if self._pause_info() is None:
                     self._paused_seq = None
-                    _log("Resumed — dispatching the still-owed turn")
+                    _log("Resumed — dispatching the still-owed turn", kind="resumed", **_state_ctx(state))
                     self._dispatch(state)
                     return
                 self._log_paused(self._pause_info() or {})
@@ -807,7 +830,7 @@ class _StateProcessor:
             if (elapsed > self.timeout_minutes * 60
                     and state.get("status") == "working"):
                 _log(f"Warning: no state change for {self.timeout_minutes}m"
-                     " - agent may be stuck")
+                     " - agent may be stuck", kind="stuck", **_state_ctx(state))
                 notify_macos("Tagteam",
                              f"No activity for {self.timeout_minutes}m")
                 self.idle_since = time.time()
@@ -826,14 +849,14 @@ class _StateProcessor:
                     elif self.engine is not None and isinstance(getattr(self.engine, "slot_busy", None), dict):
                         from tagteam import headless as _h
                         if not _h.slot_status(self.project_dir)["held"]:
-                            _log("Turn slot freed — dispatching the still-owed turn")
+                            _log("Turn slot freed — dispatching the still-owed turn", kind="resumed", **_state_ctx(state))
                             self.engine.slot_busy = None
                             self._dispatch(state)
                 return
 
             if state.get("status") == "ready" and self._watchdog_due(state):
                 _log(f"Watchdog: state still 'ready' after {self.resend_minutes}m"
-                     f" — re-sending command ({self._watchdog['resends']}/{self.WATCHDOG_MAX_RESENDS})")
+                     f" — re-sending command ({self._watchdog['resends']}/{self.WATCHDOG_MAX_RESENDS})", kind="watchdog", **_state_ctx(state))
                 self.last_ready_send_time = None  # avoid rapid re-sends
                 # fall through to re-process
             else:
@@ -893,7 +916,7 @@ class _StateProcessor:
         now = time.time()
         if now - wd["last_busy_log"] >= max(self.resend_s, 60.0):
             wd["last_busy_log"] = now
-            _log(f"   watchdog: {msg} — not re-sending ({wd['resends']}/{self.WATCHDOG_MAX_RESENDS} used)")
+            _log(f"   watchdog: {msg} — not re-sending ({wd['resends']}/{self.WATCHDOG_MAX_RESENDS} used)", kind="watchdog")
 
     def _watchdog_due(self, state: dict) -> bool:
         """Decide whether the still-'ready' turn for this seq may be re-sent
@@ -910,7 +933,7 @@ class _StateProcessor:
             agent = self.lead_name if state.get("turn") == "lead" else self.reviewer_name
             mins = int(round((time.time() - self.last_ready_send_time) / 60)) + self.resend_minutes * wd["resends"]
             _log(f"   watchdog: {agent}'s turn still 'ready' after ~{mins}m and {wd['resends']} re-sends"
-                 f" — not re-sending again; check {agent}'s tab")
+                 f" — not re-sending again; check {agent}'s tab", kind="watchdog")
             notify_macos("Tagteam", f"{agent}'s turn is still waiting ({mins}m) — check {agent}'s tab")
             wd["notified"] = True
             return False
@@ -939,7 +962,7 @@ class _StateProcessor:
         try:
             config = check_participants(self.project_dir)
         except ParticipantMismatch as exc:
-            _log(f"   REFUSED: {exc}")
+            _log(f"   REFUSED: {exc}", kind="refused", **_state_ctx(state))
             return
         if config is not None:
             self.lead_name, self.reviewer_name = get_agent_names(config)
@@ -967,14 +990,14 @@ class _StateProcessor:
             self._handle_escalated(state)
         elif current_status == "aborted":
             reason = state.get("reason", "unknown")
-            _log(f"-- Cycle aborted: {reason}")
+            _log(f"-- Cycle aborted: {reason}", kind="aborted", **_state_ctx(state))
             notify_macos("Tagteam", f"Cycle aborted: {reason}")
 
     def _handle_ready(self, agent_name, pane, session_id,
                       command, phase, round_num, state=None):
         command = terminal_turn_message(command)
         _log(f">> {agent_name}'s turn"
-             f" (phase: {phase}, round: {round_num})")
+             f" (phase: {phase}, round: {round_num})", kind="turn", **_state_ctx(state))
         # Phase 32: the pause marker holds dispatch in EVERY mode. Do not
         # arm the watchdog re-send while paused; remember the seq so resume
         # can re-dispatch it once.
@@ -1006,10 +1029,10 @@ class _StateProcessor:
                     return
             send_success = self._send_tab(session_id, command)
             if send_success:
-                _log(f"   Sent to {agent_name}: {command}")
+                _log(f"   Sent to {agent_name}: {command}", kind="sent", **_state_ctx(state))
             else:
                 _log(f"   FAILED: Could not send to"
-                     f" {agent_name} after {self.max_retries} attempts")
+                     f" {agent_name} after {self.max_retries} attempts", kind="send-failed", **_state_ctx(state))
                 notify_macos("Tagteam", f"Failed to send to {agent_name}")
 
         elif self.mode == "tmux":
@@ -1026,16 +1049,16 @@ class _StateProcessor:
                 pre_send_delay=self.pre_send_delay,
             )
             if send_success:
-                _log(f"   Sent to {pane}: {command}")
+                _log(f"   Sent to {pane}: {command}", kind="sent", **_state_ctx(state))
             else:
                 _log(f"   FAILED: Could not send to '{pane}'"
-                     f" after {self.max_retries} attempts")
+                     f" after {self.max_retries} attempts", kind="send-failed", **_state_ctx(state))
                 notify_macos("Tagteam",
                              f"Failed to send to {pane} after retries")
 
         elif self.mode == "notify":
             send_success = True
-            _log(f"   Command: {command}")
+            _log(f"   Command: {command}", kind="sent", **_state_ctx(state))
             notify_macos("Tagteam", f"{agent_name}'s turn: {command}")
 
         elif self.mode == "headless":
@@ -1045,9 +1068,9 @@ class _StateProcessor:
             # No send-time bookkeeping: the watchdog re-send path is
             # short-circuited for headless in tick().
             if self.engine is None:
-                _log("   ERROR: headless mode without an engine")
+                _log("   ERROR: headless mode without an engine", kind="error", **_state_ctx(state))
                 return
-            _log(f"   Command: {command}")
+            _log(f"   Command: {command}", kind="sent", **_state_ctx(state))
             self.engine.run_owed_turn(state or {})
             return
 
@@ -1072,10 +1095,10 @@ class _StateProcessor:
                 "using the contract's start impl workflow."
             )
         if result == "roadmap-complete":
-            _log("** Roadmap complete: all phases finished!")
+            _log("** Roadmap complete: all phases finished!", kind="done", **_state_ctx(state))
             notify_macos("Tagteam", "Roadmap complete!")
         else:
-            _log(f"** Cycle complete: {result}")
+            _log(f"** Cycle complete: {result}", kind="done", **_state_ctx(state))
             notify_macos("Tagteam", f"Cycle complete: {result}")
 
         _log(f"   Sending completion notice to {self.lead_name}...")
@@ -1093,7 +1116,7 @@ class _StateProcessor:
         roadmap = state.get("roadmap") or {}
         pause_reason = roadmap.get("pause_reason") or state.get("reason")
         if pause_reason:
-            _log(f"!! Paused: {pause_reason}")
+            _log(f"!! Paused: {pause_reason}", kind="paused", **_state_ctx(state))
             if str(pause_reason).startswith(("blocked:", "roadmap invalid:", "stale queue:")):
                 _log("   Resume with: tagteam roadmap resume"
                      " (after unblocking)")
@@ -1102,7 +1125,7 @@ class _StateProcessor:
                      " --status ready --turn <lead|reviewer>")
             notify_macos("Tagteam", f"Paused: {pause_reason}")
         else:
-            _log("!! Escalated to human arbiter")
+            _log("!! Escalated to human arbiter", kind="escalated", **_state_ctx(state))
             notify_macos("Tagteam", "Escalated to human arbiter!")
             self._maybe_brief(state)
 
@@ -1123,9 +1146,9 @@ class _StateProcessor:
             if res.status in ("ok", "partial"):
                 _log(f"   brief: {res.path}")
             elif res.status == "failed":
-                _log(f"   brief failed: {res.reason} — `tagteam brief --generate` to retry")
+                _log(f"   brief failed: {res.reason} — `tagteam brief --generate` to retry", kind="error", **_state_ctx(state))
         except Exception as e:  # the loop must never die because of the briefer
-            _log(f"   briefer error: {type(e).__name__}: {e}")
+            _log(f"   briefer error: {type(e).__name__}: {e}", kind="error", **_state_ctx(state))
 
     def _maybe_panel(self, state: dict) -> bool:
         """Phase 39: run the reviewer panel for a reviewer-ready submission.
@@ -1141,7 +1164,7 @@ class _StateProcessor:
             from tagteam import panel as _panel
             res = _panel.run_panel(self.project_dir, kind="auto", spec=spec, state=state, log=_log)
         except Exception as e:  # the loop must never die because of the panel
-            _log(f"   panel error: {type(e).__name__}: {e} — will retry")
+            _log(f"   panel error: {type(e).__name__}: {e} — will retry", kind="panel", **_state_ctx(state))
             self._panel_owed_seq = seq
             return False
         if res.status in ("deferred", "error", "not-ready", "cancelled", "superseded"):
@@ -1150,15 +1173,15 @@ class _StateProcessor:
             # by a rounds-only AMEND (same seq still owed) — retry on identical
             # ticks; a seq change clears the latch naturally
             if self._panel_owed_seq != seq:
-                _log(f"   panel: undecided ({res.reason}) — reviewer hand-off withheld until the panel decides")
+                _log(f"   panel: undecided ({res.reason}) — reviewer hand-off withheld until the panel decides", kind="panel", **_state_ctx(state))
             self._panel_owed_seq = seq
             return False
         self._panel_owed_seq = None
         if res.status == "stale":
-            _log(f"   panel: {res.reason} — this observation is stale; not dispatching")
+            _log(f"   panel: {res.reason} — this observation is stale; not dispatching", kind="panel", **_state_ctx(state))
             return False
         if res.status == "merged":
-            _log("   panel: merged — the panel's entry is the reviewer's response (reviewer not dispatched)")
+            _log("   panel: merged — the panel's entry is the reviewer's response (reviewer not dispatched)", kind="panel", **_state_ctx(state))
             return False
         return bool(res.dispatch)
 
@@ -1178,7 +1201,7 @@ class _StateProcessor:
             from tagteam import gatekeeper as _gk
             res = _gk.run_gate(self.project_dir, kind="auto", spec=spec, state=state, log=_log)
         except Exception as e:  # the loop must never die because of the gate
-            _log(f"   gate error: {type(e).__name__}: {e} — will retry")
+            _log(f"   gate error: {type(e).__name__}: {e} — will retry", kind="gate", **_state_ctx(state))
             self._gate_owed_seq = seq
             return False
         if res.status in ("deferred", "error", "not-ready", "superseded"):
@@ -1186,18 +1209,18 @@ class _StateProcessor:
             # by a rounds-only AMEND on the same seq) — retry on identical
             # ticks; the reviewer waits for a decision
             if self._gate_owed_seq != seq:
-                _log(f"   gate: undecided ({res.reason}) — reviewer hand-off withheld until the gate decides")
+                _log(f"   gate: undecided ({res.reason}) — reviewer hand-off withheld until the gate decides", kind="gate", **_state_ctx(state))
             self._gate_owed_seq = seq
             return False
         self._gate_owed_seq = None
         if res.status == "stale":
-            _log(f"   gate: {res.reason} — this observation is stale; not dispatching")
+            _log(f"   gate: {res.reason} — this observation is stale; not dispatching", kind="gate", **_state_ctx(state))
             return False
         if res.status == "bounce":
-            _log("   gate: bounced — turn is the lead's (reviewer not dispatched)")
+            _log("   gate: bounced — turn is the lead's (reviewer not dispatched)", kind="gate", **_state_ctx(state))
             return False
         if not res.dispatch:
-            _log(f"   gate: {res.reason} — no hand-off")
+            _log(f"   gate: {res.reason} — no hand-off", kind="gate", **_state_ctx(state))
             return False
         return True
 
@@ -1240,7 +1263,7 @@ def _build_processor(
         file_backend = session_backend(project_dir)
         if file_backend is not None and file_backend != mode:
             _log(f"ERROR: .handoff-session.json was written by the {file_backend!r}"
-                 f" backend, but --mode {mode} was requested.")
+                 f" backend, but --mode {mode} was requested.", kind="error")
             _log(f"  Run 'tagteam watch --mode {file_backend}' (or just 'tagteam watch'"
                  " to auto-detect), or recreate the session with"
                  f" 'tagteam session start --backend {mode}'.")
@@ -1248,7 +1271,7 @@ def _build_processor(
         lead_session_id = get_session_id("lead", project_dir)
         reviewer_session_id = get_session_id("reviewer", project_dir)
         if not lead_session_id or not reviewer_session_id:
-            _log("ERROR: Could not find session IDs in .handoff-session.json")
+            _log("ERROR: Could not find session IDs in .handoff-session.json", kind="error")
             _log("  Run 'python -m tagteam session start' first.")
             return None
 
@@ -1328,7 +1351,7 @@ def _build_processor(
         )
         errors = engine.validate()
         if errors:
-            _log("ERROR: headless mode cannot start:")
+            _log("ERROR: headless mode cannot start:", kind="error")
             for e in errors:
                 _log(f"  - {e}")
             return None
@@ -1357,7 +1380,7 @@ def _build_processor(
 
 def _log_startup_banner(processor: _StateProcessor, interval: int) -> None:
     _log(f"Watching handoff-state.json"
-         f" (interval: {interval}s, mode: {processor.mode})")
+         f" (interval: {interval}s, mode: {processor.mode})", kind="start")
     _log(f"Lead: {processor.lead_name} | Reviewer: {processor.reviewer_name}")
     rm = getattr(processor, "resend_minutes", None)
     if rm is not None:
@@ -1419,9 +1442,13 @@ def _log_startup_banner(processor: _StateProcessor, interval: int) -> None:
 # OPT-IN (3.0 arc §2: flag-off behavior is identical to the previous
 # release): the file is written only when the project has opted into the
 # cockpit (`serve: {theme: cockpit}` in tagteam.yaml) or the watcher was
-# started with `--pidfile`. Otherwise `tagteam watch` writes nothing new;
+# started with `--pidfile`. Otherwise `tagteam watch` writes no pidfile;
 # the cockpit then falls back to the cwd-bound process scan / in-flight
 # identity (see `cockpit_api.watcher_status`).
+#
+# Phase 67 is the one exception to "a bare watch writes nothing new": every
+# watcher records its event log and heartbeat (`tagteam/watchlog.py`) into an
+# EXISTING `.tagteam/` — never creating it. The pidfile stays opt-in.
 # ---------------------------------------------------------------------------
 
 WATCHER_PIDFILE = "watcher.json"
@@ -1497,7 +1524,8 @@ class WatcherLock:
     per-user file keyed by the resolved project path
     (`~/.tagteam/watchers/<hash>.lock`, like the port leases). It lives outside
     the project because a bare `tagteam watch` must write no new file there
-    (3.0-arc constraint). The OS releases it when the process dies; the fd is
+    (3.0-arc constraint; since Phase 67 the watcher's event log and heartbeat
+    in an existing `.tagteam/` are the one approved exception). The OS releases it when the process dies; the fd is
     non-inheritable, so an agent turn the watcher spawns never keeps it. The
     file's JSON content only names the holder for refusal messages."""
 
@@ -1699,6 +1727,27 @@ def watch(
 def _watch_locked(*, interval, mode, lead_pane, reviewer_pane, confirm, timeout_minutes, project_dir,
                   max_retries, retry_delay, pre_send_delay, force_poll, turn_timeout_minutes,
                   tail_rounds, turn_retries, pidfile) -> bool:
+    # Phase 67: every watcher records its narration and a heartbeat into an
+    # existing `.tagteam/` (the pidfile below stays opt-in). Tied to this
+    # call, not to `keep_pidfile`.
+    global _SINK
+    from tagteam import watchlog
+    _SINK = watchlog.Sink(_pidfile_root(project_dir), mode, every_s=interval)
+    try:
+        return _watch_sinked(interval=interval, mode=mode, lead_pane=lead_pane, reviewer_pane=reviewer_pane,
+                             confirm=confirm, timeout_minutes=timeout_minutes, project_dir=project_dir,
+                             max_retries=max_retries, retry_delay=retry_delay, pre_send_delay=pre_send_delay,
+                             force_poll=force_poll, turn_timeout_minutes=turn_timeout_minutes,
+                             tail_rounds=tail_rounds, turn_retries=turn_retries, pidfile=pidfile)
+    finally:
+        sink, _SINK = _SINK, None
+        if sink is not None:
+            sink.close()
+
+
+def _watch_sinked(*, interval, mode, lead_pane, reviewer_pane, confirm, timeout_minutes, project_dir,
+                  max_retries, retry_delay, pre_send_delay, force_poll, turn_timeout_minutes,
+                  tail_rounds, turn_retries, pidfile) -> bool:
     processor = _build_processor(
         mode=mode,
         lead_pane=lead_pane,
@@ -1733,8 +1782,12 @@ def _watch_locked(*, interval, mode, lead_pane, reviewer_pane, confirm, timeout_
             from tagteam import watcher_events
             if watcher_events.is_available():
                 _log("[trigger] event-driven (watchdog) with 30s heartbeat")
+                if _SINK is not None:
+                    _SINK.every_s = 30.0
                 if _run_event_loop(processor, project_dir):
                     return True
+                if _SINK is not None:
+                    _SINK.every_s = float(interval)
                 # Event loop failed at startup — fall through to poll mode.
                 _log(f"[trigger] falling back to poll mode"
                      f" (interval={interval}s)")
@@ -1757,11 +1810,12 @@ def _run_poll_loop(processor: "_StateProcessor",
         while True:
             processor.try_repair()
             state = read_state(project_dir)
+            _beat(state)
             if state is not None:
                 processor.tick(state)
             time.sleep(interval)
     except KeyboardInterrupt:
-        _log("Watcher stopped.")
+        _log("Watcher stopped.", kind="stop")
 
 
 def _run_event_loop(processor: "_StateProcessor", project_dir: str) -> bool:
@@ -1783,17 +1837,18 @@ def _run_event_loop(processor: "_StateProcessor", project_dir: str) -> bool:
     def on_change():
         processor.try_repair()
         state = read_state(project_dir)
+        _beat(state)
         if state is not None:
             processor.tick(state)
 
     try:
         watcher_events.watch_with_events(state_path, on_change)
     except KeyboardInterrupt:
-        _log("Watcher stopped.")
+        _log("Watcher stopped.", kind="stop")
         return True
     except Exception as e:
         _log(f"[trigger] event mode failed:"
-             f" {type(e).__name__}: {e}")
+             f" {type(e).__name__}: {e}", kind="error")
         return False
     return True
 
@@ -1843,7 +1898,11 @@ def _auto_detect_mode(project_dir: str = ".") -> tuple[str, str | None]:
 
 
 def watch_command(args: list[str]) -> int:
-    """Parse CLI args and start the watcher."""
+    """Parse CLI args and start the watcher. `status` / `log` (Phase 67) are
+    reads of the watcher's heartbeat and event log and start nothing."""
+    if args and args[0] in ("status", "log"):
+        from tagteam import watchlog
+        return watchlog.command(args, _pidfile_root("."))
     interval = 10
     mode = None  # None = auto-detect; explicit --mode overrides.
     lead_pane = "tagteam:0.0"

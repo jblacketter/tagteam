@@ -585,6 +585,8 @@ class CockpitRouter:
         try:
             if path == "/api/now":
                 h._send_json(capi.now_payload(self.project_dir))
+            elif path == "/api/watcher/events":
+                h._send_json(capi.watcher_events_payload(self.project_dir, (q.get("n") or ["50"])[0]))
             elif path == "/api/interjections":
                 phase, ctype = self._cycle_from_qs(q)
                 h._send_json(capi.interjections_payload(self.project_dir, phase, ctype))

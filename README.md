@@ -315,6 +315,8 @@ tagteam state diagnose
 tagteam watch --mode notify
 tagteam watch --mode headless          # spawn each turn as a fresh agent process
 tagteam watch --pidfile                # keep .tagteam/watcher.json for the cockpit's liveness strip
+tagteam watch status                   # running? when it last looked, its last dispatch, paused?
+tagteam watch log [-n N] [--json]      # what the watcher did (every mode records it), newest last
 tagteam tail                           # follow the in-flight headless turn
 tagteam cycle rounds --phase P --type plan --tail 3
 tagteam pause --reason "..." / tagteam resume / tagteam cancel-turn
