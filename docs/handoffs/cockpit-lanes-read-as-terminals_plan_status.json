@@ -1,0 +1,16 @@
+{
+  "state": "in-progress",
+  "ready_for": "lead",
+  "round": 1,
+  "phase": "cockpit-lanes-read-as-terminals",
+  "type": "plan",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-21",
+  "baseline": {
+    "sha": "bcfdb562198541ee53efad2b1c718d025198cf9c",
+    "dirty_paths": [],
+    "captured_at": "2026-09-21T14:19:54.676553+00:00",
+    "source": "plan-init"
+  }
+}
