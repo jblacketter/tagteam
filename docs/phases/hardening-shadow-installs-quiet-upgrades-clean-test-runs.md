@@ -3,8 +3,29 @@
 ## Status
 - [x] Planning: approved round 1 (2026-09-20) at `79de8a1`
 - [x] Implementation: branch `phase/hardening-shadow-installs-quiet-upgrades-clean-test-runs`
-- [ ] Implementation Review
-- [ ] Complete
+- [x] Implementation Review: approved round 2 (2026-09-20) at `df0db7f`; gate 2,142 passed, 5 skipped. Round 1: two reviewer findings in `installs.py` (duplicate `Version` headers counted only when valid; METADATA read without the guarded reader).
+- [ ] Complete: PR open, merge pending
+
+## Closeout
+```
+Phase report: hardening-shadow-installs-quiet-upgrades-clean-test-runs — plan approved r1 · impl approved r2
+  plan   1 round · 0 change requests · 0 bounces
+  impl   2 rounds · 1 change request · 0 bounces · gate 2 runs, 15m 24s
+  time   start→approve 26m 41s · implementation before first submit 5m 19s
+         lead 2m 33s (1 span, 2 unknown) · reviewer 3m 24s (3 spans) · gate 15m 25s (2 spans)  (elapsed; includes relay wait)
+  usage  no usage rows stored under this phase
+  turns  matched 0 of 6 · no token data 0 · unmatched 4 · unknown 2
+```
+Criterion 5: after both full-suite gate runs `git status --short --ignored`
+showed no `build/`, `dist/` or `tagteam.egg-info/` (the reviewer confirmed the
+same). The round-1 fixes added `tagteam/safe_read.py` — doctor's guarded
+bounded reader moved verbatim so `installs` shares it without importing
+`diagnostics`.
+
+**On release (3.14.3):** no project files change; note that `tagteam doctor` /
+`tagteam state` now report a tagteam in the project's `.venv`, and that an
+upgrade which changes no framework file no longer rewrites
+`tagteam-manifest.json`.
 
 ## Summary
 Four small, independent fixes, all observed on 2026-09-20 and logged in

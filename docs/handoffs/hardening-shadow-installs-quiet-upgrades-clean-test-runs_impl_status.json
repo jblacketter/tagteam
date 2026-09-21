@@ -1,0 +1,25 @@
+{
+  "state": "approved",
+  "ready_for": null,
+  "round": 2,
+  "phase": "hardening-shadow-installs-quiet-upgrades-clean-test-runs",
+  "type": "impl",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-21",
+  "baseline": {
+    "sha": "79de8a1d7a51dd1006319ee8a2bb8726a6d63811",
+    "dirty_paths": [],
+    "captured_at": "2026-09-21T02:22:06.546409+00:00",
+    "source": "copied-from-plan"
+  },
+  "impl_boundary": {
+    "sha": "79de8a1d7a51dd1006319ee8a2bb8726a6d63811",
+    "dirty": {
+      "docs/handoffs/hardening-shadow-installs-quiet-upgrades-clean-test-runs_plan_rounds.jsonl": "0d7220ea86923b9643f6bf1548158f0892e108ad88ea973d9df930da1c72bc63",
+      "docs/handoffs/hardening-shadow-installs-quiet-upgrades-clean-test-runs_plan_status.json": "9e719cc19d6fee03de08b49b6b46be65257865f26548bcf92c43e8f30c21dce4"
+    },
+    "captured_at": "2026-09-21T02:23:10.631011+00:00",
+    "source": "copied-from-plan"
+  }
+}
