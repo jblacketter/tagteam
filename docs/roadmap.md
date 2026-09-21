@@ -42,11 +42,11 @@ the top. Each phase is engine + CLI first, cockpit surface second. tagteam stays
 - **Depends on:** Phase 68
 
 ### Phase 68c: Wait-child test waits for its child
-- **Status:** In review — impl approved round 1 (2026-09-21); gate: 2,275 passed, 5 skipped at `638558e`. PR open, merge pending. See `docs/phases/wait-child-test-waits-for-its-child.md`.
+- **Status:** ✅ Complete — impl approved round 1 (2026-09-21); gate: 2,275 passed, 5 skipped at `638558e`. PR #54 merged 2026-09-21 (rebase). See `docs/phases/wait-child-test-waits-for-its-child.md`.
 - **Description:** Issue 11. `test_wait_child_terminates_and_reports_a_child_still_running` failed once in the 3.14.7 release-tree suite (load average ~48) and passed on the rerun. It gives a spawned interpreter 0.5 s and then expects its output in the failure dump; a starved interpreter has not printed yet. The child now signals — with a marker file written after its flush — that it has printed, and the clock starts then. Test only; no product code.
 
 ### Phase 68b: Cockpit lanes read as terminals
-- **Status:** In review — plan approved round 2, impl approved round 3 (2026-09-21); gate: 2,295 passed, 5 skipped at `15eefdf`. PR open, merge pending. See `docs/phases/cockpit-lanes-read-as-terminals.md`. Split out of Phase 68 so each half is reviewable.
+- **Status:** ✅ Complete — plan approved round 2, impl approved round 3 (2026-09-21); gate: 2,295 passed, 5 skipped at `15eefdf`. PR #55 merged 2026-09-21 (rebase). See `docs/phases/cockpit-lanes-read-as-terminals.md`. Split out of Phase 68 so each half is reviewable.
 - **Description:** The lead lane is chat bubbles, the reviewer lane a card with a ~16-line log box: two looks, neither the terminal tab it replaces. Both lanes become one terminal-style stream per turn — the rendered turn log (`→ Bash: …` / `← …`), live for the running turn, newest turn open and earlier ones collapsed — scoped to the current cycle in **both** lanes (the lead lane has no cycle filter today, so it shows Phase 52 cards under the current cycle's header: the open backlog item). Gate and panel runs leave the reviewer's lane for a strip between the lanes, so a `BOUNCED` no longer reads as the reviewer's. The lead lane keeps the only composer; a chat turn renders in the same stream style. Also found while planning: the Needs-you "process disappeared — Cancel turn" card and the lanes' `gone` state still test `pid_alive === false`, which is true for the whole of every pre-check and the start of every turn — they move to `inflight.liveness` (Phase 68), and the lanes and Needs-you take their story from `headline` so a stalled watcher is not contradicted on the same page.
 - **Depends on:** Phase 68
 

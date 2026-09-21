@@ -4,7 +4,7 @@
 - [x] Planning: approved round 2 (2026-09-21) at `1988723`
 - [x] Implementation: branch `phase/cockpit-lanes-read-as-terminals`
 - [x] Implementation Review: approved round 3 (2026-09-21) at `15eefdf`; gate 2,295 passed, 5 skipped
-- [ ] Complete: PR open; merge is the arbiter's
+- [x] Complete: PR #55 merged 2026-09-21 (rebase).
 
 ## Closeout
 ```
