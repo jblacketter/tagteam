@@ -134,7 +134,18 @@ change — needs a cycle.
 - `northstar-test-automation`: `duplicate phase number 7` and `8` — two phases
   share each number. Not touched (arbiter: leave that project for now).
 
-### 10. Flaky under load: `test_start_watcher_reports_refusal_as_already_running` — DIAGNOSABLE since Phase 65 (cause still unknown)
+### 10. Flaky under load: `test_start_watcher_reports_refusal_as_already_running` — FIXED during Phase 67 (cause found: the test raced itself)
+**Cause (2026-09-20, Phase 67 impl round 2 gate).** The failure recurred and, thanks to Phase 65's
+`_child_output`, explained itself: the spawned watcher had exited 1 with
+`refused: another watcher is already running for this project (pid <pytest's pid>, probe, …)`.
+The test waited with `_lock_free()`, which *acquires* the exclusive lock as mode `probe` every 0.1 s
+(holding it across a `ps` call in `procs.identity`); the child makes one non-blocking attempt, and when it
+landed inside a probe it was refused and never retried. Reproduced deterministically: hold the lock as
+`probe`, start `tagteam watch` → exit 1 with that message. Not a product defect — a second watcher *should*
+be refused while the lock is held. Fix is test-only: that wait now reads the lock's record
+(`_lock_held_by(root, pid)`) and takes no lock. The other `_lock_free` uses run when nothing is racing.
+
+Original report:
 2026-09-20, Phase 64 impl round 2 gate: 1 failed / 2,111 passed —
 `tests/test_watcher_lock.py:376`, `assert _wait(lambda: not _lock_free(project))`:
 the externally spawned `tagteam watch --mode notify` had not taken the project

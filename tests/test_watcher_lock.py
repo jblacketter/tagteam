@@ -114,6 +114,19 @@ def _lock_free(root: Path) -> bool:
     return True
 
 
+def _lock_held_by(root: Path, pid: int) -> bool:
+    """Has `pid` taken the project's watcher lock? Read from the lock's own
+    record, WITHOUT acquiring it. `_lock_free` takes the exclusive lock for a
+    moment (and `procs.identity` runs a `ps` inside that moment); polled while
+    a spawned watcher makes its single non-blocking attempt, the probe can win
+    and the child is refused — `(pid <this test>, probe)`, exit 1. That was
+    issue 10's flake (seen in two gate runs on 2026-09-20; the second one said
+    so, thanks to `_child_output`). Use this while a child is starting;
+    `_lock_free` is fine once nothing is racing for the lock."""
+    rec = W.read_watcher_lock(root) or {}
+    return rec.get("pid") == pid and rec.get("mode") != "probe"
+
+
 class _NoBuild:
     def __init__(self):
         self.called = False
@@ -416,7 +429,7 @@ class TestServeProcessExit:
 def test_start_watcher_reports_refusal_as_already_running(project):
     external = _start_watch(project, "--mode", "notify")    # no pidfile: only the scan and the lock see it
     try:
-        assert _wait_child(external, lambda: not _lock_free(project))
+        assert _wait_child(external, lambda: _lock_held_by(project, external.pid))
         real = capi.watcher_status
         try:
             capi.watcher_status = lambda *a, **k: {"running": False}   # the pre-spawn check misses it
