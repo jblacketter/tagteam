@@ -3,8 +3,19 @@
 ## Status
 - [x] Planning: approved round 1 (2026-09-20) at `61765be`
 - [x] Implementation: branch `phase/version-from-the-source-tree` (stacked on `phase/roadmap-placeholders-are-not-phases` until PR #47 merges; to be rebased onto `main` then)
-- [ ] Implementation Review
-- [ ] Complete
+- [x] Implementation Review: approved round 3 (2026-09-20) at `57088cf`; gate 2,112 passed, 5 skipped. Round 1: two reviewer findings in the narrow reader (header comment under DOTALL; indented duplicate keys). Round 2: gate bounce on an unrelated watcher-lock timing test, not reproduced, cause not established (issue 10).
+- [ ] Complete: PR open, merge pending (after PR #47)
+
+## Closeout
+```
+Phase report: version-from-the-source-tree — plan approved r1 · impl approved r3
+  plan   1 round · 0 change requests · 0 bounces
+  impl   3 rounds · 1 change request · 1 bounce · gate 3 runs, 23m 17s
+  time   start→approve 32m 55s · implementation before first submit 2m 59s
+         lead 2m 12s (2 spans, 2 unknown) · reviewer 4m 26s (3 spans) · gate 23m 18s (3 spans)  (elapsed; includes relay wait)
+  usage  no usage rows stored under this phase
+  turns  matched 0 of 7 · no token data 0 · unmatched 5 · unknown 2
+```
 
 ## Summary
 `tagteam.__version__` is `importlib.metadata.version("tagteam")`. For an
