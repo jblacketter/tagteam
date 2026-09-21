@@ -1,0 +1,25 @@
+{
+  "state": "in-progress",
+  "ready_for": "lead",
+  "round": 3,
+  "phase": "watcher-event-log-and-heartbeat",
+  "type": "impl",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-21",
+  "baseline": {
+    "sha": "7bc098675547eca29d530ac437cd991bc5296bb4",
+    "dirty_paths": [],
+    "captured_at": "2026-09-21T05:05:50.453741+00:00",
+    "source": "copied-from-plan"
+  },
+  "impl_boundary": {
+    "sha": "dcf4f2e399868ad927023bb2ce7be02e50e07695",
+    "dirty": {
+      "docs/handoffs/watcher-event-log-and-heartbeat_plan_rounds.jsonl": "8db93de4a908dd05c94bf38406f935ab1be9775425c9cb1f82d9ccb8760e2d89",
+      "docs/handoffs/watcher-event-log-and-heartbeat_plan_status.json": "ff6fb74e584e9ad4b041df55f97955bdd40780c517c40eda57697780c0638f55"
+    },
+    "captured_at": "2026-09-21T05:09:35.695215+00:00",
+    "source": "copied-from-plan"
+  }
+}

@@ -226,9 +226,13 @@ class TestSigterm:
             assert _wait_child(w, lambda: W.read_pidfile(project))
             os.kill(w.pid, signal.SIGTERM)
             assert w.wait(15) == 0
-            # Poll mode logs "Watcher stopped."; the watchdog event loop (installed in CI via
-            # `.[event]`) returns silently. The contract is the clean exit, not the log line.
+            # The contract is the clean exit. Since Phase 67 both loops also record one `stop`
+            # (the watchdog event loop, installed in CI via `.[event]`, used to return silently).
             assert W.read_pidfile(project) is None and _lock_free(project)
+            from tagteam import watchlog
+            events = watchlog.read(project, 500)
+            assert [e["kind"] for e in events].count("stop") == 1 and events[-1]["kind"] == "stop", events[-3:]
+            assert watchlog.read_beat(project) is None
         finally:
             _reap(w)
 

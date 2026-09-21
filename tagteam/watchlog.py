@@ -253,12 +253,17 @@ def read(root: str | Path, n: int = 50) -> list[dict]:
     return live[-n:]
 
 
-def last_event(root: str | Path, kinds: tuple[str, ...] | None = None, scan: int = 400) -> dict | None:
-    """Newest event that is not ``info`` (or whose kind is in ``kinds``)."""
-    for rec in reversed(read(root, scan)):
-        k = rec.get("kind")
-        if (kinds is None and k != "info") or (kinds is not None and k in kinds):
-            return rec
+def last_event(root: str | Path, kinds: tuple[str, ...] | None = None) -> dict | None:
+    """Newest retained event that is not ``info`` (or whose kind is in
+    ``kinds``): the live file first, then the rotated one. Bounded by the
+    files' own byte cap, not by a record count — chatter must not be able to
+    hide a dispatch that is still on disk."""
+    root = Path(root)
+    for rel in (EVENTS_REL, ROTATED_REL):
+        for rec in reversed(_records(root, rel)):
+            k = rec.get("kind")
+            if (kinds is None and k != "info") or (kinds is not None and k in kinds):
+                return rec
     return None
 
 
