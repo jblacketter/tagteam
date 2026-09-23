@@ -33,7 +33,7 @@ the top. Each phase is engine + CLI first, cockpit surface second. tagteam stays
 - **Depends on:** Phase 70, Phase 68
 
 ### Phase 70: Standing orders
-- **Status:** ✅ Approved — plan approved round 3, impl approved round 3 (2026-09-23); gate: 2,354 passed, 5 skipped at `c8e5640`. PR open. See `docs/phases/standing-orders.md`.
+- **Status:** ✅ Approved — plan approved round 3, impl approved round 3 (2026-09-23); gate: 2,354 passed, 5 skipped at `c8e5640`. PR #56 open. See `docs/phases/standing-orders.md`.
 - **Description:** The arbiter's run-level instructions live in chat today ("go to the end of all phases unless you have a question", "commit at phase end but hold the PR for my approval" / "open the PR when you are done"). Make them durable: per-project standing orders with a per-run override, delivered to both agents in every turn (headless prompt, `cycle rounds`), like an interjection that is not consumed. Two kinds, kept distinct: **enforced** — when the run stops for the arbiter (after each phase · at the end of the roadmap · only on questions), a switch over the existing single-phase / full-roadmap machinery; **advisory** — git and PR conduct, which tagteam delivers but cannot enforce (it runs no git). Engine + CLI only.
 
 ### Phase 69: Cockpit roadmap board
