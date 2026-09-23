@@ -444,6 +444,8 @@ Arbiter controls (any mode):
   tagteam pause --reason "reviewing by hand"    tagteam resume
   tagteam interject "prefer the smaller diff"   tagteam cancel-turn
   tagteam usage
+Standing orders (every turn; `stop` is enforced, notes are advisory):
+  tagteam orders stop roadmap [--run]           tagteam orders add "hold the PR for my approval"
 Escalations (opt-in briefer: `briefer: {enabled: true}` in tagteam.yaml):
   tagteam brief                                 tagteam rule approve --content "..."
 Gatekeeper (opt-in: `gatekeeper: {enabled: true, tests: {command: "..."}}`; `on_submit: true` gates from `cycle add`):
@@ -489,6 +491,7 @@ READ_ONLY_COMMANDS: dict[str, "callable"] = {
     "doctor": lambda rest: True,
     "report": lambda rest: True,
     "watch": _sub_in("status", "log"),   # Phase 67: the heartbeat / event-log reads only
+    "orders": lambda rest: not rest or rest == ["--json"] or rest[0] in ("-h", "--help", "help"),  # Phase 70
 }
 # Never a helper's business: parents, humans and installers only. Refused with
 # any arguments — `--help` included (see `read_only_refusal`).
@@ -518,7 +521,7 @@ def _read_only_summary() -> list[tuple[str, tuple[str, ...] | None]]:
             ("panel", ("status", "lenses", "list")), ("roadmap", ("queue", "phases", "check", "graph", "ready")),
             ("interject --list", None), ("brief", None), ("hub list", None),
             ("registry list", None), ("usage", None), ("contract", None), ("tail", None), ("hook", None),
-            ("doctor", None), ("report", None), ("watch", ("status", "log"))]
+            ("doctor", None), ("report", None), ("watch", ("status", "log")), ("orders [--json]", None)]
 
 
 def main() -> int:
@@ -596,6 +599,10 @@ def _dispatch() -> int:
         from tagteam.controls import interject_command
 
         return interject_command(sys.argv[2:])
+    if command == "orders":
+        from tagteam.orders import orders_command
+
+        return orders_command(sys.argv[2:])
     if command == "usage":
         from tagteam.usage import usage_command
 

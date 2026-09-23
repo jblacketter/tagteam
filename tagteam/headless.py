@@ -910,12 +910,23 @@ def render_change_surface(scope: dict | None) -> str:
     return f"{CHANGE_SURFACE_HEADER} (baseline {base}) ===\n{body}\n\n"
 
 
+def _standing_orders_block(state: dict, project_root: str | Path) -> str:
+    """Phase 70: the STANDING ORDERS block ('' without explicit orders).
+    A failure to read orders must never cost the turn."""
+    try:
+        from tagteam import orders as _orders
+        return _orders.render_block(_orders.effective(state, project_root))
+    except Exception:
+        return ""
+
+
 def compose_prompt(*, role: str, agent_name: str, project_root: str | Path,
                    state: dict, skill_text: str, tail_entries: list[dict],
                    tail_n: int, interjections: list[dict] | None = None,
                    project_context: tuple[str, str] | None = None,
                    change_surface: dict | None = None,
-                   skill_source: str = "project") -> str:
+                   skill_source: str = "project",
+                   orders_block: str = "") -> str:
     """Build the bounded turn context sent on stdin."""
     command = state.get("command") or STANDARD_TURN_COMMAND
     start = parse_start_command(command)
@@ -935,6 +946,7 @@ def compose_prompt(*, role: str, agent_name: str, project_root: str | Path,
         f"init). When it succeeds, stop.\n"
         f"{boundary}\n"
         f"{inter}"
+        f"{orders_block}"
         f"{ctx}"
         f"{surface}"
         f"=== COMMAND ===\n{command}\n\n"
@@ -1796,7 +1808,8 @@ class HeadlessEngine:
                                 tail_n=self.tail_n, interjections=notes,
                                 project_context=project_context,
                                 skill_source=self.skill_source,
-                                change_surface=change_surface)
+                                change_surface=change_surface,
+                                orders_block=_standing_orders_block(state, self.project_root))
 
         if self.confirm:
             try:

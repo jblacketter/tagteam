@@ -35,6 +35,8 @@ Unified command for the AI handoff workflow. Reads your role and current state, 
 
 **Arbiter interjections.** The human arbiter can leave notes with `tagteam interject`. In a headless turn they appear in your prompt under `=== ARBITER INTERJECTIONS (unconsumed) ===`; interactively they appear as an `interjections` list on the round in `tagteam cycle rounds` output. Treat them as authoritative instructions for this cycle (they may already have been addressed in earlier rounds — verify before acting), and mention in your submission how you handled them.
 
+**Standing orders.** The arbiter's run-level instructions (`tagteam orders`) come with every turn: in a headless prompt under `=== STANDING ORDERS ===`, and interactively on stderr above `tagteam cycle rounds` output. There are two kinds. **Enforced:** `stop` (`phase` = the run stops for the arbiter after each phase's implementation is approved; `roadmap` = it goes on to the next ready roadmap phase). The engine applies it when the impl approval is recorded, by setting `run_mode`/`roadmap` in the state, so act on the state and don't second-guess it. Escalations and questions stop a run either way. **Advisory:** numbered notes such as "commit at phase end but hold the PR for my approval". Tagteam delivers these but cannot enforce them, so following them is up to you. A note marked *this run* wins over a project note it conflicts with. Mention in your submission how you handled any advisory note that applied.
+
 **Step 2 — CRITICAL: You MUST begin every `/tagteam:handoff` response with this status banner:**
 
 ```
@@ -59,7 +61,7 @@ If there is no state file, show: `Phase: — | Type: — | Round: — | Turn: �
   - If `result == "roadmap-complete"`: "Roadmap complete — all phases finished!"
   - If plan → "Plan approved! Implement, then `/tagteam:handoff start [phase] impl`."
   - If impl and `run_mode == "full-roadmap"` → "Implementation approved! Watcher will auto-advance to next phase." (The watcher sets `turn: lead` for the next phase — lead runs `/tagteam:handoff start [next-phase]`.)
-  - If impl (single-phase) → "Implementation approved! Start next phase."
+  - If impl (single-phase) → "Implementation approved! Start next phase." (If standing orders are in force, `tagteam orders` shows what the approval did: the run stopped, or it was converted to a roadmap run, in which case `run_mode` is `full-roadmap` and the bullet above applies.)
 - **Escalated:** "Escalated to human arbiter." (If `roadmap.pause_reason` is set instead — `blocked: …` / `roadmap invalid: …` / `stale queue: …` — this is a full-roadmap pause, not a ruling: the arbiter unblocks and runs `tagteam roadmap resume`.) The arbiter reads `tagteam brief` (a decision brief, if the escalation briefer is enabled) and rules with `tagteam rule approve|request-changes --content "…"` — or from the cockpit's Needs-you card (`tagteam serve --theme cockpit`), which runs the same command.
 - **Needs-human:** "Paused for human input." The arbiter answers with `tagteam rule answer --to lead|reviewer --content "…"` (the answer arrives as an interjection and the cycle is re-armed for that role). Do not hand-edit cycle files.
 - **Aborted:** "Cycle was aborted. See cycle file for reason."

@@ -700,6 +700,13 @@ def state_command(args: list[str]) -> int:
         print(describe_roles(root))
         from tagteam.framework import version_line
         print(f"Framework:  {version_line(root)}")
+        from tagteam import orders as _orders
+        try:
+            line = _orders.state_line(state, root, _orders.current_decision(state, root))
+        except Exception:
+            line = None
+        if line:
+            print(f"Orders:     {line}")
         return 0
 
     subcmd = args[0]

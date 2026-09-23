@@ -31,6 +31,7 @@ _TAGTEAM_ARTIFACT_FILES = frozenset({
     "handoff-state.json",
     ".handoff-state.tmp",
     "handoff-diagnostics.jsonl",
+    "tagteam-orders.json",        # Phase 70: the arbiter's standing orders are not implementation work
 })
 _TAGTEAM_ARTIFACT_PREFIXES = ("docs/handoffs/",)
 
@@ -584,6 +585,20 @@ def add_round(phase: str, cycle_type: str, role: str, action: str,
             if _ib is not None:                       # not a git repo → no key at all
                 status["impl_boundary"] = _ib
 
+        # Phase 70: a fresh impl APPROVE decides, ONCE, what the standing
+        # orders make of the run, and records it on the cycle status. Every
+        # derive (this one, and any later `state sync`) applies the recorded
+        # decision and never re-resolves. No explicit orders → no key at all.
+        fresh_decision = False
+        if cycle_type == "impl" and action == "APPROVE" and status.get("state") == "approved":
+            from tagteam import orders as _orders
+            from tagteam.state import read_state as _read_state
+            _dec = _orders.decide(_read_state(project_dir) or {}, phase, project_dir)
+            status.pop("run_decision", None)
+            if _dec is not None:
+                status["run_decision"] = _dec
+                fresh_decision = True
+
         sp = _status_path(phase, cycle_type, project_dir)
         sp.write_text(json.dumps(status, indent=2) + "\n", encoding="utf-8")
 
@@ -600,12 +615,17 @@ def add_round(phase: str, cycle_type: str, role: str, action: str,
         _derive_top_level_state(
             phase, cycle_type, project_dir,
             updated_by=resolved_updated_by,
+            fresh_decision=fresh_decision,
         )
 
         # Shadow DB write + divergence check.
         _shadow_db_after_cycle_write(project_dir, phase, cycle_type)
         _auto_export_cycle_md(project_dir, phase, cycle_type)
 
+    if fresh_decision:
+        from tagteam import orders as _orders
+        print(f"note: standing orders: {_orders.describe_decision(status['run_decision'])}",
+              file=sys.stderr)
     return status
 
 
@@ -676,7 +696,8 @@ _CYCLE_STATE_TO_TOP_LEVEL = {
 
 def _derive_top_level_state(phase: str, cycle_type: str,
                             project_dir: str,
-                            updated_by: str | None = None) -> dict | None:
+                            updated_by: str | None = None,
+                            fresh_decision: bool = False) -> dict | None:
     """Rewrite handoff-state.json to reflect the given cycle's current status.
 
     Per-cycle status is the source of truth. This reads the cycle's
@@ -737,6 +758,21 @@ def _derive_top_level_state(phase: str, cycle_type: str,
 
     if "run_mode" not in updates:
         updates["run_mode"] = "single-phase"
+
+    # Phase 70: apply the RECORDED standing-orders decision of an approved
+    # impl cycle (never re-resolve: `state sync` must not re-decide), and
+    # carry the run override through the replace-write. Only the fresh
+    # approval write (`fresh_decision`, passed by `add_round` alone) may
+    # materialise a converted run's queue or drop the override.
+    decision = cycle_status.get("run_decision") if (cycle_type == "impl" and cstate == "approved") else None
+    if decision is not None:
+        from tagteam import orders as _orders
+        _orders.apply_decision(updates, decision, fresh=fresh_decision)
+        keep_orders = _orders.keep_run_override(decision, fresh=fresh_decision)
+    else:
+        keep_orders = True
+    if keep_orders and "orders" in current_state:
+        updates["orders"] = current_state["orders"]
 
     return update_state(updates, project_dir, replace=True)
 
@@ -1482,6 +1518,7 @@ def _cli_rounds(args: list[str]) -> int:
             return 1
 
     entries = tail_rounds(phase, cycle_type, tail_n)
+    _print_orders_block()
     if entries:
         for e in entries:
             print(json.dumps(e))
@@ -1489,6 +1526,21 @@ def _cli_rounds(args: list[str]) -> int:
 
     print(f"No rounds found for: {phase}_{cycle_type}")
     return 1
+
+
+def _print_orders_block() -> None:
+    """Phase 70: the STANDING ORDERS block on stderr, so an interactive agent
+    reading `cycle rounds` sees it and stdout stays JSON lines. Silent
+    without explicit orders; never fails the read."""
+    try:
+        from tagteam import orders as _orders
+        from tagteam.state import read_state
+        root = _resolve(".")
+        block = _orders.render_block(_orders.effective(read_state(root) or {}, root))
+    except Exception:
+        return
+    if block:
+        sys.stderr.write(block)
 
 
 def _with_interjections(md: str, phase: str, cycle_type: str,

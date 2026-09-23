@@ -116,6 +116,15 @@ any other watcher running, saying so.
 ## Steering
 
 - `tagteam interject "note" [--to lead|reviewer]` — a note the next turn must honor.
+- `tagteam orders` — standing orders, delivered to both agents in every turn
+  (like an interjection that is never consumed). Project orders live in a
+  committed `tagteam-orders.json`; `--run` sets an override for the current
+  run, dropped when that run ends. **Enforced:** `tagteam orders stop
+  phase|roadmap` decides whether the run stops for you after each phase or goes
+  on to the next ready roadmap phase. The engine applies it when an
+  implementation is approved. **Advisory:** `tagteam orders add "hold the PR
+  for my approval"` notes are delivered but not enforced, because tagteam runs
+  no git. Without orders, nothing changes.
 - `tagteam pause --reason "…"` / `tagteam resume` — hold dispatch without losing state.
 - `tagteam cancel-turn` — abandon an in-flight headless turn.
 - `tagteam serve` — the cockpit: talk to the lead, launch, watch, rule.

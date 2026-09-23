@@ -518,7 +518,9 @@ def _select_next_phase(queue: list, idx: int, completed: list, seq: int,
             "result": "roadmap-complete",
             "roadmap": roadmap_update,
         }
-        new_state = update_state(updates, project_dir, expected_seq=seq)
+        # Phase 70: the run is over — its standing-orders override ends with it.
+        new_state = update_state(updates, project_dir, expected_seq=seq,
+                                 clear_keys=["orders"])
         if new_state is None:
             _log("   SKIP: state changed since approval detected (seq mismatch)")
             return None
