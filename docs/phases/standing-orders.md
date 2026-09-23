@@ -4,7 +4,7 @@
 - [x] Planning: approved round 3 (2026-09-23) at `fd4fda3`
 - [x] Implementation: branch `phase-70-standing-orders`
 - [x] Implementation Review: approved round 3 (2026-09-23) at `c8e5640`; gate 2,354 passed, 5 skipped
-- [ ] Complete: PR #56 open, awaiting the arbiter's merge.
+- [x] Complete: PR #56 merged 2026-09-23 (rebase).
 
 ## Closeout
 ```
