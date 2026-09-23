@@ -195,6 +195,14 @@ limited to one line of 500 characters, and the server enforces that.
    advisory notes, for the project or for this run, from presets or free
    text. Each write shows its exact CLI line first, and `tagteam orders`
    agrees with the page afterwards (checked in the real page).
+4. A malformed `tagteam-orders.json` or an invalid `tagteam.yaml` is shown as
+   a warning, with the values the engine actually uses. The page still loads.
+5. `tagteam.yaml` rows are read-only and name the key to change. Phase 71b
+   is on the roadmap.
+6. No existing tab, lane or bar changes behaviour. The existing cockpit tests
+   pass.
+7. It has been looked at in a real browser, and the states that were only
+   table-tested are listed plainly.
 8. Engine rows match the runtime outcome, pinned by API tests that compare
    each row with the resolver the engine uses:
    - gatekeeper `enabled: true` with an invalid `scope` shows the gate OFF,
@@ -225,14 +233,6 @@ limited to one line of 500 characters, and the server enforces that.
     page says it is still using its earlier settings. That is tested with a
     heartbeat fixture, and the page does not claim to know the watcher's
     settings.
-4. A malformed `tagteam-orders.json` or an invalid `tagteam.yaml` is shown as
-   a warning, with the values the engine actually uses. The page still loads.
-5. `tagteam.yaml` rows are read-only and name the key to change. Phase 71b
-   is on the roadmap.
-6. No existing tab, lane or bar changes behaviour. The existing cockpit tests
-   pass.
-7. It has been looked at in a real browser, and the states that were only
-   table-tested are listed plainly.
 
 ## Risks and open questions for the reviewer
 - **The split (71 / 71b).** Editing `tagteam.yaml` is the riskier half and
