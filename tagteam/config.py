@@ -636,6 +636,20 @@ def validate_watcher_config(config: dict) -> list[str]:
     return errors
 
 
+def resolve_watcher(config: dict | None) -> tuple[int, list[str]]:
+    """Phase 71: the re-send interval a watcher actually uses, and why.
+    Any problem with the block → the default, as `_watch_locked` has always
+    done (it now calls this, so the cockpit's Rules tab cannot drift from
+    it). Never raises."""
+    try:
+        problems = validate_watcher_config(config or {})
+        if problems:
+            return WATCHER_DEFAULT_RESEND_MINUTES, problems
+        return get_watcher_spec(config or {})["resend_minutes"], []
+    except Exception as e:
+        return WATCHER_DEFAULT_RESEND_MINUTES, [f"watcher config unreadable: {e}"]
+
+
 def get_watcher_spec(config: dict) -> dict:
     """{"resend_minutes"} with defaults applied. Callers validate first."""
     block = config.get("watcher") if isinstance(config, dict) else None

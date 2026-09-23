@@ -420,3 +420,38 @@ table.u th { color: var(--text-dim); font-weight: 500; }
 .lead-msg details.activity { margin-top: 6px; border: 1px solid var(--line); border-radius: 6px; }
 .lead-msg details.activity summary { font-size: 12px; padding: 4px 8px; }
 .lead-msg details.activity .live { max-height: 16em; padding: 4px 8px; }
+
+/* ---- Phase 71: Rules tab — enforced and advisory are apart by heading, marker, border style and words ---- */
+.rules-group { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 12px; background: var(--bg-2); }
+.rules-group h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.rules-group .rg-mark { font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em; padding: 1px 6px; border-radius: 4px; }
+.rules-enforced { border-left: 4px solid var(--accent); }
+.rules-enforced .rg-mark { background: var(--accent); color: var(--bg); }
+.rules-advisory { border-left: 4px dashed var(--text-dim); }
+.rules-advisory .rg-mark { border: 1px dashed var(--text-dim); color: var(--text-dim); }
+.rule-row { display: grid; grid-template-columns: minmax(140px, 200px) 1fr; gap: 4px 12px; padding: 7px 0; border-top: 1px solid var(--line); }
+.rule-row .r-label { font-weight: 600; font-size: 13px; }
+.rule-row .r-value { font-family: var(--mono); font-size: 12px; color: var(--text-dim); }
+.rule-row .r-value.off { color: var(--muted); }
+.rule-row .r-text { font-size: 13px; overflow-wrap: anywhere; }
+.rule-row .r-meta { font-size: 11.5px; color: var(--muted); overflow-wrap: anywhere; }
+.rules-stop { padding-bottom: 8px; }
+.rules-stop .r-now { font-size: 13.5px; margin-bottom: 6px; }
+.rules-scope { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin: 4px 0 6px; }
+.rules-scope button { background: transparent; border: 0; color: var(--text-dim); padding: 3px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+.rules-scope button[aria-pressed="true"] { background: var(--bg-3); color: var(--text); font-weight: 600; }
+.rules-radio { display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
+.rules-radio label { display: flex; gap: 6px; align-items: baseline; cursor: pointer; }
+.rules-radio .rec { font-size: 11px; color: var(--ok); }
+.rules-shadow { font-size: 12px; color: var(--warn); margin-top: 4px; }
+.rule-note { display: flex; gap: 8px; align-items: baseline; padding: 5px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.rule-note .n-scope { font-size: 11px; color: var(--text-dim); border: 1px dashed var(--line); border-radius: 4px; padding: 0 5px; white-space: nowrap; }
+.rule-note .n-text { flex: 1; overflow-wrap: anywhere; }
+.rules-add { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.rules-add .rules-scope-line { align-self: flex-start; }
+.rules-scope-line { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-dim); }
+.rules-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.rules-chips button { background: var(--bg-3); border: 1px dashed var(--line); color: var(--text); border-radius: 12px; padding: 3px 10px; font: inherit; font-size: 12px; cursor: pointer; text-align: left; }
+.rules-free { display: flex; gap: 6px; }
+.rules-free input { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--line); color: var(--text); border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 13px; }
+@media (max-width: 640px) { .rule-row { grid-template-columns: 1fr; } }

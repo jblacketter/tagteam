@@ -1,0 +1,25 @@
+{
+  "state": "approved",
+  "ready_for": null,
+  "round": 2,
+  "phase": "cockpit-rules-tab",
+  "type": "plan",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-23",
+  "baseline": {
+    "sha": "5c3c5d0b3af1b34b0da26b243a12345d0c211c0c",
+    "dirty_paths": [],
+    "captured_at": "2026-09-23T23:19:33.412672+00:00",
+    "source": "plan-init"
+  },
+  "impl_boundary": {
+    "sha": "a7ee220b2b58231b594a352aaaf60f09120c242e",
+    "dirty": {
+      "docs/handoffs/cockpit-rules-tab_plan_rounds.jsonl": "fcfad01be3e899d8e14bac90358a29442781cff9363b3f6f26c63cbc95f4020e",
+      "docs/handoffs/cockpit-rules-tab_plan_status.json": "aa4395055b53fc625f57484c50faa219b24c6fdc5bb1de124979209dbf0f03bf"
+    },
+    "captured_at": "2026-09-23T23:24:00.424265+00:00",
+    "source": "plan-approve"
+  }
+}

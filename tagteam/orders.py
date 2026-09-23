@@ -430,13 +430,17 @@ def _show(project_dir: Path, as_json: bool, out=None) -> int:
     return 0
 
 
-def orders_command(args: list[str], project_root: str | Path | None = None) -> int:
+def orders_command(args: list[str], project_root: str | Path | None = None, out=None) -> int:
+    """`out` (the cockpit's capture, like the `controls` commands): every
+    line — errors included — goes there; otherwise stdout / stderr."""
     from tagteam.state import _resolve_project_root
     from tagteam.controls import _who
+    err = out if out is not None else sys.stderr
+    out = out if out is not None else sys.stdout
     root = Path(project_root) if project_root else Path(_resolve_project_root())
     args = list(args)
     if args and args[0] in ("-h", "--help", "help"):
-        print(USAGE)
+        print(USAGE, file=out)
         return 0
     run = "--run" in args
     args = [a for a in args if a != "--run"]
@@ -444,15 +448,15 @@ def orders_command(args: list[str], project_root: str | Path | None = None) -> i
     if "--by" in args:
         i = args.index("--by")
         if i + 1 >= len(args):
-            print("--by needs a name", file=sys.stderr)
+            print("--by needs a name", file=err)
             return 2
         by = args[i + 1]
         del args[i:i + 2]
     if not args or args == ["--json"]:
         if run:
-            print("--run applies to writes only", file=sys.stderr)
+            print("--run applies to writes only", file=err)
             return 2
-        return _show(root, as_json=bool(args))
+        return _show(root, as_json=bool(args), out=out)
     sub, rest = args[0], args[1:]
     who = _who(by)
     try:
@@ -462,7 +466,7 @@ def orders_command(args: list[str], project_root: str | Path | None = None) -> i
             elif len(rest) == 1 and rest[0] in STOP_VALUES:
                 value = rest[0]
             else:
-                print("usage: tagteam orders stop phase|roadmap|--unset [--run]", file=sys.stderr)
+                print("usage: tagteam orders stop phase|roadmap|--unset [--run]", file=err)
                 return 2
 
             def mutate(o):
@@ -473,7 +477,7 @@ def orders_command(args: list[str], project_root: str | Path | None = None) -> i
         elif sub == "add":
             text = " ".join(rest).strip()
             if not text:
-                print('usage: tagteam orders add "<note>" [--run]', file=sys.stderr)
+                print('usage: tagteam orders add "<note>" [--run]', file=err)
                 return 2
 
             def mutate(o):
@@ -489,7 +493,7 @@ def orders_command(args: list[str], project_root: str | Path | None = None) -> i
             except ValueError:
                 rid = None
             if rid is None:
-                print("usage: tagteam orders remove ID [--run]", file=sys.stderr)
+                print("usage: tagteam orders remove ID [--run]", file=err)
                 return 2
 
             def mutate(o):
@@ -501,14 +505,14 @@ def orders_command(args: list[str], project_root: str | Path | None = None) -> i
         elif sub == "clear":
             if not run or rest:
                 print("usage: tagteam orders clear --run   (project orders: edit or remove "
-                      f"{ORDERS_FILE}, or use stop --unset / remove)", file=sys.stderr)
+                      f"{ORDERS_FILE}, or use stop --unset / remove)", file=err)
                 return 2
 
             def mutate(o):
                 return None
             done = "run override cleared"
         else:
-            print(USAGE, file=sys.stderr)
+            print(USAGE, file=err)
             return 2
 
         if run:
@@ -523,7 +527,7 @@ def orders_command(args: list[str], project_root: str | Path | None = None) -> i
             _write_project(root, new)
             where = ORDERS_FILE
     except OrdersError as e:
-        print(str(e), file=sys.stderr)
+        print(str(e), file=err)
         return 1
-    print(f"Orders: {done} ({where}).")
-    return _show(root, as_json=False)
+    print(f"Orders: {done} ({where}).", file=out)
+    return _show(root, as_json=False, out=out)
