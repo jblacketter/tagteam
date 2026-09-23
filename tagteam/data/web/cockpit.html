@@ -134,6 +134,7 @@
       <button class="tab" data-tab="diff" id="tab-diff" role="tab">Diff</button>
       <button class="tab" data-tab="usage" id="tab-usage" role="tab">Usage</button>
       <button class="tab" data-tab="notes" id="tab-notes" role="tab">Notes <span class="count" id="notes-count"></span></button>
+      <button class="tab" data-tab="rules" id="tab-rules" role="tab">Rules</button>
     </nav>
 
     <div class="panel active" id="panel-feed" role="tabpanel">
@@ -186,6 +187,25 @@
       </form>
       <div id="notes-list"></div>
       <div class="empty small hidden" id="notes-empty">No notes for this phase.</div>
+    </div>
+
+    <!-- Phase 71: what governs this project's runs. Enforced (the engine does it) and advisory
+         (the agents are told) are kept apart by heading, marker and wording, not by colour alone. -->
+    <div class="panel" id="panel-rules" role="tabpanel">
+      <div class="panel-head"><span>Rules — what governs this project's runs</span><span class="spacer"></span><button class="btn btn-small" id="btn-rules-refresh">Refresh</button></div>
+      <div class="banner hidden" id="rules-warnings"></div>
+      <div class="banner hidden" id="rules-stale"></div>
+      <section class="rules-group rules-enforced" aria-labelledby="rules-enforced-h">
+        <h3 id="rules-enforced-h"><span class="rg-mark">ENFORCED</span> The engine does this</h3>
+        <div class="rules-stop" id="rules-stop"></div>
+        <div id="rules-enforced"></div>
+      </section>
+      <section class="rules-group rules-advisory" aria-labelledby="rules-advisory-h">
+        <h3 id="rules-advisory-h"><span class="rg-mark">ADVISORY</span> The agents are told this — tagteam cannot enforce it</h3>
+        <div id="rules-advisory"></div>
+        <div class="rules-add" id="rules-add"></div>
+      </section>
+      <div class="muted small" id="rules-last"></div>
     </div>
   </section>
 </main>

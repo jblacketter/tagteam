@@ -1,10 +1,30 @@
 # Phase 71: Cockpit Rules tab
 
 ## Status
-- [ ] Planning: plan cycle open (round 2 — r1: runtime resolvers; saved vs effective stop)
-- [ ] Implementation
+- [x] Planning: approved round 2 (2026-09-23) at `a7ee220`. r1: runtime resolvers; saved vs effective stop.
+- [x] Implementation: branch `phase-71-cockpit-rules-tab`
 - [ ] Implementation Review
 - [ ] Complete
+
+## Implementation notes: what looking at it changed
+The tab was driven in a real page (a scratch project, `tagteam serve --port 8768`, Playwright MCP). Screenshots are in the git-ignored `.playwright-mcp/`: `p71-1` project phase + run roadmap, `p71-2` the confirm for unsetting the run stop, `p71-3` a full-roadmap run with no override, `p71-4` a malformed orders file plus a stale-config watcher, `p71-5` 390 px. After every write, `tagteam orders` agreed with the page:
+- the run stop was unset and the run note kept (9c);
+- a free-text project note was added;
+- clear-run removed the stop and the notes (9d);
+- a shadowed project edit to `roadmap` was shown as saved, and the shadow note disappeared (9a).
+
+The first look found three things the plan had not:
+1. **The advisory scope toggle stretched to the full width** (a flex column), and neither toggle said *what* it scoped. Both now have a caption ("Saved setting for:" / "Add a note for:") and size to their content.
+2. **A malformed `tagteam-orders.json` still invited project edits** that every CLI write refuses, and the Project radio read "Not set" when in fact the file could not be read. The payload now carries `project_orders_ok`. When it is false, the Project stop radios, preset chips and free text are disabled, none is checked, and one line says why. This-run editing stays available.
+3. **The stop order was shown twice** (as the editor's "Now:" line and as a row). It is now shown once, as the editor.
+
+**Deviations from the plan text:**
+- The tab's behaviour is tested in **real Chromium** (the shipped markup, CSS and slice, driven by clicks) instead of under the node DOM stub. The stub has no layout, and 68/68b showed it hides exactly what matters here: computed border style, checked/disabled state, and overflow.
+- The effective line and the shadow note are sentences the server writes (`stop.effective_text`, `stop.shadow_note`), so the slice composes no precedence text.
+
+**Seen in the page:** every state in criterion 9, the warnings banner, the stale-watcher notice (with a faked heartbeat on a live pid), and 390 px width.
+**Table-tested only:** panel ON and briefer ON as rendered rows. Both are pinned by API tests, and the payload was previewed on this repo, whose briefer is on.
+**By design:** a change made from the CLI shows up in the tab on Refresh, since the SSE signature is not extended.
 
 ## Summary
 Phase 70 made standing orders durable, but they can only be seen and set from

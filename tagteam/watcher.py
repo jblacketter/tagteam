@@ -1359,18 +1359,13 @@ def _build_processor(
         _log(f"WARNING: reviewer panel disabled for this run: {e}")
 
     # Phase 41: watchdog re-send interval — problems warn and use the default.
-    resend_minutes = None
-    try:
-        from tagteam.config import validate_watcher_config, get_watcher_spec, WATCHER_DEFAULT_RESEND_MINUTES
-        wproblems = validate_watcher_config(config or {})
-        if wproblems:
-            _log(f"WARNING: watcher config ignored (default resend {WATCHER_DEFAULT_RESEND_MINUTES}m):")
-            for pr in wproblems:
-                _log(f"  - {pr}")
-        else:
-            resend_minutes = get_watcher_spec(config or {})["resend_minutes"]
-    except Exception as e:
-        _log(f"WARNING: watcher config ignored: {e}")
+    # Phase 71: one resolution, shared with the cockpit's Rules tab.
+    from tagteam.config import resolve_watcher, WATCHER_DEFAULT_RESEND_MINUTES
+    resend_minutes, wproblems = resolve_watcher(config or {})
+    if wproblems:
+        _log(f"WARNING: watcher config ignored (default resend {WATCHER_DEFAULT_RESEND_MINUTES}m):")
+        for pr in wproblems:
+            _log(f"  - {pr}")
 
     engine = None
     if mode == "headless":

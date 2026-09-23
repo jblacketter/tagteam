@@ -1424,7 +1424,7 @@ def _run(fn, args: list[str], project_dir: str | Path) -> dict:
 
 _FN_NAMES = {"pause_command": "pause", "resume_command": "resume",
              "interject_command": "interject", "cancel_turn_command": "cancel-turn",
-             "rule_command": "rule", "brief_command": "brief"}
+             "rule_command": "rule", "brief_command": "brief", "orders_command": "orders"}
 
 
 def _cli_line(fn, args: list[str]) -> str:
@@ -1495,6 +1495,8 @@ def _plan(action: str, params: dict, *, by: str):
         elif to:
             raise ValueError("'to' only applies to answer")
         return controls.rule_command, args
+    if action == "orders":                 # Phase 71: the Rules tab
+        return _plan_orders(params, by)
     raise ValueError(f"Unknown action: {action}")
 
 
@@ -1518,3 +1520,248 @@ def watcher_events_payload(project_dir: str | Path, n: int = 50, chatter: bool =
     except (TypeError, ValueError):
         n = 50
     return {"events": watchlog.read(project_dir, max(1, min(n, 500)), include_info=bool(chatter))}
+
+
+# ---------------------------------------------------------------------------
+# Phase 71: GET /api/rules — what governs this project's runs
+# ---------------------------------------------------------------------------
+# Every engine row comes from the resolver the engine itself uses (never a
+# raw `get_*_spec` getter, which assumes a validated block), so a row states
+# what RUNS. File-only: no database, nothing created, allowed read-only.
+
+ORDER_PRESETS = {
+    "stop": [
+        {"value": "phase", "label": "Stop after each phase for my review", "recommended": True},
+        {"value": "roadmap", "label": "Run to the end of the roadmap unless there is a question",
+         "recommended": False},
+    ],
+    "advisory": [
+        {"text": "Commit at the end of each phase, but hold the PR for my approval", "recommended": True},
+        {"text": "Open the PR when the phase is done", "recommended": False},
+        {"text": "Keep commits small and describe how each change was verified", "recommended": False},
+    ],
+}
+ORDER_TEXT_MAX = 500
+
+_TYPE_WORDS = {"impl": "implementation reviews", "plan": "plan reviews"}
+_APPLIES = {"submit": "each submission", "approval": "each approval", "watcher": "when the watcher starts"}
+
+
+def _types_words(types) -> str:
+    types = [t for t in (types or []) if t in _TYPE_WORDS]
+    if set(types) >= {"impl", "plan"}:
+        return "every review"
+    if len(types) == 1:
+        return f"{_TYPE_WORDS[types[0]]} only"
+    return "no review type"
+
+
+def _gate_row(config: dict) -> dict:
+    from tagteam.gatekeeper import resolve_gatekeeper
+    g = resolve_gatekeeper(config)
+    applies = "submit" if g.on_submit else "watcher"
+    row = {"key": "gate", "label": "Gate before the reviewer's turn", "on": g.enabled,
+           "source": "tagteam.yaml gatekeeper", "change": "gatekeeper.enabled",
+           "applies": _APPLIES[applies], "warnings": [f"gatekeeper: {p}" for p in g.problems]}
+    if not g.enabled:
+        row["value"] = "off"
+        row["text"] = "No gate: the reviewer's turn starts as soon as the lead submits."
+        if g.problems:
+            row["text"] += " (The gatekeeper block is invalid, so the gate is OFF.)"
+        return row
+    checks = ["the test suite" if g.tests_command else "no tests (no test command configured)",
+              "the implementation-scope check" if g.scope else "no scope check (scope is off)",
+              "the plan-doc check"]
+    when = ("inside the lead's submission" if g.on_submit
+            else "in the watcher, before it hands the turn to the reviewer")
+    row["value"] = f"on · {_types_words(g.on)}"
+    row["text"] = (f"On {_types_words(g.on)}, {when}: {', '.join(checks)}. A failure hands the "
+                   f"turn back to the lead; after {g.max_bounces} bounces in a round the reviewer "
+                   f"gets the turn with the failures.")
+    return row
+
+
+def _panel_row(config: dict, root: Path) -> dict:
+    from tagteam.panel import resolve_panel
+    p = resolve_panel(config, root)
+    block = config.get("panel") if isinstance(config.get("panel"), dict) else {}
+    row = {"key": "panel", "label": "Reviewer panel", "on": p.enabled,
+           "source": "tagteam.yaml panel", "change": "panel.enabled",
+           "applies": _APPLIES["watcher"],
+           "warnings": [f"panel: {x}" for x in p.problems] if block.get("enabled") is True else []}
+    if not p.enabled:
+        row["value"] = "off"
+        row["text"] = "One reviewer takes every review turn."
+        if row["warnings"]:
+            row["text"] += " (The panel is configured but cannot run, so it is OFF.)"
+        return row
+    phases = f", phases {', '.join(p.phases)} only" if p.phases else ""
+    row["value"] = f"on · {len(p.lenses)} lenses"
+    row["text"] = (f"On {_types_words(p.on)}{phases}, {len(p.lenses)} lens reviews "
+                   f"({', '.join(p.lens_names)}) take the reviewer's turn; their verdicts are "
+                   f"merged into one reviewer entry.")
+    return row
+
+
+def _briefer_row(config: dict, root: Path) -> dict:
+    from tagteam.briefer import resolve_briefer
+    b = resolve_briefer(config, root)
+    block = config.get("briefer") if isinstance(config.get("briefer"), dict) else {}
+    row = {"key": "briefer", "label": "Escalation brief", "on": b.enabled,
+           "source": "tagteam.yaml briefer", "change": "briefer.enabled",
+           "applies": _APPLIES["watcher"],
+           "warnings": [f"briefer: {x}" for x in b.problems] if block.get("enabled") is True else []}
+    if not b.enabled:
+        row["value"] = "off"
+        row["text"] = "No automatic decision brief when a cycle escalates."
+        if row["warnings"]:
+            row["text"] += " (The briefer is configured but cannot run, so it is OFF.)"
+        return row
+    row["value"] = f"on · {b.provider}"
+    row["text"] = (f"When a cycle escalates, {b.provider} writes a decision brief for you "
+                   f"(`tagteam brief`).")
+    return row
+
+
+def _resend_row(config: dict) -> dict:
+    from tagteam.config import resolve_watcher
+    minutes, problems = resolve_watcher(config)
+    text = ("A turn is never re-sent." if minutes == 0 else
+            f"If a turn is still owed after {minutes} min, a terminal-mode watcher types the "
+            f"command into that terminal again (a headless watcher never re-sends).")
+    if problems:
+        text += " (The watcher block is invalid, so the default applies.)"
+    return {"key": "resend", "label": "Re-send a stuck turn", "on": minutes > 0,
+            "value": "never" if minutes == 0 else f"{minutes} min", "text": text,
+            "source": "tagteam.yaml watcher" if isinstance(config.get("watcher"), dict) and not problems
+            else "default", "change": "watcher.resend_minutes", "applies": _APPLIES["watcher"],
+            "warnings": [f"watcher: {x}" for x in problems]}
+
+
+def _stale_row() -> dict:
+    from tagteam.cycle import STALE_ROUND_LIMIT
+    return {"key": "stale", "label": "Auto-escalation", "on": True,
+            "value": f"{STALE_ROUND_LIMIT} stale rounds",
+            "text": (f"{STALE_ROUND_LIMIT} consecutive unchanged re-submissions escalate the "
+                     f"cycle to you. A round number alone never does."),
+            "source": "built in", "change": None, "applies": _APPLIES["submit"], "warnings": []}
+
+
+def _stop_block(state: dict, eff: dict) -> dict:
+    project = (eff.get("project") or {}).get("stop")
+    run = (eff.get("run") or {}).get("stop") if eff.get("run") else None
+    source = eff["stop_source"]
+    shadowed = source if (source in ("run", "run-mode") and project is not None
+                          and project != eff["stop"]) else None
+    what = {"phase": "the run stops after each phase", "roadmap": "the run goes on through the roadmap"}
+    why = {"run": "set for this run", "run-mode": "this is a full-roadmap run",
+           "project": "project order", "default": "default — no order set"}[source]
+    note = None
+    if shadowed:
+        by = "set for this run" if shadowed == "run" else "this is a full-roadmap run"
+        note = (f"This run uses “{eff['stop']}” ({by}), so your project setting "
+                f"“{project}” applies from the next run.")
+    return {"effective": eff["stop"], "source": source, "project": project, "run": run,
+            "run_mode_roadmap": state.get("run_mode") == "full-roadmap",
+            "project_shadowed_by": shadowed,
+            "has_run_override": eff.get("run") is not None,
+            "effective_text": f"Now: {what[eff['stop']]} ({why}).",
+            "shadow_note": note}
+
+
+def _watcher_stale_config(root: Path) -> dict | None:
+    """A running watcher that started before tagteam.yaml last changed still
+    uses the settings it loaded. The page cannot see those settings."""
+    from tagteam import watchlog
+    try:
+        view = watchlog.beat_view(root)
+        if view.get("state") in ("none", "previous"):
+            return None
+        beat = watchlog.read_beat(root) or {}
+        started = beat.get("started_at")
+        cfg = root / "tagteam.yaml"
+        if not started or not cfg.is_file():
+            return None
+        st = datetime.fromisoformat(str(started))
+        if st.tzinfo is None:
+            st = st.replace(tzinfo=timezone.utc)
+        mtime = datetime.fromtimestamp(cfg.stat().st_mtime, tz=timezone.utc)
+        if mtime > st:
+            return {"started_at": st.isoformat(), "config_mtime": mtime.isoformat(),
+                    "pid": beat.get("pid")}
+    except Exception:
+        return None
+    return None
+
+
+def rules_payload(project_dir: str | Path) -> dict:
+    from tagteam import orders
+    from tagteam.config import read_config
+    from tagteam.state import read_state
+    root = Path(project_dir)
+    warnings: list[str] = []
+    cfg_path = root / "tagteam.yaml"
+    config = read_config(cfg_path) if cfg_path.is_file() else None
+    if cfg_path.is_file() and not isinstance(config, dict):
+        warnings.append("tagteam.yaml could not be read — the rows show the engine's defaults")
+    config = config if isinstance(config, dict) else {}
+    state = read_state(str(root)) or {}
+    eff = orders.effective(state, root)
+    if eff["warn"]:
+        warnings.append(f"{eff['warn']} — treated as no project orders")
+    stop = _stop_block(state, eff)
+    stop_row = {"key": "stop", "label": "When a run stops for you", "on": True,
+                "value": eff["stop"], "text": orders._STOP_WORDS[eff["stop"]],
+                "source": {"run": "standing order (this run)", "run-mode": "this full-roadmap run",
+                           "project": "standing order (project)", "default": "default"}[eff["stop_source"]],
+                "change": "orders", "applies": _APPLIES["approval"], "warnings": []}
+    enforced = [stop_row]
+    for build in (lambda: _gate_row(config), lambda: _panel_row(config, root),
+                  lambda: _briefer_row(config, root), lambda: _resend_row(config), _stale_row):
+        try:
+            enforced.append(build())
+        except Exception as e:   # one broken row never hides the others
+            warnings.append(f"a rule could not be read ({type(e).__name__})")
+    for r in enforced:
+        warnings.extend(r.get("warnings") or [])
+    advisory = [{"id": n["id"], "scope": n["source"], "text": n["text"], "by": n.get("by")}
+                for n in eff["advisory"]]
+    return {"enforced": enforced, "advisory": advisory, "stop": stop,
+            "last_decision": orders.describe_decision(orders.current_decision(state, root)),
+            "presets": ORDER_PRESETS, "warnings": warnings,
+            "watcher_stale_config": _watcher_stale_config(root),
+            "orders_file": orders.ORDERS_FILE, "text_max": ORDER_TEXT_MAX,
+            # a malformed/unsafe file is refused by every project write — say so, don't invite one
+            "project_orders_ok": eff["warn"] is None}
+
+
+def _plan_orders(params: dict, by: str):
+    """POST /api/orders → `tagteam orders …` argv."""
+    from tagteam import orders
+    op = str(params.get("op") or "").strip()
+    run = params.get("run") is True
+    tail = (["--run"] if run else [])
+    if op == "stop":
+        value = str(params.get("value") or "").strip()
+        if value not in ("phase", "roadmap", "unset"):
+            raise ValueError("'value' must be phase, roadmap or unset")
+        return orders.orders_command, ["stop", "--unset" if value == "unset" else value] + tail + ["--by", by]
+    if op == "add":
+        text = params.get("text")
+        text = "" if text is None else str(text).strip()
+        if not text:
+            raise ValueError("'text' is required")
+        if "\n" in text or "\r" in text:
+            raise ValueError("'text' must be one line")
+        if len(text) > ORDER_TEXT_MAX:
+            raise ValueError(f"'text' is limited to {ORDER_TEXT_MAX} characters")
+        return orders.orders_command, ["add", text] + tail + ["--by", by]
+    if op == "remove":
+        try:
+            rid = int(params.get("id"))
+        except (TypeError, ValueError):
+            raise ValueError("'id' must be an integer")
+        return orders.orders_command, ["remove", str(rid)] + tail
+    if op == "clear-run":
+        return orders.orders_command, ["clear", "--run"]
+    raise ValueError("'op' must be stop, add, remove or clear-run")

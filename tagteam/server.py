@@ -585,6 +585,8 @@ class CockpitRouter:
         try:
             if path == "/api/now":
                 h._send_json(capi.now_payload(self.project_dir))
+            elif path == "/api/rules":           # Phase 71
+                h._send_json(capi.rules_payload(self.project_dir))
             elif path == "/api/watcher/events":
                 # `_qs` already returns one string per key (Phase 68 fix: 3.14.5 indexed it
                 # again, so n=200 meant 2)
@@ -895,6 +897,7 @@ class CockpitRouter:
             "/api/interject": "interject", "/api/interject/retire": "interject/retire",
             "/api/cancel-turn": "cancel-turn", "/api/brief/generate": "brief/generate",
             "/api/rule": "rule",
+            "/api/orders": "orders",        # Phase 71
         }
         action = actions.get(path)
         if action is None:

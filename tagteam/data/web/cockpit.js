@@ -638,6 +638,176 @@
     }
   }
 
+  // ---------- Phase 71: Rules tab ----------
+  // What governs this project's runs, as /api/rules states it. This slice PRESENTS the payload:
+  // which rows exist, what they say, and which saved value each scope holds are all server-side.
+  // Enforced and advisory stay apart by heading, marker and wording (never colour alone).
+  var RULES = { data: null, stopScope: 'project', noteScope: 'project', loaded: false };
+
+  function loadRules() {
+    return getJSON('/api/rules').then(function (r) {
+      if (!r.ok) { toast('err', 'Could not load the rules (' + r.status + ')'); return; }
+      RULES.loaded = true;
+      renderRules(r.body || {});
+    });
+  }
+
+  function ordersAct(btn, body, title, detail) {
+    return act(btn, '/api/orders', body, {
+      confirm: { title: title, body: detail, labels: { ok: 'Save' } },
+      onDone: function () { loadRules(); }
+    });
+  }
+
+  function scopeToggle(current, onPick, caption) {
+    var line = el('div', 'rules-scope-line');
+    line.appendChild(el('span', null, caption));
+    var box = el('div', 'rules-scope');
+    box.setAttribute('role', 'group');
+    [['project', 'Project'], ['run', 'This run']].forEach(function (s) {
+      var b = el('button', null, s[1]);
+      b.type = 'button';
+      b.setAttribute('aria-pressed', current === s[0] ? 'true' : 'false');
+      b.dataset.scope = s[0];
+      b.addEventListener('click', function () { onPick(s[0]); });
+      box.appendChild(b);
+    });
+    line.appendChild(box);
+    return line;
+  }
+
+  function renderRuleRow(r) {
+    var row = el('div', 'rule-row');
+    row.dataset.key = r.key;
+    var left = el('div');
+    left.appendChild(el('div', 'r-label', r.label));
+    left.appendChild(el('div', 'r-value' + (r.on === false ? ' off' : ''), r.value));
+    var right = el('div');
+    right.appendChild(el('div', 'r-text', r.text));
+    var meta = 'Applies: ' + r.applies + ' · source: ' + r.source;
+    if (r.change && r.change !== 'orders') meta += ' · to change: ' + r.change + ' in tagteam.yaml';
+    right.appendChild(el('div', 'r-meta', meta));
+    row.appendChild(left); row.appendChild(right);
+    return row;
+  }
+
+  function renderStopEditor(p) {
+    var box = $('rules-stop');
+    box.textContent = '';
+    var stop = p.stop || {};
+    box.appendChild(el('div', 'r-now', stop.effective_text || ''));
+    box.appendChild(scopeToggle(RULES.stopScope, function (s) { RULES.stopScope = s; renderStopEditor(RULES.data); }, 'Saved setting for:'));
+    var saved = RULES.stopScope === 'run' ? stop.run : stop.project;    // the SAVED value of this scope, never the effective one
+    var locked = RULES.stopScope === 'project' && p.project_orders_ok === false;
+    var radio = el('div', 'rules-radio');
+    radio.setAttribute('role', 'radiogroup');
+    var opts = ((p.presets && p.presets.stop) || []).map(function (o) { return { value: o.value, label: o.label, rec: o.recommended }; });
+    opts.push({ value: 'unset', label: 'Not set — inherit', rec: false });
+    opts.forEach(function (o) {
+      var lab = el('label');
+      var inp = document.createElement('input');
+      inp.type = 'radio'; inp.name = 'rules-stop-' + RULES.stopScope; inp.value = o.value;
+      inp.checked = !locked && (saved == null ? 'unset' : saved) === o.value;
+      inp.disabled = locked;
+      inp.addEventListener('change', function () {
+        var where = RULES.stopScope === 'run' ? 'this run' : 'the project';
+        ordersAct(inp, { op: 'stop', value: o.value, run: RULES.stopScope === 'run' },
+          'Set the stop order for ' + where,
+          o.value === 'unset' ? ('Removes the stop order for ' + where + (RULES.stopScope === 'run' ? '. This run’s notes stay.' : '.'))
+                              : o.label + ' — for ' + where + '.');
+        renderStopEditor(RULES.data);                                     // back to the saved value until the write lands
+      });
+      lab.appendChild(inp);
+      lab.appendChild(el('span', null, o.label));
+      if (o.rec) lab.appendChild(el('span', 'rec', 'recommended'));
+      radio.appendChild(lab);
+    });
+    box.appendChild(radio);
+    if (locked) box.appendChild(el('div', 'rules-shadow', 'Project orders cannot be read or saved until ' + p.orders_file + ' is fixed or removed (see the warning above).'));
+    if (RULES.stopScope === 'project' && stop.shadow_note) box.appendChild(el('div', 'rules-shadow', stop.shadow_note));
+    if (stop.has_run_override) {
+      var clear = el('button', 'link-btn', 'Clear this run’s overrides');
+      clear.type = 'button';
+      clear.addEventListener('click', function () {
+        ordersAct(clear, { op: 'clear-run' }, 'Clear this run’s overrides',
+          'Removes this run’s stop order AND its notes. Project orders are not touched.');
+      });
+      box.appendChild(clear);
+    }
+  }
+
+  function renderAdvisory(p) {
+    var list = $('rules-advisory');
+    list.textContent = '';
+    var notes = p.advisory || [];
+    if (!notes.length) list.appendChild(el('div', 'muted small', 'No advisory notes.'));
+    notes.forEach(function (n) {
+      var row = el('div', 'rule-note');
+      row.appendChild(el('span', 'n-scope', n.scope === 'run' ? 'this run' : 'project'));
+      row.appendChild(el('span', 'n-text', '#' + n.id + ' ' + n.text));
+      var rm = el('button', 'btn btn-small', 'Remove');
+      rm.type = 'button';
+      rm.addEventListener('click', function () {
+        ordersAct(rm, { op: 'remove', id: n.id, run: n.scope === 'run' }, 'Remove note #' + n.id,
+          '“' + n.text + '” (' + (n.scope === 'run' ? 'this run' : 'project') + ')');
+      });
+      row.appendChild(rm);
+      list.appendChild(row);
+    });
+    var add = $('rules-add');
+    add.textContent = '';
+    add.appendChild(scopeToggle(RULES.noteScope, function (s) { RULES.noteScope = s; renderAdvisory(RULES.data); }, 'Add a note for:'));
+    var where = RULES.noteScope === 'run' ? 'this run' : 'the project';
+    var noteLocked = RULES.noteScope === 'project' && p.project_orders_ok === false;
+    if (noteLocked) add.appendChild(el('div', 'rules-shadow', 'Project notes cannot be saved until ' + p.orders_file + ' is fixed or removed.'));
+    var chips = el('div', 'rules-chips');
+    ((p.presets && p.presets.advisory) || []).forEach(function (o) {
+      var c = el('button', null, '+ ' + o.text + (o.recommended ? ' (recommended)' : ''));
+      c.type = 'button';
+      c.disabled = noteLocked;
+      c.addEventListener('click', function () {
+        ordersAct(c, { op: 'add', text: o.text, run: RULES.noteScope === 'run' }, 'Add an advisory note for ' + where, o.text);
+      });
+      chips.appendChild(c);
+    });
+    add.appendChild(chips);
+    var form = el('form', 'rules-free');
+    var input = document.createElement('input');
+    input.type = 'text'; input.id = 'rules-free-text'; input.maxLength = p.text_max || 500;
+    input.placeholder = 'Your own note for both agents…';
+    var go = el('button', 'btn btn-small', 'Add');
+    go.type = 'submit';
+    input.disabled = go.disabled = noteLocked;
+    form.appendChild(input); form.appendChild(go);
+    form.addEventListener('submit', function (e) {
+      if (e && e.preventDefault) e.preventDefault();
+      var text = (input.value || '').trim();
+      if (!text) return;
+      ordersAct(go, { op: 'add', text: text, run: RULES.noteScope === 'run' }, 'Add an advisory note for ' + where, text);
+    });
+    add.appendChild(form);
+  }
+
+  function renderRules(p) {
+    RULES.data = p;
+    var warn = $('rules-warnings');
+    warn.textContent = (p.warnings || []).join(' · ');
+    warn.classList.toggle('hidden', !(p.warnings || []).length);
+    var stale = $('rules-stale');
+    var sc = p.watcher_stale_config;
+    stale.textContent = sc ? ('tagteam.yaml changed after the running watcher started (' + fmtTs(sc.started_at)
+      + '). It still uses the settings it started with — restart it to apply the change. This page cannot see those settings.') : '';
+    stale.classList.toggle('hidden', !sc);
+    renderStopEditor(p);
+    var rows = $('rules-enforced');
+    rows.textContent = '';
+    // the stop order is the editor above (its "Now:" line is the stop row's statement)
+    (p.enforced || []).forEach(function (r) { if (r.key !== 'stop') rows.appendChild(renderRuleRow(r)); });
+    renderAdvisory(p);
+    $('rules-last').textContent = p.last_decision ? ('Last approval: ' + p.last_decision) : '';
+  }
+  // ---------- end Phase 71 ----------
+
   // ---------- Tabs ----------
   function showTab(name) {
     document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === name); });
@@ -645,9 +815,11 @@
     if (name === 'diff' && !diffLoaded) loadDiff();
     if (name === 'usage' && !usageLoaded) loadUsage();
     if (name === 'notes' && !notesLoaded) loadNotes();
+    if (name === 'rules' && !RULES.loaded) loadRules();
     try { localStorage.setItem('tagteam.cockpit.tab', name); } catch (e) { /* ignore */ }
   }
   document.querySelectorAll('.tab').forEach(function (t) { t.addEventListener('click', function () { showTab(t.dataset.tab); }); });
+  $('btn-rules-refresh').addEventListener('click', function () { loadRules(); });
   function activeTab() { var t = document.querySelector('.tab.active'); return t ? t.dataset.tab : 'feed'; }
 
   // ---------- Feed ----------
@@ -883,6 +1055,7 @@
         var ps = [loadFeed(), loadActivity(), loadLead(false)];
         if (t === 'notes' || notesLoaded) ps.push(loadNotes());
         if (t === 'usage' && usageLoaded) ps.push(loadUsage());
+        if (t === 'rules' && RULES.loaded) ps.push(loadRules());
         if (t === 'diff' && diffLoaded && reason !== 'tick') ps.push(loadDiff());
         return Promise.all(ps);
       });

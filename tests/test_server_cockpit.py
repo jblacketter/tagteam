@@ -161,9 +161,9 @@ class SSEReader:
 
 LEGACY_NEW_ENDPOINTS = ["/api/now", "/api/usage", "/api/briefs", "/api/brief/current",
                         "/api/interjections", "/api/scope-diff/feat-x_plan", "/api/tail",
-                        "/api/events", "/api/cockpit/info"]
+                        "/api/events", "/api/cockpit/info", "/api/rules"]
 NEW_POSTS = ["/api/pause", "/api/resume", "/api/interject", "/api/interject/retire",
-             "/api/cancel-turn", "/api/brief/generate", "/api/rule"]
+             "/api/cancel-turn", "/api/brief/generate", "/api/rule", "/api/orders"]
 
 
 # ---------------------------------------------------------------------------
