@@ -263,6 +263,10 @@ safe for a read-only helper (`TAGTEAM_READ_ONLY=1`).
 - **Contract and tools.** `tagteam contract`, the plugin (`unknown` when Claude
   Code could not be asked — not the same as `missing`), the vendored skill,
   `.mcp.json` server names and Claude hook events — configured, not probed.
+- **Standing orders.** When `tagteam-orders.json` exists, doctor shows its
+  stop order and how many advisory notes it has (never their text). A
+  malformed, oversized or symlinked file is a `warn`, because the engine
+  treats it as no project orders.
 - **Protections.** Which guarantees are enforcement and which are instructions:
   a Claude hook does not bind a Codex process.
 

@@ -555,6 +555,7 @@ def add_round(phase: str, cycle_type: str, role: str, action: str,
         status = _read_status_from_file(
             _status_path(phase, cycle_type, project_dir)
         ) or {}
+        prior_cycle_state = status.get("state")
         transition = _TRANSITIONS[action]
         status["state"] = transition["state"]
         status["ready_for"] = transition["ready_for"]
@@ -589,8 +590,12 @@ def add_round(phase: str, cycle_type: str, role: str, action: str,
         # orders make of the run, and records it on the cycle status. Every
         # derive (this one, and any later `state sync`) applies the recorded
         # decision and never re-resolves. No explicit orders → no key at all.
+        # Only a real transition INTO approved decides: a repeated APPROVE of
+        # an already-approved cycle keeps (and re-applies, not fresh) the
+        # decision it has — it must never re-decide a stopped run.
         fresh_decision = False
-        if cycle_type == "impl" and action == "APPROVE" and status.get("state") == "approved":
+        if (cycle_type == "impl" and action == "APPROVE" and status.get("state") == "approved"
+                and prior_cycle_state != "approved"):
             from tagteam import orders as _orders
             from tagteam.state import read_state as _read_state
             _dec = _orders.decide(_read_state(project_dir) or {}, phase, project_dir)

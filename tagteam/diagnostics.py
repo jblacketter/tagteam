@@ -495,11 +495,13 @@ class Report:
     user_level: list = field(default_factory=list)
     notes: list = field(default_factory=list)
     installs: list = field(default_factory=list)      # Phase 65: tagteam copies in the project's own venvs
+    orders: dict | None = None                        # Phase 70: tagteam-orders.json (None = absent)
 
     @property
     def counts(self) -> dict:
         return {"warn": sum(f["severity"] == "warn" for f in self.findings)
-                + sum(i["state"] == "differs" for i in self.installs),
+                + sum(i["state"] == "differs" for i in self.installs)
+                + int(bool(self.orders) and self.orders.get("state") == "warn"),
                 "info": sum(f["severity"] == "info" for f in self.findings)}
 
     def to_json(self) -> dict:
@@ -560,8 +562,9 @@ def build_report(target: str | Path) -> Report:
     if config_note:
         notes.insert(0, config_note)
     from tagteam.installs import observe_installs
+    from tagteam.orders import doctor_view
     return Report(
-        installs=observe_installs(root),
+        installs=observe_installs(root), orders=doctor_view(root),
         root=str(root), roles=roles, roles_configured=bool(roles),
         contract={"shell": {"entry": "tagteam contract", "state": "found"}, "plugin": plugin,
                   "vendored_skill": skill},
@@ -647,6 +650,9 @@ def format_report(rep: Report) -> str:
         L.append(f"        → {f['remediation']}")
     for u in rep.user_level:
         L.append(f"  user-level candidate  {u} (not read; tagteam never modifies it)")
+    if rep.orders:
+        L += ["", "Standing orders",
+              f"  {rep.orders['state']:<5} {rep.orders['path']}: {rep.orders['detail']}"]
     if rep.notes:
         L += ["", "Not read"] + [f"  {n['path']} — {n['detail']}" for n in rep.notes]
     c = rep.counts

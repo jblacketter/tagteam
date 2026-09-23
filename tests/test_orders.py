@@ -278,6 +278,31 @@ class TestStopAndContinue:
         assert _status(project, "a")["run_decision"]["outcome"] == "convert"
         assert read_state(str(project))["run_mode"] == "full-roadmap"
 
+    def test_repeated_approve_does_not_redecide_a_stopped_run(self, project):
+        """r2 review: a duplicate APPROVE of an approved cycle keeps its
+        recorded stop instead of re-resolving against the project order."""
+        _roadmap(project)
+        _project_orders(project, stop="roadmap", advisory=[])
+        init_cycle("a", "impl", "claude", "codex", "impl", str(project))
+        _run(project, "stop", "phase", "--run")
+        add_round("a", "impl", "reviewer", "APPROVE", 1, "ok", str(project))
+        first = _status(project, "a")["run_decision"]
+        assert first["outcome"] == "stop"
+        add_round("a", "impl", "reviewer", "APPROVE", 1, "ok again", str(project))
+        assert _status(project, "a")["run_decision"] == first
+        s = read_state(str(project))
+        assert s["run_mode"] == "single-phase" and "roadmap" not in s
+
+    def test_repeated_approve_keeps_an_override_queued_for_the_next_run(self, project):
+        _roadmap(project)
+        _run(project, "stop", "phase")
+        _approve_impl(project, "a")                        # stop, recorded
+        _run(project, "add", "next run: open the PR", "--run")
+        add_round("a", "impl", "reviewer", "APPROVE", 1, "again", str(project))
+        s = read_state(str(project))
+        assert s["orders"]["advisory"][0]["text"] == "next run: open the PR"
+        assert s["run_mode"] == "single-phase"
+
     def test_plan_approval_records_nothing(self, project):
         _run(project, "stop", "roadmap")
         init_cycle("a", "plan", "claude", "codex", "plan", str(project))
@@ -452,6 +477,25 @@ class TestCli:
             "version": 1, "stop": None, "advisory": []}
         out = capsys.readouterr().out
         assert "Enforced (the engine does this)" in out and "Advisory (delivered, not enforced)" in out
+
+    def test_write_over_the_read_limit_is_refused_and_leaves_the_file(self, project):
+        """r2 review: never write what the reader would refuse. Cumulative
+        notes and escaped non-ASCII text count by their encoded size."""
+        _run(project, "stop", "roadmap")
+        before = (project / orders.ORDERS_FILE).read_bytes()
+        assert _run(project, "add", "x" * orders.MAX_BYTES) == 1
+        assert (project / orders.ORDERS_FILE).read_bytes() == before
+        # Many notes: fill until refused; the last accepted file is still read.
+        note = "é" * 1500                       # json.dumps escapes → ~9 KB per note
+        rc = 0
+        while rc == 0:
+            kept = (project / orders.ORDERS_FILE).read_bytes()
+            rc = _run(project, "add", note)
+        assert rc == 1 and (project / orders.ORDERS_FILE).read_bytes() == kept
+        assert len(kept) <= orders.MAX_BYTES
+        eff = orders.effective({}, project)
+        assert eff["warn"] is None and eff["stop"] == "roadmap" and eff["advisory"]
+        assert not list(project.glob(".tagteam-orders.json.*.tmp"))
 
     def test_bad_usage(self, project):
         assert _run(project, "stop", "sometimes") == 2
