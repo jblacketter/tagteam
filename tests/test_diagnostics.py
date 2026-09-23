@@ -627,3 +627,40 @@ class TestSetupPointer:
         monkeypatch.setattr(dg, "legacy_findings", boom)
         assert su.main(str(env.proj), report_user_skills=False, preview=True) == 0
         assert "note: legacy workflow scan failed (RuntimeError)" in capsys.readouterr().out
+
+
+class TestStandingOrders:
+    """Phase 70: doctor exposes the engine's fallback for a bad orders file."""
+
+    def test_missing_file_is_quiet(self, env, capsys):
+        config(env.proj)
+        rep = dg.build_report(env.proj)
+        assert rep.orders is None
+        assert "Standing orders" not in _all_output(env.proj, capsys)
+
+    def test_valid_file_counts_without_disclosing_notes(self, env, capsys):
+        config(env.proj)
+        write(env.proj, "tagteam-orders.json", json.dumps(
+            {"version": 1, "stop": "roadmap", "advisory": [{"id": 1, "text": "SECRET-NOTE-TEXT"}]}))
+        rep = dg.build_report(env.proj)
+        assert rep.orders["state"] == "ok" and "1 advisory note" in rep.orders["detail"]
+        assert "SECRET-NOTE-TEXT" not in _all_output(env.proj, capsys)
+
+    @pytest.mark.parametrize("shape", ["malformed", "oversized", "symlink"])
+    def test_bad_file_is_a_warning(self, env, capsys, shape):
+        config(env.proj)
+        path = env.proj / "tagteam-orders.json"
+        if shape == "malformed":
+            path.write_text("{nope")
+        elif shape == "oversized":
+            path.write_text(json.dumps({"advisory": [{"id": 1, "text": "x" * 70_000}]}))
+        else:
+            target = env.tmp / "elsewhere.json"
+            target.write_text(json.dumps({"stop": "roadmap"}))
+            os.symlink(target, path)
+        before = dg.build_report(env.proj).counts["warn"]
+        rep = dg.build_report(env.proj)
+        assert rep.orders["state"] == "warn" and "no project orders" in rep.orders["detail"]
+        assert before == rep.counts["warn"] >= 1
+        out = _all_output(env.proj, capsys)
+        assert "warn  tagteam-orders.json" in out and "x" * 100 not in out

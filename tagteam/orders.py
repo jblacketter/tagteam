@@ -64,6 +64,21 @@ def _valid_notes(raw) -> list[dict] | None:
     return notes
 
 
+def doctor_view(project_dir: str | Path) -> dict | None:
+    """For `tagteam doctor`: None when the file is absent (quiet); else
+    {state: ok|warn, path, detail} — counts only, never a note's text."""
+    from tagteam import safe_read
+    if safe_read._lstat_chain(Path(project_dir), ORDERS_FILE).state == "absent":
+        return None
+    project, warn = load_project(project_dir)
+    if warn:
+        return {"state": "warn", "path": ORDERS_FILE,
+                "detail": f"{warn} — the engine treats this as no project orders"}
+    n = len(project.get("advisory") or [])
+    return {"state": "ok", "path": ORDERS_FILE,
+            "detail": f"stop: {project.get('stop') or 'unset'} · {n} advisory note{'s' if n != 1 else ''}"}
+
+
 def load_project(project_dir: str | Path) -> tuple[dict, str | None]:
     """(orders, warning). A missing file is `({}, None)`; a symlink, a
     non-regular file, an oversized, unparseable or malformed file is
@@ -309,6 +324,10 @@ def _write_project(project_dir: Path, orders: dict) -> None:
         raise OrdersError(f"refused: {probe.detail or ORDERS_FILE + ' is not a regular file'}")
     body = {"version": 1, "stop": orders.get("stop"), "advisory": orders.get("advisory") or []}
     data = (json.dumps(body, indent=2) + "\n").encode("utf-8")
+    if len(data) > MAX_BYTES:
+        raise OrdersError(f"refused: the orders would be {len(data):,} bytes, over the "
+                          f"{MAX_BYTES // 1024} KB limit {ORDERS_FILE} is read with — "
+                          f"shorten or remove notes; {ORDERS_FILE} is unchanged")
     tmp = project_dir / f".{ORDERS_FILE}.{os.getpid()}.tmp"
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     fd = os.open(tmp, flags, 0o644)
