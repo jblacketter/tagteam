@@ -1,7 +1,7 @@
 # Phase 70: Standing orders
 
 ## Status
-- [ ] Planning: plan cycle open (round 2 — r1 review: reconciliation, terminal outcomes, no-orders promise)
+- [ ] Planning: plan cycle open (round 3 — r1: reconciliation, terminal outcomes, no-orders promise; r2: continue vs convert)
 - [ ] Implementation
 - [ ] Implementation Review
 - [ ] Complete
@@ -125,15 +125,25 @@ action is APPROVE, the type is impl, and the orders are explicit. It calls
 (`<phase>_impl_status.json`, the per-cycle source of truth):
 
 ```json
-"run_decision": {"outcome": "advance" | "stop" | "complete",
+"run_decision": {"outcome": "continue" | "convert" | "stop" | "complete",
                  "reason": "order" | "roadmap-invalid: …" | "roadmap-exhausted",
                  "stop": "phase" | "roadmap", "source": "run" | "run-mode" | "project",
                  "queue": [...], "current_index": N, "ts": "…"}
 ```
 
-`queue` and `current_index` are present for `advance` only. `add_round`
+There are two kinds of advance, and they are deliberately different outcomes:
+- **`continue`**: the run is already full-roadmap. Nothing is recorded but
+  the outcome. The run's own `roadmap` (`queue`, `current_index`, **and its
+  `completed` list**) is left exactly as it is, by the existing preservation
+  rule. The watcher's `_try_roadmap_advance` adds the phase just approved to
+  that `completed` list, and `_select_next_phase` keeps using it to exclude
+  earlier approvals and satisfy dependencies. That is today's behaviour, byte
+  for byte.
+- **`convert`**: the run was single-phase and becomes a new full-roadmap run.
+  Only this outcome records `queue` and `current_index`, and only this one
+  starts `completed` empty, because the run has no earlier approvals. `add_round`
 then calls `_derive_top_level_state(..., fresh_decision=True)`. That flag is the
-only thing that lets a derive (a) materialise an `advance` queue and (b) drop the
+only thing that lets a derive (a) materialise a `convert` queue and (b) drop the
 run override when the outcome ends the run (`stop`, `complete`). No other caller
 passes it, so no sync, gate, rearm or init ever converts a run or consumes an
 override.
@@ -146,7 +156,8 @@ already reads:
 |---|---|
 | none (pre-Phase-70 or no explicit orders) | today's behaviour, unchanged |
 | `stop` / `complete` | `run_mode: single-phase`, no `roadmap`. Idempotent, and on the safe side: re-applying it can never start a phase. |
-| `advance` | **Fresh write:** `run_mode: full-roadmap` + the recorded `roadmap` (`queue`, `current_index`, `completed: []`). **Sync:** the existing roadmap-preservation rule and nothing else. The state's roadmap is kept if it still points at this phase, otherwise single-phase. A sync never re-creates a queue, because that could restart an advance the watcher already made. |
+| `continue` | The existing roadmap-preservation rule and nothing else, fresh or sync. The run's `queue`, `current_index` and `completed` are never rewritten. |
+| `convert` | **Fresh write:** `run_mode: full-roadmap` + a new `roadmap` from the recorded `queue` / `current_index` with `completed: []`. **Sync:** the existing roadmap-preservation rule and nothing else. The state's roadmap (with whatever `completed` the watcher has since added) is kept if it still points at this phase, otherwise single-phase. A sync never re-creates a queue, because that could restart an advance the watcher already made. |
 
 `orders` (the run override) is preserved by every derive except the fresh
 run-ending one.
@@ -164,8 +175,8 @@ The two regressions this closes (success criterion 11):
 ### The outcomes at a fresh impl approval (explicit orders)
 | Effective `stop` | `run_mode` | Roadmap | Outcome | Run override |
 |---|---|---|---|---|
-| `roadmap` | full-roadmap | (not consulted) | `advance`, state unchanged from today. The watcher advances as it does now. | kept |
-| `roadmap` | single-phase | valid, and other non-terminal phases remain | `advance`. `queue = [approved phase] + build_queue(roadmap)` minus the approved phase if it appears again, `current_index: 0`. The approved phase is always `queue[0]`, **even when the roadmap already marks it Complete** (`build_queue` omits terminal phases). That way the existing preservation rule (`queue[idx] == phase`) holds and the watcher's `_try_roadmap_advance` records it as completed. The watcher then starts the next ready phase, reports roadmap-complete, or pauses as blocked. | kept |
+| `roadmap` | full-roadmap | (not consulted) | `continue`. The run's roadmap, including `completed`, is untouched (state unchanged from today), and the watcher advances as it does now. | kept |
+| `roadmap` | single-phase | valid, and other non-terminal phases remain | `convert`. `queue = [approved phase] + build_queue(roadmap)` minus the approved phase if it appears again, `current_index: 0`. The approved phase is always `queue[0]`, **even when the roadmap already marks it Complete** (`build_queue` omits terminal phases). That way the existing preservation rule (`queue[idx] == phase`) holds and the watcher's `_try_roadmap_advance` records it as completed. The watcher then starts the next ready phase, reports roadmap-complete, or pauses as blocked. | kept |
 | `roadmap` | single-phase | valid, **nothing else non-terminal**: `build_queue` raises its all-complete `ValueError`, or returns only the approved phase | `complete` / `roadmap-exhausted`. The run is over and there is nothing to advance to. | **dropped** |
 | `roadmap` | single-phase | missing, unparseable, or `check_graph` problems | `stop` / `roadmap-invalid: <first problem>`. One line on stderr from the writer says the run stopped and why. | **dropped** |
 | `phase` | full-roadmap | (not consulted) | `stop` / `order`: `run_mode: single-phase`, `roadmap` dropped. `--run stop phase` during a roadmap run halts it at the end of this phase. | **dropped** |
@@ -235,7 +246,7 @@ tagteam orders clear --run
   a parser does not.
 - **`tagteam state`:** one `Orders:` line, only when orders are explicit:
   `stop: roadmap (project) · 2 advisory`. After an approval with a
-  `run_decision` it adds the outcome: `· last approval: advance` /
+  `run_decision` it adds the outcome: `· last approval: continued` / `converted to a roadmap run` /
   `stopped (order)` / `roadmap exhausted` / `stopped (roadmap invalid: …)`.
 - **Contract** (`tagteam/data/.claude/skills/handoff/SKILL.md` + the plugin
   copy, kept in sync by the existing test): one paragraph. It says standing
@@ -305,8 +316,16 @@ the impl scope check.
         cycle stays single-phase, and a second sync changes nothing;
     (b) an override queued while `done` survives a `state sync` of the previous
         approved cycle and is not applied to it;
-    (c) a `state sync` of an `advance` cycle after the watcher moved on never
+    (c) a `state sync` of a `convert` cycle after the watcher moved on never
         re-creates the queue.
+13. An existing roadmap run keeps its history under explicit orders (the r2
+    review). A real roadmap in `tmp_path` with phases A → B → C, where C
+    depends on A, and the docs still mark A and B non-terminal. The run state
+    has `queue [A, B, C]`, `completed [A]` and current B, and there is one
+    advisory note. Approving B records `continue`, and the state's `roadmap`
+    is unchanged by the approval write. The unchanged watcher then starts C
+    with `completed [A, B]`: A is not restarted, and C's dependency on A counts
+    as satisfied through the run's `completed`, not the roadmap text.
 12. Conversion edge cases: the approved phase already marked Complete in the
     roadmap is `queue[0]` and the watcher advances past it; an exhausted
     roadmap gives `complete`; a missing roadmap, a malformed roadmap and a
