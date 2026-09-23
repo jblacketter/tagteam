@@ -1,7 +1,7 @@
 # Phase 70: Standing orders
 
 ## Status
-- [ ] Planning: plan cycle open (round 1)
+- [ ] Planning: plan cycle open (round 2 — r1 review: reconciliation, terminal outcomes, no-orders promise)
 - [ ] Implementation
 - [ ] Implementation Review
 - [ ] Complete
@@ -91,43 +91,116 @@ delivered text says run notes win where the two conflict. There is no removing
 a project note for one run (out of scope). Every surface calls this one
 function; none of them re-derive it.
 
-### Enforcement: at the approval write, not in the watcher
-The decision is made once, deterministically, in `_derive_top_level_state()`
-when it maps an **impl** cycle to `approved`. That covers a reviewer APPROVE
-and an arbiter `rule approve`, because both go through `add_round`. It is
-applied by rewriting the fields the watcher already keys on. **The watcher does
-not change.** It still advances only when `run_mode == "full-roadmap"`.
+### Explicit orders, and the no-orders promise
+Orders are **explicit** when `tagteam-orders.json` holds a non-null `stop` or at
+least one note, or when the state carries a run override. **Without explicit
+orders, Phase 70 writes and prints nothing new.** That covers an ordinary
+full-roadmap run, whose effective `stop` is `roadmap` from its run mode.
+Specifically, there is:
+- no `run_decision` in the cycle status,
+- no STANDING ORDERS block in the prompt or on stderr,
+- no `Orders:` line in `tagteam state`,
+- no change to the approval write.
 
-| Effective `stop` | `run_mode` now | Written with the approval |
-|---|---|---|
-| `roadmap` | full-roadmap | unchanged (today). |
-| `roadmap` | single-phase | `run_mode: full-roadmap` and `roadmap: {queue, current_index, completed: []}`, where `queue = roadmap.build_queue(docs/roadmap.md)` (all incomplete phases, topological). `current_index` is the approved phase's index in the queue. If the phase is not in the roadmap, the index is 0 and the watcher's `completed` bookkeeping covers it. From here the watcher's existing `_try_roadmap_advance` → `_select_next_phase` picks the next ready phase, or reports roadmap-complete, or pauses as blocked. If the roadmap is missing or invalid, nothing is converted, the run stops as single-phase, and the writer prints one line saying why. |
-| `phase` | full-roadmap | `run_mode: single-phase`, `roadmap` dropped. A run override `--run stop phase` set during a roadmap run halts it cleanly at the end of the current phase. |
-| `phase` | single-phase | unchanged (today). |
+A full-roadmap run with no orders is byte-identical to today. With explicit
+orders, the new output is the intended change: the prompt/stderr block, the
+`Orders:` line, and `run_decision` in the approved impl cycle's status.
 
-Because the decision is recorded in the state, the watcher, `tagteam state`,
-`now.headline` and the cockpit all see the same outcome, and none of them
-re-derive it. Plan approvals are untouched: 68a's headless plan→impl advance
-and the tab-mode notice stay as they are.
+### Enforcement: decided once at the fresh approval, recorded, re-applied safely
+`_derive_top_level_state()` has several callers:
+- `add_round` (reviewer APPROVE, arbiter `rule approve`),
+- `init_cycle`,
+- `rearm`,
+- the gatekeeper,
+- **`tagteam state sync`** (`state.py:856`), which re-derives any cycle,
+  current or old.
 
-**Without a watcher**, the state still says what happens next
-(`run_mode`/`queue`), and the contract tells the lead to follow it. That is
-already true of full-roadmap mode today.
+So resolving orders inside it would re-decide on every sync. Instead the
+decision is split in two.
+
+**1. Decide: in `add_round` only, on a fresh impl APPROVE.** This runs inside
+the writer lock, *before* the status file is written. It fires only when the
+action is APPROVE, the type is impl, and the orders are explicit. It calls
+`orders.effective()` once and records the result on the **cycle status**
+(`<phase>_impl_status.json`, the per-cycle source of truth):
+
+```json
+"run_decision": {"outcome": "advance" | "stop" | "complete",
+                 "reason": "order" | "roadmap-invalid: …" | "roadmap-exhausted",
+                 "stop": "phase" | "roadmap", "source": "run" | "run-mode" | "project",
+                 "queue": [...], "current_index": N, "ts": "…"}
+```
+
+`queue` and `current_index` are present for `advance` only. `add_round`
+then calls `_derive_top_level_state(..., fresh_decision=True)`. That flag is the
+only thing that lets a derive (a) materialise an `advance` queue and (b) drop the
+run override when the outcome ends the run (`stop`, `complete`). No other caller
+passes it, so no sync, gate, rearm or init ever converts a run or consumes an
+override.
+
+**2. Apply: in `_derive_top_level_state()`, from the recorded decision only,
+never by re-resolving.** It reads `run_decision` from the cycle status it
+already reads:
+
+| Recorded outcome | Applied on every derive (fresh or sync) |
+|---|---|
+| none (pre-Phase-70 or no explicit orders) | today's behaviour, unchanged |
+| `stop` / `complete` | `run_mode: single-phase`, no `roadmap`. Idempotent, and on the safe side: re-applying it can never start a phase. |
+| `advance` | **Fresh write:** `run_mode: full-roadmap` + the recorded `roadmap` (`queue`, `current_index`, `completed: []`). **Sync:** the existing roadmap-preservation rule and nothing else. The state's roadmap is kept if it still points at this phase, otherwise single-phase. A sync never re-creates a queue, because that could restart an advance the watcher already made. |
+
+`orders` (the run override) is preserved by every derive except the fresh
+run-ending one.
+
+The two regressions this closes (success criterion 11):
+- Project `stop: roadmap`, run `stop: phase`. The impl approval records
+  `stop` and drops the override. A `state sync` of that cycle re-applies the
+  recorded `stop` and stays single-phase. Without the recording it would
+  re-resolve the project `roadmap` and convert the run.
+- Run `done`. The arbiter queues `--run stop roadmap` for the next run. A
+  `state sync` of the previous approved cycle preserves the override and
+  applies that cycle's recorded decision (or none). It never consumes the
+  override and never converts the old cycle.
+
+### The outcomes at a fresh impl approval (explicit orders)
+| Effective `stop` | `run_mode` | Roadmap | Outcome | Run override |
+|---|---|---|---|---|
+| `roadmap` | full-roadmap | (not consulted) | `advance`, state unchanged from today. The watcher advances as it does now. | kept |
+| `roadmap` | single-phase | valid, and other non-terminal phases remain | `advance`. `queue = [approved phase] + build_queue(roadmap)` minus the approved phase if it appears again, `current_index: 0`. The approved phase is always `queue[0]`, **even when the roadmap already marks it Complete** (`build_queue` omits terminal phases). That way the existing preservation rule (`queue[idx] == phase`) holds and the watcher's `_try_roadmap_advance` records it as completed. The watcher then starts the next ready phase, reports roadmap-complete, or pauses as blocked. | kept |
+| `roadmap` | single-phase | valid, **nothing else non-terminal**: `build_queue` raises its all-complete `ValueError`, or returns only the approved phase | `complete` / `roadmap-exhausted`. The run is over and there is nothing to advance to. | **dropped** |
+| `roadmap` | single-phase | missing, unparseable, or `check_graph` problems | `stop` / `roadmap-invalid: <first problem>`. One line on stderr from the writer says the run stopped and why. | **dropped** |
+| `phase` | full-roadmap | (not consulted) | `stop` / `order`: `run_mode: single-phase`, `roadmap` dropped. `--run stop phase` during a roadmap run halts it at the end of this phase. | **dropped** |
+| `phase` | single-phase | (not consulted) | `stop` / `order`, state unchanged from today. | **dropped** |
+
+The `ValueError` from `build_queue` is the only exception the decision
+catches by type. The all-complete case is recognised by the roadmap
+module's own test (`ready_phases`/terminal status), not by message text. Any
+other exception from reading the roadmap becomes `roadmap-invalid`. **Nothing
+can raise out of the approval write.** At worst, the decision is `stop`.
+
+Plan approvals are untouched: 68a's headless plan→impl advance and the tab-mode
+notice stay as they are. **Without a watcher**, the state still records what
+comes next, and the contract tells the lead to follow it, as full-roadmap mode
+does today.
 
 ### Lifetime of the run override
-A run override ends when its run ends:
-- **The run stops:** the impl-approval write resolves `stop: phase`. That same
-  write drops `orders` from the state.
-- **The roadmap completes:** the `_select_next_phase` write that sets
-  `result: roadmap-complete` drops it. That is one extra key in an update the
-  watcher already makes. It is the only watcher edit.
-- **The arbiter clears it:** `tagteam orders clear --run`.
+It is dropped at **every terminal outcome** and kept only through **resumable
+pauses**:
+- **Dropped** by the fresh impl approval whose outcome is `stop` or
+  `complete` (every row marked *dropped* above).
+- **Dropped** by the watcher's `_select_next_phase` write that sets `result:
+  roadmap-complete`. That is one extra key in an update the watcher already
+  makes, and it is the only watcher edit.
+- **Dropped** by `tagteam orders clear --run`.
+- **Kept** through the resumable pauses, which are these and only these: an
+  escalation, a NEED_HUMAN, and the full-roadmap pauses with `pause_reason`
+  `blocked:` / `roadmap invalid:` / `stale queue:` (all resumed with
+  `roadmap resume` or a ruling). It is also kept through every intermediate
+  cycle write: submit, request changes, plan approve, `init_cycle`, `rearm`, a
+  gate bounce.
 
-A blocked pause, an escalation and a NEED_HUMAN keep the override, because the
-run resumes. A run override set while no run is active (state `done`) applies
-to the next run the lead starts. `cycle init` for a new phase keeps `orders`
-through the same preservation. That is how the arbiter says "for the next run,
-go to the end".
+A run override set while the state is `done` applies to the next run the lead
+starts. It is preserved by the next `cycle init`, which is how the arbiter
+says "for the next run, go to the end".
 
 ### CLI: `tagteam orders`
 ```
@@ -154,14 +227,16 @@ tagteam orders clear --run
   block right after the interjections block. It has the enforced line in words
   ("When this phase's implementation is approved the run goes on to the next
   ready phase; escalations and questions still stop it") and the advisory
-  notes, marked "advisory — tagteam does not enforce these". It is absent when
-  there are no orders and `stop` is the default. The block is capped like the
+  notes, marked "advisory — tagteam does not enforce these". It is absent
+  unless orders are explicit (see above). The block is capped like the
   other blocks, and when capped it points to `tagteam orders`.
 - **`tagteam cycle rounds`:** the same block goes to **stderr**, before the
   JSON lines, so stdout stays machine-readable. An interactive agent sees it;
   a parser does not.
-- **`tagteam state`:** one `Orders:` line: `stop: roadmap (project) · 2
-  advisory`.
+- **`tagteam state`:** one `Orders:` line, only when orders are explicit:
+  `stop: roadmap (project) · 2 advisory`. After an approval with a
+  `run_decision` it adds the outcome: `· last approval: advance` /
+  `stopped (order)` / `roadmap exhausted` / `stopped (roadmap invalid: …)`.
 - **Contract** (`tagteam/data/.claude/skills/handoff/SKILL.md` + the plugin
   copy, kept in sync by the existing test): one paragraph. It says standing
   orders arrive with every turn, the enforced one is applied by the engine
@@ -177,11 +252,12 @@ the impl scope check.
 
 ## Files
 - `tagteam/orders.py` (new): load/save, `effective()`, `render_block()`,
-  `apply_at_impl_approval(updates, state, project_dir)`, CLI.
+  `decide(state, phase, project_dir)`, `apply_decision(updates, decision, fresh)`, CLI.
 - `tagteam/cli.py`: dispatch `orders`, add it to `READ_ONLY_COMMANDS` for the
   bare read.
-- `tagteam/cycle.py`: `_derive_top_level_state()` preserves `orders`, calls
-  `apply_at_impl_approval` on impl → approved. `_TAGTEAM_ARTIFACT_FILES` +=
+- `tagteam/cycle.py`: `add_round` records `run_decision` on a fresh impl
+  APPROVE (`orders.decide()`); `_derive_top_level_state()` preserves `orders`
+  (dropped only with `fresh_decision=True`) and applies a recorded decision. `_TAGTEAM_ARTIFACT_FILES` +=
   `tagteam-orders.json`. `_cli_rounds` prints the block to stderr.
 - `tagteam/watcher.py`: the roadmap-complete write drops `orders`.
 - `tagteam/headless.py`: `compose_prompt(..., orders_block=...)` and its
@@ -194,10 +270,11 @@ the impl scope check.
   `tests/test_watcher*.py`, `tests/test_headless*.py`.
 
 ## Success criteria
-1. With no `tagteam-orders.json` and no run override, every state write,
-   prompt and CLI output is byte-identical to today, pinned by a test over
-   single-phase and full-roadmap approvals. Nothing is created on disk by a
-   read.
+1. Without explicit orders (no file, an empty file, `stop: null` with no notes,
+   no run override), the approval write, cycle status, state, prompt,
+   `cycle rounds` stdout+stderr and `tagteam state` output are byte-identical
+   to today for single-phase **and** full-roadmap approvals. A test pins both.
+   A read creates nothing on disk.
 2. `tagteam orders stop roadmap` followed by an impl approval in a
    single-phase run leaves the state `full-roadmap` with a queue whose
    current entry is the approved phase. The **unchanged** watcher then advances
@@ -205,11 +282,12 @@ the impl scope check.
    next ready phase started, a blocked phase skipped, roadmap-complete at the
    end).
 3. `tagteam orders stop phase --run` during a full-roadmap run: the next impl
-   approval leaves `single-phase` with no roadmap, the watcher does not advance,
-   and the run override is gone.
-4. A run override survives every intermediate cycle write (plan submit,
-   request changes, plan approve, impl init, escalation + ruling) and is dropped
-   exactly at the run's end (stop, roadmap-complete) or on `clear --run`.
+   approval records `stop`, leaves `single-phase` with no roadmap, the watcher
+   does not advance, and the run override is gone.
+4. A run override survives every intermediate cycle write and every resumable
+   pause listed above. It is dropped exactly at each terminal outcome (`stop`,
+   `complete` for exhausted and for invalid roadmaps, watcher roadmap-complete)
+   or on `clear --run`. Each case has its own test.
 5. Precedence is `run > run-mode > project > default`, pinned by a table test
    over `effective()`.
 6. The headless prompt contains the standing-orders block when there are
@@ -222,14 +300,25 @@ the impl scope check.
 9. `tagteam-orders.json` does not appear in the impl scope diff.
 10. The contract and workflows docs describe both kinds. The shipped-docs
     audit and plugin-sync tests pass.
+11. Reconciliation is idempotent:
+    (a) project `roadmap` + run `phase`, approve, `state sync` of the same
+        cycle stays single-phase, and a second sync changes nothing;
+    (b) an override queued while `done` survives a `state sync` of the previous
+        approved cycle and is not applied to it;
+    (c) a `state sync` of an `advance` cycle after the watcher moved on never
+        re-creates the queue.
+12. Conversion edge cases: the approved phase already marked Complete in the
+    roadmap is `queue[0]` and the watcher advances past it; an exhausted
+    roadmap gives `complete`; a missing roadmap, a malformed roadmap and a
+    `check_graph` problem each give `stop` / `roadmap-invalid`. In every case
+    the approval write succeeds.
 
 ## Risks and open questions for the reviewer
-- **Enforcement in `_derive_top_level_state`, not the watcher.** I chose the
-  approval write so the decision is deterministic, recorded, and independent
-  of whether a watcher runs or which mode it is in. The cost is a roadmap parse
-  inside the approval write. It is bounded and only happens when the stop is
-  `roadmap` and the run is single-phase. If parsing fails, the run stops as
-  single-phase.
+- **Decided in `add_round`, applied in `_derive_top_level_state`** (the r1
+  review). The decision is deterministic, recorded on the cycle status and
+  independent of the watcher. The cost is a roadmap parse inside a fresh impl
+  approval, which happens only when the stop is `roadmap` on a single-phase run
+  with explicit orders. Any failure becomes `stop`.
 - **Committed `tagteam-orders.json`**, rather than something under the
   git-ignored runtime `.tagteam/`. Arbiter's call if they would rather keep
   orders out of git. Only the path constant changes.
