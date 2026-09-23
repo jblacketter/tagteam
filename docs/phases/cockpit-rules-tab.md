@@ -3,8 +3,26 @@
 ## Status
 - [x] Planning: approved round 2 (2026-09-23) at `a7ee220`. r1: runtime resolvers; saved vs effective stop.
 - [x] Implementation: branch `phase-71-cockpit-rules-tab`
-- [ ] Implementation Review
-- [ ] Complete
+- [x] Implementation Review: approved round 2 (2026-09-23) at `33ae377`; gate 2,399 passed, 5 skipped
+- [ ] Complete: PR open, awaiting the arbiter's merge.
+
+## Closeout
+```
+Phase report: cockpit-rules-tab — plan approved r2 · impl approved r2
+  plan   2 rounds · 1 change request · 0 bounces
+  impl   2 rounds · 1 change request · 0 bounces · gate 2 runs, 15m 56s
+  time   start→approve 37m 43s · implementation before first submit 10m 20s
+         lead 3m 40s (2 spans, 2 unknown) · reviewer 7m 47s (4 spans) · gate 15m 57s (2 spans)  (elapsed; includes relay wait)
+  usage  no usage rows stored under this phase
+  turns  matched 0 of 8 · no token data 0 · unmatched 6 · unknown 2
+```
+- **Plan r1:** the rows would have come from the raw config getters, which describe the YAML and not what runs. The editor would also have bound the effective stop value instead of each scope's saved one.
+- **Impl r1:**
+  - a background refresh wiped a half-typed note;
+  - malformed panel/briefer blocks read as a quiet "off";
+  - `run: "true"` saved the project order, and `id: 1.9` deleted note #1.
+
+  All three were fixed with real-endpoint or real-Chromium regressions.
 
 ## Implementation notes: what looking at it changed
 The tab was driven in a real page (a scratch project, `tagteam serve --port 8768`, Playwright MCP). Screenshots are in the git-ignored `.playwright-mcp/`: `p71-1` project phase + run roadmap, `p71-2` the confirm for unsetting the run stop, `p71-3` a full-roadmap run with no override, `p71-4` a malformed orders file plus a stale-config watcher, `p71-5` 390 px. After every write, `tagteam orders` agreed with the page:

@@ -33,7 +33,7 @@ the top. Each phase is engine + CLI first, cockpit surface second. tagteam stays
 - **Depends on:** Phase 71
 
 ### Phase 71: Cockpit Rules tab
-- **Status:** In review — plan approved round 2 (2026-09-23); impl in review. See `docs/phases/cockpit-rules-tab.md`.
+- **Status:** ✅ Approved — plan approved round 2, impl approved round 2 (2026-09-23); gate: 2,399 passed, 5 skipped at `33ae377`. PR open. See `docs/phases/cockpit-rules-tab.md`.
 - **Description:** A Rules tab that shows, in plain language, what governs this project's runs: the effective `tagteam.yaml` (gate, panel, briefer, resend minutes, round cap) and the standing orders of Phase 70. Rules the engine enforces and orders the agents are merely told are kept visually apart. Read-only first; then editing of a small safe set through the CLI with a dry-run diff (targeted line edits — a PyYAML rewrite would drop the file's comments). Presets with a recommended default, plus one free-text box.
 - **Depends on:** Phase 70, Phase 68
 
