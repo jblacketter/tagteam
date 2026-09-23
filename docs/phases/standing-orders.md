@@ -1,10 +1,32 @@
 # Phase 70: Standing orders
 
 ## Status
-- [x] Planning: plan approved round 3 (2026-09-23) at `fd4fda3`. r1: reconciliation, terminal outcomes, no-orders promise; r2: continue vs convert.
+- [x] Planning: approved round 3 (2026-09-23) at `fd4fda3`
 - [x] Implementation: branch `phase-70-standing-orders`
-- [ ] Implementation Review
-- [ ] Complete
+- [x] Implementation Review: approved round 3 (2026-09-23) at `c8e5640`; gate 2,354 passed, 5 skipped
+- [ ] Complete: PR open, awaiting the arbiter's merge.
+
+## Closeout
+```
+Phase report: standing-orders — plan approved r3 · impl approved r3
+  plan   3 rounds · 2 change requests · 0 bounces
+  impl   3 rounds · 1 change request · 1 bounce · gate 3 runs, 23m 57s
+  time   start→approve 44m 00s · implementation before first submit 7m 51s
+         lead 5m 25s (4 spans, 2 unknown) · reviewer 6m 47s (5 spans) · gate 23m 58s (3 spans)  (elapsed; includes relay wait)
+  usage  no usage rows stored under this phase
+  turns  matched 0 of 11 · no token data 0 · unmatched 9 · unknown 2
+```
+- **Plan r1:** `state sync` would have re-decided an approval. This led to deciding once at the fresh approval, recording the decision on the cycle status, and having sync re-apply it only. Terminal outcomes (exhausted or invalid roadmap) could have leaked the override. The no-orders promise contradicted full-roadmap runs.
+- **Plan r2:** resetting `completed` on an existing roadmap run would have let an earlier phase run again. This led to `continue` versus `convert`.
+- **Impl r1:** a gate bounce, because `tagteam orders` was missing from README and how-tagteam-works.
+- **Impl r2:** a repeated APPROVE re-decided and could restart a stopped run. The CLI could write a file its own reader refuses. The planned doctor warning was missing.
+
+**Deviations from the plan text, accepted in review:**
+- `--run` writes don't bump `seq`, because a bump would make the watcher re-dispatch the owed turn.
+- Every recorded decision prints a one-line stderr note.
+- A repeated APPROVE keeps and re-applies its recorded decision rather than being rejected.
+
+**Not exercised:** a live watcher process dispatching the next phase after a convert. The tests call the unchanged `_try_roadmap_advance` directly.
 
 ## Summary
 The arbiter's run-level instructions live in chat today: "go to the end of all
