@@ -82,12 +82,16 @@ tagteam cancel-turn                           # kill the in-flight headless turn
 tagteam interject "prefer the smaller diff"   # note for the next turn (--to lead|reviewer to target a role)
 tagteam interject --list                      # pending / delivered / retired notes for this cycle
 tagteam interject --retire 3                  # close a note without delivering it
+tagteam orders stop phase|roadmap [--run]     # standing order (enforced): stop after each phase, or run the roadmap
+tagteam orders add "hold the PR for my approval" [--run]   # standing note (advisory: delivered every turn, not enforced)
+tagteam orders                                # effective orders and where each comes from
 tagteam usage [--json]                        # per-turn tokens; roll-ups by role, by cycle, totals
 ```
 
 - **pause/resume** use the same marker file the engine writes on a failed turn (`.tagteam/headless-paused.json`), so `resume` also tells you what failed and where the log is.
 - **cancel-turn** never signals a PID it cannot bind to the recorded turn: it checks the child's and the watcher's creation identities (recorded at spawn) and the parent pid, and if anything is stale or unverifiable it just removes the stale metadata and says so.
 - **interject** notes are stored with provenance (who, when, which cycle/round/turn was owed) in the project DB and go into the *next eligible* turn's prompt under an `ARBITER INTERJECTIONS` heading (headless) or show up as `interjections` on `tagteam cycle rounds` (interactive). A note is scoped to the cycle it was written for; delivery is stamped only when the receiving turn succeeds. `--to reviewer` waits for the reviewer's turn.
+- **orders** are standing orders: like an interjection that is never consumed, delivered to both agents in every turn (a `STANDING ORDERS` block in the headless prompt; on stderr above `tagteam cycle rounds`). Project orders live in a committed `tagteam-orders.json`, and `--run` sets an override in `handoff-state.json` that is dropped when its run ends. Only `stop` is enforced: when an implementation is approved, the engine records a decision on the cycle (continue / convert to a roadmap run / stop / roadmap exhausted), and `state sync` re-applies that decision without re-deciding. Advisory notes are delivered but not enforced. Without orders, nothing is written or printed.
 - **Retries** (`tagteam watch --mode headless --turn-retries N`, default 0) re-run a failed turn only when it provably did nothing: the outcome is `spawn_failed`/`nonzero_exit`/`timeout` **and** a content-sensitive repo fingerprint (HEAD + index + worktree, recursively through every gitlink) **and** the handoff state are unchanged. `no_round`/`cancelled` are never retried; any git failure or unmerged index fails closed. Only `.gitignore`d paths are outside the fingerprint.
 - Per-role turn timeouts: `agents.<role>.headless.timeout_minutes`.
 - **Notifications** work on macOS (osascript), Windows (toast, `msg` fallback) and Linux (`notify-send`); `TAGTEAM_NO_NOTIFY=1` silences them.
