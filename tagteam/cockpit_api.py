@@ -1584,11 +1584,12 @@ def _gate_row(config: dict) -> dict:
 def _panel_row(config: dict, root: Path) -> dict:
     from tagteam.panel import resolve_panel
     p = resolve_panel(config, root)
-    block = config.get("panel") if isinstance(config.get("panel"), dict) else {}
+    # Any problem with a PRESENT block is shown — a malformed mapping or enable value included
+    # (impl r1 review); an absent block, or a valid disabled one, has none and stays quiet.
     row = {"key": "panel", "label": "Reviewer panel", "on": p.enabled,
            "source": "tagteam.yaml panel", "change": "panel.enabled",
            "applies": _APPLIES["watcher"],
-           "warnings": [f"panel: {x}" for x in p.problems] if block.get("enabled") is True else []}
+           "warnings": [f"panel: {x}" for x in p.problems] if "panel" in config else []}
     if not p.enabled:
         row["value"] = "off"
         row["text"] = "One reviewer takes every review turn."
@@ -1606,11 +1607,10 @@ def _panel_row(config: dict, root: Path) -> dict:
 def _briefer_row(config: dict, root: Path) -> dict:
     from tagteam.briefer import resolve_briefer
     b = resolve_briefer(config, root)
-    block = config.get("briefer") if isinstance(config.get("briefer"), dict) else {}
     row = {"key": "briefer", "label": "Escalation brief", "on": b.enabled,
            "source": "tagteam.yaml briefer", "change": "briefer.enabled",
            "applies": _APPLIES["watcher"],
-           "warnings": [f"briefer: {x}" for x in b.problems] if block.get("enabled") is True else []}
+           "warnings": [f"briefer: {x}" for x in b.problems] if "briefer" in config else []}
     if not b.enabled:
         row["value"] = "off"
         row["text"] = "No automatic decision brief when a cycle escalates."
@@ -1739,6 +1739,9 @@ def _plan_orders(params: dict, by: str):
     """POST /api/orders → `tagteam orders …` argv."""
     from tagteam import orders
     op = str(params.get("op") or "").strip()
+    # A supplied scope must be a real boolean: "true" / 1 must not quietly mean the PROJECT.
+    if "run" in params and params["run"] is not None and not isinstance(params["run"], bool):
+        raise ValueError("'run' must be true or false")
     run = params.get("run") is True
     tail = (["--run"] if run else [])
     if op == "stop":
@@ -1757,11 +1760,11 @@ def _plan_orders(params: dict, by: str):
             raise ValueError(f"'text' is limited to {ORDER_TEXT_MAX} characters")
         return orders.orders_command, ["add", text] + tail + ["--by", by]
     if op == "remove":
-        try:
-            rid = int(params.get("id"))
-        except (TypeError, ValueError):
+        raw = params.get("id")
+        # an actual integer (or an integer string) — never a bool, never a truncated float
+        if isinstance(raw, bool) or not (isinstance(raw, int) or (isinstance(raw, str) and raw.strip().isdigit())):
             raise ValueError("'id' must be an integer")
-        return orders.orders_command, ["remove", str(rid)] + tail
+        return orders.orders_command, ["remove", str(int(raw))] + tail
     if op == "clear-run":
         return orders.orders_command, ["clear", "--run"]
     raise ValueError("'op' must be stop, add, remove or clear-run")

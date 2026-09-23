@@ -105,6 +105,23 @@ class TestEngineRows:
         assert "no scope check" in g["text"] and "in the watcher" in g["text"]
         assert g["applies"] == "when the watcher starts"
 
+    @pytest.mark.parametrize("block, key", [
+        ("panel: invalid\n", "panel"), ("panel:\n  enabled: \"true\"\n", "panel"),
+        ("briefer: invalid\n", "briefer"), ("briefer:\n  enabled: \"yes\"\n", "briefer")])
+    def test_malformed_panel_or_briefer_is_a_warning_even_when_not_enabled(self, proj, block, key):
+        """impl r1 review: a malformed mapping or enable value is shown, beside a valid row."""
+        _cfg(proj, block + "watcher:\n  resend_minutes: 7\n")
+        p = capi.rules_payload(proj)
+        rows = _rows(p)
+        assert rows[key]["on"] is False and rows[key]["warnings"]
+        assert any(w.startswith(key + ":") for w in p["warnings"])
+        assert rows["resend"]["value"] == "7 min"
+
+    @pytest.mark.parametrize("block", ["", "panel:\n  enabled: false\n", "briefer:\n  enabled: false\n"])
+    def test_absent_or_valid_disabled_blocks_are_quiet(self, proj, block):
+        _cfg(proj, block)
+        assert capi.rules_payload(proj)["warnings"] == []
+
     def test_unreadable_config_is_a_warning_and_defaults(self, proj):
         (proj / "tagteam.yaml").write_text("agents: [unclosed\n")
         p = capi.rules_payload(proj)
@@ -225,7 +242,9 @@ class TestOrdersAction:
 
     @pytest.mark.parametrize("params", [
         {"op": "stop", "value": "sometimes"}, {"op": "add", "text": ""}, {"op": "add", "text": "two\nlines"},
-        {"op": "add", "text": "x" * 501}, {"op": "remove", "id": "x"}, {"op": "nope"}, {}])
+        {"op": "add", "text": "x" * 501}, {"op": "remove", "id": "x"}, {"op": "nope"}, {},
+        {"op": "stop", "value": "roadmap", "run": "true"}, {"op": "add", "text": "t", "run": 1},
+        {"op": "remove", "id": 1.9}, {"op": "remove", "id": True}, {"op": "remove", "id": "-1"}])
     def test_bad_params_are_rejected(self, params):
         with pytest.raises(ValueError):
             capi._plan("orders", params, by="web:jack")
@@ -249,6 +268,20 @@ class TestOrdersAction:
             r = s.client.post("/api/orders", {"op": "bogus"}, headers=s.auth())
             assert r["status"] == 400
             assert s.client.post("/api/orders", {"op": "clear-run"})["status"] in (401, 403)   # token required
+
+    def test_bad_scope_or_id_is_400_and_changes_nothing(self, proj):
+        """impl r1 review: `run: "true"` must not save the PROJECT stop, and
+        `id: 1.9` must not delete note #1."""
+        _cfg(proj, "serve:\n  theme: cockpit\n")
+        write_state({"phase": "a", "type": "plan", "status": "ready", "turn": "reviewer"}, str(proj))
+        _o(proj, "add", "keep me")
+        before = ((proj / orders.ORDERS_FILE).read_bytes(), (proj / "handoff-state.json").read_bytes())
+        with Served(proj, "cockpit") as s:
+            for body in ({"op": "stop", "value": "roadmap", "run": "true"},
+                         {"op": "remove", "id": 1.9}, {"op": "remove", "id": True}):
+                r = s.client.post("/api/orders", body, headers=s.auth())
+                assert r["status"] == 400 and r["json"]["ok"] is False, body
+        assert ((proj / orders.ORDERS_FILE).read_bytes(), (proj / "handoff-state.json").read_bytes()) == before
 
     def test_rules_is_cockpit_only(self, proj):
         with Served(proj) as s:
@@ -316,7 +349,8 @@ def _run_rules_in_chromium(scenario_js: str) -> dict:
       var POSTS = [], TOASTS = [];
       function toast(k, m) { TOASTS.push(k + ':' + m); }
       function getJSON() { return Promise.resolve({ ok: true, body: PAYLOAD }); }
-      function act(btn, url, data, opts) { POSTS.push({ url: url, data: data, title: opts.confirm.title, body: opts.confirm.body }); }
+      var ACTS = [];
+      function act(btn, url, data, opts) { POSTS.push({ url: url, data: data, title: opts.confirm.title, body: opts.confirm.body }); ACTS.push(opts); }
     """
     page = ("<!DOCTYPE html><html><head><meta charset='utf-8'><style>" + css + "</style></head><body>"
             + "<main class='main' style='width:900px'>" + panel + "</main>"
@@ -403,3 +437,35 @@ class TestRulesTabInARealBrowser:
         """)
         assert r == {"disabled": [True, True, True], "checked": False, "chips": True, "free": True,
                      "runEditable": True}
+
+    def test_a_draft_survives_refreshes_and_is_cleared_only_by_its_own_success(self):
+        """impl r1 review: SSE / the live tick / a write re-render the tab; an
+        unfinished note must keep its text, focus and caret."""
+        r = _run_rules_in_chromium(r"""
+          renderRules(PAYLOAD);
+          var inp = $('rules-free-text');
+          inp.focus(); inp.value = 'half a thought'; inp.dispatchEvent(new Event('input'));
+          inp.setSelectionRange(4, 6);
+          renderRules(PAYLOAD);                                   // a background refresh
+          var a = $('rules-free-text');
+          var RESULT = { refreshed: { value: a.value, focused: document.activeElement === a,
+                                      sel: [a.selectionStart, a.selectionEnd] } };
+          document.querySelector('.rules-add .rules-scope button[data-scope="run"]').click();   // scope change
+          RESULT.afterScope = $('rules-free-text').value;
+          document.querySelector('.rules-free button').click();   // submit → the write is REFUSED
+          ACTS[ACTS.length - 1].onDone({ ok: false });
+          renderRules(PAYLOAD);                                   // the reload after a refused write
+          RESULT.afterRefused = $('rules-free-text').value;
+          // a cancelled confirm never calls onDone: nothing to do, the text is simply still there
+          RESULT.afterCancel = $('rules-free-text').value;
+          document.querySelector('.rules-free button').click();   // submit again → succeeds
+          ACTS[ACTS.length - 1].onDone({ ok: true });            // its loadRules() re-renders asynchronously…
+          renderRules(PAYLOAD);                                   // …so render the reload's result here
+          RESULT.afterSuccess = $('rules-free-text').value;
+          RESULT.posted = POSTS.map(function (p) { return p.data; });
+        """)
+        assert r["refreshed"] == {"value": "half a thought", "focused": True, "sel": [4, 6]}
+        assert r["afterScope"] == "half a thought"
+        assert r["afterRefused"] == "half a thought" and r["afterCancel"] == "half a thought"
+        assert r["afterSuccess"] == ""
+        assert r["posted"] == [{"op": "add", "text": "half a thought", "run": True}] * 2

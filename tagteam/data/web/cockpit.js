@@ -642,7 +642,10 @@
   // What governs this project's runs, as /api/rules states it. This slice PRESENTS the payload:
   // which rows exist, what they say, and which saved value each scope holds are all server-side.
   // Enforced and advisory stay apart by heading, marker and wording (never colour alone).
-  var RULES = { data: null, stopScope: 'project', noteScope: 'project', loaded: false };
+  // `draft`: the unfinished free-text note. The tab re-renders on every refresh (SSE, the live tick,
+  // after any write), so the text, focus and selection live here — never only in a replaced <input> —
+  // and the draft is cleared only when ITS add succeeded (impl r1 review).
+  var RULES = { data: null, stopScope: 'project', noteScope: 'project', loaded: false, draft: '' };
 
   function loadRules() {
     return getJSON('/api/rules').then(function (r) {
@@ -652,10 +655,10 @@
     });
   }
 
-  function ordersAct(btn, body, title, detail) {
+  function ordersAct(btn, body, title, detail, onOk) {
     return act(btn, '/api/orders', body, {
       confirm: { title: title, body: detail, labels: { ok: 'Save' } },
-      onDone: function () { loadRules(); }
+      onDone: function (r) { if (r && r.ok && onOk) onOk(); loadRules(); }
     });
   }
 
@@ -755,6 +758,9 @@
       list.appendChild(row);
     });
     var add = $('rules-add');
+    var old = $('rules-free-text');                       // focus + selection survive the rebuild
+    var keep = (old && document.activeElement === old)
+      ? { start: old.selectionStart, end: old.selectionEnd } : null;
     add.textContent = '';
     add.appendChild(scopeToggle(RULES.noteScope, function (s) { RULES.noteScope = s; renderAdvisory(RULES.data); }, 'Add a note for:'));
     var where = RULES.noteScope === 'run' ? 'this run' : 'the project';
@@ -775,6 +781,8 @@
     var input = document.createElement('input');
     input.type = 'text'; input.id = 'rules-free-text'; input.maxLength = p.text_max || 500;
     input.placeholder = 'Your own note for both agents…';
+    input.value = RULES.draft;
+    input.addEventListener('input', function () { RULES.draft = input.value; });
     var go = el('button', 'btn btn-small', 'Add');
     go.type = 'submit';
     input.disabled = go.disabled = noteLocked;
@@ -783,9 +791,14 @@
       if (e && e.preventDefault) e.preventDefault();
       var text = (input.value || '').trim();
       if (!text) return;
-      ordersAct(go, { op: 'add', text: text, run: RULES.noteScope === 'run' }, 'Add an advisory note for ' + where, text);
+      ordersAct(go, { op: 'add', text: text, run: RULES.noteScope === 'run' }, 'Add an advisory note for ' + where, text,
+        function () { if ((RULES.draft || '').trim() === text) RULES.draft = ''; });
     });
     add.appendChild(form);
+    if (keep) {
+      input.focus();
+      try { input.setSelectionRange(keep.start, keep.end); } catch (e) { /* ignore */ }
+    }
   }
 
   function renderRules(p) {
