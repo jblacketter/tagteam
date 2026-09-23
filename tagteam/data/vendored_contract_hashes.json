@@ -1,6 +1,7 @@
 {
   "contract": "tagteam/data/.claude/skills/handoff/SKILL.md",
   "hashes": {
+    "076f864c3d0edeb344b74266d3801cb872b7332e6f4a21b0b3a73b1cf15d2634": "431df5e6b484",
     "2cfbe9e5fe1268948a4703b46f7a3afd6b43d3bed1c6d5dc1d1a8ef9120b5cdb": "3.4.0",
     "4631899e19a4b064fd442bab07549be86ad33664e244390d13a2471282860052": "0.10.0",
     "503716cc29042b0bcbb8018db6b9e51e3b46f59a878cd4f24cbe878246d6b3b8": "0.9.0",
