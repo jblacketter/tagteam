@@ -1,8 +1,8 @@
 # Phase 70: Standing orders
 
 ## Status
-- [ ] Planning: plan cycle open (round 3 — r1: reconciliation, terminal outcomes, no-orders promise; r2: continue vs convert)
-- [ ] Implementation
+- [x] Planning: plan approved round 3 (2026-09-23) at `fd4fda3`. r1: reconciliation, terminal outcomes, no-orders promise; r2: continue vs convert.
+- [x] Implementation: branch `phase-70-standing-orders`
 - [ ] Implementation Review
 - [ ] Complete
 
