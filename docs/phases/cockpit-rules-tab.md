@@ -1,7 +1,7 @@
 # Phase 71: Cockpit Rules tab
 
 ## Status
-- [ ] Planning: plan cycle open (round 1)
+- [ ] Planning: plan cycle open (round 2 — r1: runtime resolvers; saved vs effective stop)
 - [ ] Implementation
 - [ ] Implementation Review
 - [ ] Complete
@@ -47,51 +47,68 @@ key and file to change.
 
 ## Technical approach
 
-### `GET /api/rules`: one payload, derived server-side
-The front end presents it and never derives anything from it. It reads only
-files: `tagteam.yaml` via `read_config` + the `get_*_spec` helpers,
-`orders.effective()`, and the state file. It never opens the database,
-creates nothing, and is allowed under `TAGTEAM_READ_ONLY`.
+### `GET /api/rules`: one payload, derived server-side, from the runtime resolvers
+The front end presents it and never derives anything. It reads files only: the
+state file, `tagteam.yaml`, `tagteam-orders.json`, and the watcher heartbeat
+through `watchlog.beat_view()`. It never opens the database, creates nothing,
+and is allowed under `TAGTEAM_READ_ONLY`.
 
+**Engine rows describe what runs, not what the YAML says** (r1 review). Each
+row comes from the resolver the engine itself uses, never from a raw
+`get_*_spec` getter, because the getters assume a validated block:
+
+| Row | Resolver (shared with the engine) | What the row states |
+|---|---|---|
+| gate | `gatekeeper.resolve_gatekeeper(config)` | `enabled` after validation. The cycle types it gates (`on`: "implementation reviews only" for `[impl]`). When it runs: at the lead's submission (`on_submit`) or in the watcher before the reviewer's turn. Which checks are active: tests configured or not, scope on or off, plan-doc always. Its bounce cap. Never the test command. |
+| panel | `panel.resolve_panel(config, root)` | enabled after validation *and* lens-brief/provider resolution; the lens names; `on` cycle types; the `phases` restriction if any. |
+| briefer | `briefer.resolve_briefer(config, root)` | enabled after validation *and* provider resolution; the provider. |
+| re-send | new `config.resolve_watcher(config) -> (resend_minutes, problems)`, factored out of `watcher._watch_locked` (the watcher then calls it, so the two cannot drift): an invalid block gives the default 15, as the watcher does | "a turn still owed after N min is re-sent" (0 = never) |
+| auto-escalation | `cycle.STALE_ROUND_LIMIT` | "10 consecutive unchanged re-submissions escalate to you" |
+| stop | `orders.effective()` | see below |
+
+- A resolver's `problems` become row-level `warnings` ("gatekeeper block
+  invalid: … — the gate is OFF"). An invalid block never hides a valid
+  independent one, because each row has its own resolver, and a test pins
+  this with one invalid and one valid block side by side.
+- Resolvers that look up an executable do only a PATH/file lookup. Nothing
+  is run.
+- **Configured versus running.** Some settings are read by the watcher once,
+  when it starts: the watcher-run gate, the panel, the briefer, and the
+  re-send interval. Others are read on every call: the `on_submit` gate and
+  the standing orders. Each row carries `applies`: `"each submission"` /
+  `"each approval"` / `"when the watcher starts"`. When the heartbeat shows a
+  running watcher (`beat_view` = fresh / in-turn) whose `started_at` is
+  earlier than `tagteam.yaml`'s mtime, the payload sets
+  `watcher_stale_config: {started_at, config_mtime}`. The page then says that
+  the running watcher still uses the settings it started with, and to restart
+  it to apply the change. The page cannot see the running watcher's own
+  settings, and it says that rather than guessing.
+
+**The stop order: effective versus saved per scope** (r1 review):
 ```json
-{
-  "enforced": [
-    {"key": "stop", "label": "When a run stops for you",
-     "value": "roadmap", "text": "After each phase's implementation is approved, the run goes on to the next ready roadmap phase.",
-     "source": "standing order (project)", "editable": "orders"},
-    {"key": "gate", "label": "Gate before every review",
-     "value": "on · runs at submit", "text": "Tests, scope and plan-doc checks run inside the lead's submission; a failure hands the turn back.",
-     "source": "tagteam.yaml gatekeeper", "editable": null},
-    {"key": "panel", …}, {"key": "briefer", …},
-    {"key": "resend", "label": "Re-send a stuck turn", "value": "15 min", …},
-    {"key": "stale", "label": "Auto-escalation", "value": "10 stale rounds", "source": "built in", …}
-  ],
-  "advisory": [{"id": 1, "scope": "project"|"run", "text": "…", "by": "…"}],
-  "stop": {"value": "roadmap", "source": "project", "run_override": null|{…}},
-  "last_decision": "converted to a roadmap run …" | null,
-  "presets": {"stop": [...], "advisory": [...]},
-  "warnings": ["tagteam-orders.json is malformed — treated as no project orders", "tagteam.yaml: …validation problem…"]
-}
+"stop": {"effective": "roadmap", "source": "run" | "run-mode" | "project" | "default",
+         "project": "phase" | "roadmap" | null,     // saved in tagteam-orders.json; null = not set
+         "run": "phase" | "roadmap" | null,         // saved in the run override; null = not set
+         "run_mode_roadmap": true | false,          // a full-roadmap run supplies roadmap without a stop override
+         "project_shadowed_by": "run" | "run-mode" | null}
 ```
+`project_shadowed_by` is set when the project's saved value is not the
+effective one because a higher-precedence choice wins.
 
-- **Enforced rows** are the stop order plus the five engine rules. Each row
-  has a plain-language `text` that says what happens, not how the key is
-  spelled. Its `source` names where it comes from. The gate's test command is
-  **not** shown (doctor's rule: no configured command or argument), only
-  "tests configured".
-- **Advisory** is `effective().advisory`. Notes marked `run` are labelled
-  "this run".
-- Validation problems in `tagteam.yaml` become `warnings`. When the file is
-  invalid, a row shows what the engine actually does (the spec defaults),
-  never a guess.
-- **Presets** are defined server-side, so the CLI, the cockpit and 71b share
-  one list:
-  - stop: `phase` "Stop after each phase for my review" (recommended) ·
-    `roadmap` "Run to the end of the roadmap unless there is a question".
-  - advisory: "Commit at the end of each phase, but hold the PR for my
-    approval" (recommended) · "Open the PR when the phase is done" ·
-    "Keep commits small and describe how each change was verified".
-  - Plus one free-text box.
+The rest of the payload:
+- `advisory`: `[{id, scope: "project"|"run", text, by}]`
+- `last_decision`: the text of `orders.describe_decision`, or `null`
+- `presets` (below)
+- `warnings`, one list covering: a malformed orders file, and each
+  resolver's problems
+
+**Presets** are defined server-side in one table (`ORDER_PRESETS`):
+- stop: `phase` "Stop after each phase for my review" (recommended) ·
+  `roadmap` "Run to the end of the roadmap unless there is a question".
+- advisory: "Commit at the end of each phase, but hold the PR for my approval"
+  (recommended) · "Open the PR when the phase is done" · "Keep commits small
+  and describe how each change was verified".
+- Plus one free-text box.
 
 ### `POST /api/orders`
 `{op: "stop", value: "phase"|"roadmap"|"unset", run: bool}` ·
@@ -106,25 +123,36 @@ limited to one line of 500 characters, and the server enforces that.
 - A heading, then two visually distinct groups: **Enforced — the engine does
   this** and **Advisory — the agents are told this; tagteam cannot enforce
   it**. Each group has its own marker and wording, so neither colour alone
-  nor position alone tells them apart.
-- **Stop:** a two-option radio built from the presets, with the recommended
-  one marked. A scope toggle chooses **Project** (saved in
-  `tagteam-orders.json`) or **This run only**. When a run override is in
-  force, it is shown with a "clear" link.
+  nor position alone tells them apart. Engine rows show their `applies` note,
+  and the stale-config notice appears when the payload sets it.
+- **Stop:**
+  - **The effective line comes first:** "Now: the run stops after each phase
+    (project order)", or "Now: runs the roadmap (this is a full-roadmap run)".
+  - **Then a scope toggle, Project | This run**, which picks which *saved*
+    value is being edited. The radio always shows that scope's saved value
+    from `stop.project` or `stop.run`, never the effective one. It has three
+    options: the two presets (recommended marked) and **Not set — inherit**.
+  - **When editing Project while `project_shadowed_by` is set**, the editor
+    says "This run uses *roadmap* (set for this run / a full-roadmap run);
+    your project setting applies from the next run". A successful project
+    edit therefore never looks like it reverted.
+  - **"Not set" on This run** runs `orders stop --unset --run`. That removes
+    only the run's stop and **keeps that run's advisory notes**.
+  - **A separate "Clear this run's overrides" action** runs
+    `orders clear --run`. It removes the run's stop *and* notes, and its
+    confirmation says so.
 - **Advisory:**
   - a list of notes, each with its scope and a remove button;
   - preset chips that add a note in one click;
   - one free-text box with Add;
-  - the same scope toggle.
-- **`tagteam.yaml` rows:** read-only, each with "change `gatekeeper.enabled`
-  in tagteam.yaml" as the way out, until 71b.
+  - a scope toggle (Project | This run).
+- **`tagteam.yaml` rows:** read-only, each naming the key to change, e.g.
+  "`gatekeeper.enabled` in tagteam.yaml", until 71b.
 - Every write goes through the existing confirmation pattern, which shows the
-  exact CLI line, then reloads `/api/rules`. The tab loads the first time it
-  is opened, and again on Refresh or after a write. The page's SSE signature
-  is not extended, so changing orders from the CLI shows up on Refresh.
+  exact CLI line, then reloads `/api/rules`. The tab loads when it is first
+  opened, and again on Refresh or after a write.
 - **Last approval** (when there is a `run_decision`): one line, "Last
-  approval: converted to a roadmap run". This is the same text as
-  `tagteam state`, from `orders.describe_decision`.
+  approval: converted to a roadmap run".
 
 ### Verification
 - **Python:**
@@ -149,6 +177,7 @@ limited to one line of 500 characters, and the server enforces that.
 
 ## Files
 - `tagteam/cockpit_api.py`: `rules_payload()`, `ORDER_PRESETS`, `_plan("orders", …)`.
+- `tagteam/config.py`: `resolve_watcher()`; `tagteam/watcher.py`: `_watch_locked` calls it (no behaviour change).
 - `tagteam/server.py`: `GET /api/rules`, `POST /api/orders` (cockpit routes).
 - `tagteam/orders.py`: `orders_command(..., out=None)` (errors go to `out` when given).
 - `tagteam/data/web/cockpit.html`, `cockpit.js` (a banner-delimited "Phase 71" slice), `cockpit.css`.
@@ -166,6 +195,36 @@ limited to one line of 500 characters, and the server enforces that.
    advisory notes, for the project or for this run, from presets or free
    text. Each write shows its exact CLI line first, and `tagteam orders`
    agrees with the page afterwards (checked in the real page).
+8. Engine rows match the runtime outcome, pinned by API tests that compare
+   each row with the resolver the engine uses:
+   - gatekeeper `enabled: true` with an invalid `scope` shows the gate OFF,
+     with the problem;
+   - a watcher block with an unknown key shows 15 min, the default the
+     watcher actually uses;
+   - a panel lens with a missing brief shows the panel OFF;
+   - a briefer with no resolvable provider shows it OFF;
+   - an invalid gate block beside a valid panel block leaves the panel row
+     correct;
+   - an impl-only gate says "implementation reviews only";
+   - a gate with no tests configured, or with scope off, says so.
+   The watcher's re-send setting and `_watch_locked` share
+   `resolve_watcher`.
+9. Saved versus effective stop, through the API **and** in the real page:
+   (a) project `phase` + run `roadmap`: the Project radio shows *phase*, the
+       This-run radio shows *roadmap*, the effective line says roadmap (this
+       run), and a Project edit to `roadmap` and back is shown as saved, with
+       the shadow note;
+   (b) a full-roadmap run with no stop override: This run shows *Not set*,
+       the effective line says a full-roadmap run, and the Project radio shows
+       the saved project value;
+   (c) This-run stop *Not set* while run notes exist: the stop is removed
+       and the run's notes are still listed, both on the page and in
+       `tagteam orders`;
+   (d) "Clear this run's overrides" removes the run's stop and notes.
+10. When a running watcher started before `tagteam.yaml`'s last change, the
+    page says it is still using its earlier settings. That is tested with a
+    heartbeat fixture, and the page does not claim to know the watcher's
+    settings.
 4. A malformed `tagteam-orders.json` or an invalid `tagteam.yaml` is shown as
    a warning, with the values the engine actually uses. The page still loads.
 5. `tagteam.yaml` rows are read-only and name the key to change. Phase 71b
