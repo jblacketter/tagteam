@@ -1,0 +1,25 @@
+{
+  "state": "approved",
+  "ready_for": null,
+  "round": 3,
+  "phase": "standing-orders",
+  "type": "plan",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-23",
+  "baseline": {
+    "sha": "bf73a435138a148ec498dccb2ef5646bfeced06b",
+    "dirty_paths": [],
+    "captured_at": "2026-09-23T22:27:14.519525+00:00",
+    "source": "plan-init"
+  },
+  "impl_boundary": {
+    "sha": "fd4fda375058475fd42034025684d69ef102f88e",
+    "dirty": {
+      "docs/handoffs/standing-orders_plan_rounds.jsonl": "b858190e10e01843eaf6cb1d076a71a3388ce8141b55b81d6310b5fa83c785ef",
+      "docs/handoffs/standing-orders_plan_status.json": "1c9622c7bd037a3b55c660dca2bb02076ec382e2e7ef622ea8e15ac7252f664a"
+    },
+    "captured_at": "2026-09-23T22:33:02.107467+00:00",
+    "source": "plan-approve"
+  }
+}
