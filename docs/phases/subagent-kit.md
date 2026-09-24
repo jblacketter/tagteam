@@ -11,8 +11,8 @@
 Phase report: subagent-kit — plan approved r4 · impl approved r1
   plan   4 rounds · 3 change requests · 0 bounces
   impl   1 round · 0 change requests · 0 bounces · gate 1 run, 8m 53s
-  time   start→approve 1h 18m · implementation before first submit 18m 10s
-         lead 3m 48s (3 spans, 2 unknown) · reviewer 11m 54s (5 spans) · gate 8m 53s (1 span)  (elapsed; includes relay wait)
+  time   start→approve 29m 50s · implementation before first submit 9m 39s
+         lead 3m 27s (3 spans, 2 unknown) · reviewer 7m 50s (5 spans) · gate 8m 54s (1 span)  (elapsed; includes relay wait)
   usage  no usage rows stored under this phase
   turns  matched 0 of 10 · no token data 0 · unmatched 8 · unknown 2
 ```
