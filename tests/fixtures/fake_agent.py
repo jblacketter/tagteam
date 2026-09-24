@@ -12,6 +12,9 @@ Behaviour is driven by environment variables:
   FAKE_AGENT_CAPTURE  path: argv + stdin prompt are dumped here as JSON
   FAKE_AGENT_PIDFILE  path: grandchild pid is written here (grandchild_hang)
   FAKE_AGENT_SLEEP    seconds between emitted events (default 0.25)
+  FAKE_AGENT_HOLD     path: in `chat` mode, after the first event, wait until this
+                      file exists before replying (polled every 20 ms, capped at
+                      30 s) — lets a test assert "still running" without a race
   FAKE_AGENT_SIDE_EFFECT  JSON list of actions run before exiting in
                       `nonzero` mode (retry-gate tests):
                         {"write": [relpath, content]}   write a file (append)
@@ -51,6 +54,15 @@ def _emit(obj: dict) -> None:
 
 def _sleep() -> None:
     time.sleep(float(os.environ.get("FAKE_AGENT_SLEEP", "0.25")))
+
+
+def _hold() -> None:
+    path = os.environ.get("FAKE_AGENT_HOLD")
+    if not path:
+        return
+    deadline = time.monotonic() + 30
+    while not os.path.exists(path) and time.monotonic() < deadline:
+        time.sleep(0.02)
 
 
 def _parse_state(prompt: str) -> dict:
@@ -177,6 +189,7 @@ def main() -> int:
                 f.write(msg)
         if os.environ.get("FAKE_AGENT_CHAT_HTML"):
             reply = "<img src=x onerror=\"document.title='pwned'\"><script>document.title='pwned'</script>" + reply
+        _hold()
         _sleep()
         if flavor == "claude":
             _emit({"type": "assistant", "message": {"content": [{"type": "text", "text": reply}]},

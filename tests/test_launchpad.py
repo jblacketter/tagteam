@@ -357,8 +357,11 @@ class TestServerEndpoints:
             it = c.get("/api/start")["json"]["intent"]
             r = c.post("/api/start/launch", {"intent": it, "dry_run": True}, headers=s.auth())
             assert "tagteam lead" in r["json"]["cli"] and "watch --mode headless" in r["json"]["cli"]
-            # the composite ACCEPTS the turn and returns while it runs (blocking-ish runner: 2 s of events)
-            monkeypatch.setenv("FAKE_AGENT_SLEEP", "1.0")
+            # the composite ACCEPTS the turn and returns while it runs. Phase 74a: the fake turn is HELD
+            # (FAKE_AGENT_HOLD) until the completion section, so every "still running" assertion below
+            # is a fact of the test, not a race with a ~2 s sleep (it flaked on loaded CI runners)
+            release = tmp_path / "release-the-turn"
+            monkeypatch.setenv("FAKE_AGENT_HOLD", str(release))
             t0 = time.monotonic()
             r = c.post("/api/start/launch", {"intent": it}, headers=s.auth())
             assert r["status"] == 202 and r["json"]["launched"] and r["json"]["status"] == "pending"
@@ -377,6 +380,7 @@ class TestServerEndpoints:
             assert r2["status"] == 202 and r2["json"]["launched"] is False and r2["json"]["conversation_id"] == cid
             assert started == [("headless", True, "watch-start"), ("headless", True, "launch")]   # one from /api/watch/start above, one from the launch — both owned
             # completion finalizes the turn and the launch
+            release.write_text("go")
             deadline = time.monotonic() + 15
             while time.monotonic() < deadline and not any(f.get("event") == "end" for f in rd.frames):
                 rd.pump(0.3)

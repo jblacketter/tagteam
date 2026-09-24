@@ -12,6 +12,10 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 iTerm2 tabs (lead | watcher | reviewer) — lead lane left, reviewer lane right, the watcher behind a turn bar at
 the top. Each phase is engine + CLI first, cockpit surface second. tagteam stays a standalone package; superdash
 (a separate project) consumes it (Phase 74). -->
+### Phase 74a: Launchpad test holds the fake turn
+- **Status:** In progress — impl in review (a test-only fix, so it goes straight to an impl cycle). See `docs/phases/launchpad-test-holds-the-fake-turn.md`.
+- **Description:** `tests/test_launchpad.py::TestServerEndpoints::test_watch_session_and_launch_endpoints` flaked three times on CI: on `main` at `d49c632`, and on PRs #61 and #62. It asserted that a launched lead turn was still running, with its slot held, by relying on a fake turn lasting about 2 s (`FAKE_AGENT_SLEEP=1.0`). On a loaded runner the turn could finish first. Because `lead_chat.run_turn` releases the slot a moment before it finishes the row, a read in that gap saw the turn "running" with its slot free. The fix: the fake agent waits on a hold file the test controls (`FAKE_AGENT_HOLD`), so "still running" is a fact of the test, not a race.
+
 ### Phase 74: Versioned read API for other dashboards
 - **Status:** ✅ Complete — plan approved round 1 (2026-09-24), impl approved round 2 (2026-09-24); gate: 2,567 passed, 5 skipped at `ad9d980`. PR #61 merged 2026-09-24 (rebase). See `docs/phases/versioned-read-api-for-other-dashboards.md`. Arbiter decision 2026-09-20: tagteam stays here and is a package superdash uses; the cockpit is the first step towards that larger UI, not a part of it.
 - **Description:** The hub and cockpit read endpoints (`/api/hub`, `/api/now`, `/api/roadmap`, `/api/watcher/events`, …) are consumed today only by tagteam's own pages, so nothing promises their shape. Declare the read surface another dashboard may rely on: an `api_version` in `/api/hub/info` and `/api/cockpit/info`, a documented list of stable endpoints and fields, and a test that pins them. No new data, no Aegis- or superdash-specific glue.
