@@ -1,10 +1,39 @@
 # Phase 73: Subagent kit
 
 ## Status
-- [ ] Planning: in review (plan cycle opened 2026-09-24)
-- [ ] Implementation
+- [x] Planning: approved round 4 (2026-09-24) at `8f83364`. r1: explicit Claude Code support floor, and a fail-closed wrapper for old/failing CLIs; r2: exit-code verdicts; r3: structural validation plugin-side.
+- [x] Implementation: branch `phase-73-subagent-kit`
 - [ ] Implementation Review
 - [ ] Complete
+
+## Implementation notes
+**Live checks, all in a scratch project,** with this branch's plugin loaded via
+`claude -p --plugin-dir plugin` on Claude Code **2.1.281**. A debug
+PreToolUse hook in the scratch project's own settings recorded each payload.
+1. `tagteam:verifier` was told to run `echo READONLY=$TAGTEAM_READ_ONLY` with
+   **no prefix**. The recorded payload's command was unprefixed, and the hook
+   saw `agent_type: tagteam:verifier`. The output was `READONLY=1`, so the
+   rewrite applied (`updatedInput`, with no `permissionDecision`).
+2. `tagteam:test-runner` issued an unprefixed `tagteam cycle add …`. The CLI
+   refused it with exit 2 and its read-only message, and the cycle file was
+   unchanged. `modelUsage` listed haiku beside sonnet, which is the per-model
+   signal for measuring savings later.
+3. Under a narrow `--allowedTools "Bash(echo:*)"`:
+   - the main session's `echo MAIN=$TAGTEAM_READ_ONLY` printed empty (the
+     hook saw no `agent_type`, so the command was untouched);
+   - the helper's rewritten echo still ran;
+   - there were no permission denials.
+
+   So a narrow allow rule still matches the rewritten command.
+
+The verifier refused the cycle write in check 1 by its own instructions.
+Check 2 shows the CLI refusing, because the test-runner was asked to run the
+command as a guard test.
+
+**Measured, not promised:** the wrapper costs a non-kit call **9.5 ms**
+(200 runs, including spawning `sh` from Python), with no Python start.
+
+**Savings are unmeasured at merge** (the arbiter's decision: no A/B).
 
 ## Summary
 **Deterministic first, a cheap model second, the top model last** (the rule

@@ -242,6 +242,16 @@ def plugin_availability(root: Path) -> dict:
     """``found`` / ``missing`` / ``configured, disabled`` / ``configured,
     broken`` / ``unknown``, with the reason. Uses the Phase 48 reader; unlike
     :func:`tagteam.plugin.plugin_status` a failed discovery is ``unknown``."""
+    return _plugin_install(root)[0]
+
+
+def _plugin_install(root: Path) -> tuple[dict, str | None]:
+    """(availability, installPath when found) — one plugin listing for both."""
+    avail = _plugin_availability(root)
+    return avail, avail.pop("_install_path", None)
+
+
+def _plugin_availability(root: Path) -> dict:
     records, err = list_plugins(root)
     if records is None:
         return {"state": "unknown", "reason": err}
@@ -271,7 +281,69 @@ def plugin_availability(root: Path) -> dict:
         return {"state": "configured, broken", "reason": "install record has no installPath"}
     if not (Path(ip) / SKILL_IN_PLUGIN).is_file():
         return {"state": "configured, broken", "reason": "handoff skill missing from the install"}
-    return {"state": "found", "reason": f"{scope} scope"}
+    return {"state": "found", "reason": f"{scope} scope", "_install_path": ip}
+
+
+# ---------------------------------------------------------------------------
+# Phase 73: the plugin's helper kit
+# ---------------------------------------------------------------------------
+
+#: The Claude Code version the kit's read-only guard was verified on (live check,
+#: 2026-09-24: the PreToolUse hook saw `agent_type: tagteam:verifier` and the
+#: rewrite applied). Older versions may not report the calling agent, and then
+#: nothing can enforce read-only for the Bash helpers.
+KIT_MIN_CLAUDE_CODE = "2.1.281"
+KIT_AGENTS = ("test-runner", "verifier", "explore")
+
+
+def _claude_code_version() -> str | None:
+    import shutil
+    import subprocess
+    exe = shutil.which("claude")
+    if not exe:
+        return None
+    try:
+        r = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=10,
+                           stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    m = re.search(r"(\d+\.\d+\.\d+)", r.stdout or "")
+    return m.group(1) if r.returncode == 0 and m else None
+
+
+def observe_kit(plugin: dict, install_path: str | None, claude_version: str | None,
+                cli_version: str) -> dict:
+    """The kit's state for doctor: is it installed, is the CLI new enough for
+    the plugin, and does this Claude Code report the calling agent (without
+    which the Bash helpers run unguarded). Pure given its inputs."""
+    from tagteam.hook import _semver, skew_warning
+    out: dict = {"state": "unavailable", "detail": f"plugin {plugin.get('state')}",
+                 "cli": None, "claude_code": claude_version, "guard": "unknown", "warnings": []}
+    if plugin.get("state") != "found" or not install_path:
+        return out
+    agents = Path(install_path) / "agents"
+    have = [a for a in KIT_AGENTS if (agents / f"{a}.md").is_file()]
+    if not have:
+        out.update(state="absent", detail="this plugin version ships no helper kit — update the plugin")
+        return out
+    out.update(state="found", detail=", ".join(f"tagteam:{a}" for a in have))
+    skew = skew_warning(Path(install_path), cli_version)
+    out["cli"] = skew or f"tagteam {cli_version} meets the plugin's minimum"
+    if skew:
+        out["warnings"].append(skew)
+    have_t, min_t = _semver(claude_version), _semver(KIT_MIN_CLAUDE_CODE)
+    if have_t is None:
+        out["guard"] = "unknown"
+        out["warnings"].append("Claude Code version unknown — can't tell whether the kit's Bash helpers are guarded")
+    elif have_t >= min_t:
+        out["guard"] = "supported"
+    else:
+        out["guard"] = "unguarded"
+        out["warnings"].append(
+            f"Claude Code {claude_version} is older than {KIT_MIN_CLAUDE_CODE} (the version the read-only guard was "
+            f"verified on): tagteam:test-runner and tagteam:verifier may run Bash unguarded — don't delegate to them. "
+            f"tagteam:explore (no Bash) is unaffected.")
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -495,13 +567,15 @@ class Report:
     user_level: list = field(default_factory=list)
     notes: list = field(default_factory=list)
     installs: list = field(default_factory=list)      # Phase 65: tagteam copies in the project's own venvs
+    kit: dict | None = None                           # Phase 73: the plugin's helper kit
     orders: dict | None = None                        # Phase 70: tagteam-orders.json (None = absent)
 
     @property
     def counts(self) -> dict:
         return {"warn": sum(f["severity"] == "warn" for f in self.findings)
                 + sum(i["state"] == "differs" for i in self.installs)
-                + int(bool(self.orders) and self.orders.get("state") == "warn"),
+                + int(bool(self.orders) and self.orders.get("state") == "warn")
+                + len((self.kit or {}).get("warnings") or []),
                 "info": sum(f["severity"] == "info" for f in self.findings)}
 
     def to_json(self) -> dict:
@@ -554,8 +628,11 @@ def build_report(target: str | Path) -> Report:
     root = Path(target).resolve()
     config, config_note = read_role_config(root)
     roles = observe_roles(root, config)
-    plugin = plugin_availability(root)
+    plugin, install_path = _plugin_install(root)
     fw = observe_framework(root, plugin)
+    from tagteam import __version__ as _cli_version
+    kit = observe_kit(plugin, install_path, _claude_code_version() if plugin.get("state") == "found" else None,
+                      _cli_version)
     skill = next((i for i in fw["items"] if i["path"] == SKILL_REL), None)
     tools = observe_tools(root)
     findings, notes = scan_legacy(root, roles, _managed(fw) | {SKILL_REL})
@@ -564,7 +641,7 @@ def build_report(target: str | Path) -> Report:
     from tagteam.installs import observe_installs
     from tagteam.orders import doctor_view
     return Report(
-        installs=observe_installs(root), orders=doctor_view(root),
+        installs=observe_installs(root), orders=doctor_view(root), kit=kit,
         root=str(root), roles=roles, roles_configured=bool(roles),
         contract={"shell": {"entry": "tagteam contract", "state": "found"}, "plugin": plugin,
                   "vendored_skill": skill},
@@ -609,6 +686,14 @@ def format_report(rep: Report) -> str:
     s = rep.contract.get("vendored_skill")
     L.append(f"  vendored  {s['path']} — {s['action']} ({s['reason']})" if s
              else "  vendored  none")
+    k = rep.kit or {}
+    if k:
+        L.append(f"  kit       {k['state']} — {k['detail']}")
+        if k["state"] == "found":
+            L.append(f"    guard   {k['guard']} (Claude Code {k.get('claude_code') or '?'}; "
+                     f"verified on {KIT_MIN_CLAUDE_CODE}+)")
+        for w in k.get("warnings") or []:
+            L.append(f"    warn    {w}")
     fw = rep.framework
     L += ["", f"Framework   package {fw['package']} · manifest {fw['manifest']} · plugin: {p['state']}"]
     tally: dict[str, int] = {}

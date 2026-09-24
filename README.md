@@ -51,6 +51,13 @@ tagteam quickstart
 
 With the plugin installed and enabled, `tagteam setup` (and `tagteam upgrade`) removes the vendored `.claude/skills/handoff/` from a project — only when it is byte-for-byte a contract tagteam shipped; a customized copy or extra files are kept and reported — and headless turns compose their prompt from the packaged contract. Without the plugin, `setup` vendors the skill; `tagteam setup --no-plugin` forces that. The hook is silent outside tagteam projects and never fails a session start. A project that still vendors the skill invokes the same contract as `/handoff`; agents without Claude Code's plugin skills (Codex) read it with `tagteam contract`.
 
+**Helper kit (Phase 73).** The plugin also ships three cheap, write-less subagents the lead can hand bulky steps to, and gets a digest back:
+- `tagteam:test-runner` (haiku): one focused test run → counts, failing ids and failure tails;
+- `tagteam:verifier` (sonnet): one claim → CONFIRMED / REFUTED / UNVERIFIABLE, with evidence;
+- `tagteam:explore` (haiku, no Bash): a search → file:line pointers.
+
+Their Bash runs read-only for tagteam. A `PreToolUse` hook rewrites each helper command to `export TAGTEAM_READ_ONLY=1; …`, and blocks it if the tagteam CLI can't guard it (missing, too old, or unusable output). This needs a Claude Code that reports the calling agent (verified on 2.1.281); `tagteam doctor` says whether yours does. Other Bash calls pass straight through.
+
 **Safe migration (3.13).** `setup` and `upgrade` no longer overwrite. Every managed file (`docs/workflows.md`, the vendored skill) is classified against the package and the project's committed `tagteam-manifest.json` of what tagteam last wrote: files that are provably tagteam's are refreshed, anything else is kept and reported with the exact `tagteam setup DIR --accept PATH` line that would overwrite it (or delete a pre-plugin `.claude/skills/handoff-*.md`). An accept needs the path tracked and clean in git so `git checkout -- PATH` can undo it; `--force` lifts only that. `--preview` writes nothing. A second run on a migrated project is a byte-identical no-op. Symlinks and non-regular files at any managed path are refused under every flag.
 
 **Retired files (3.14).** Earlier versions also installed `templates/*.md` and `docs/checklists/*.md`; nothing reads a project's copy, so `setup` and `upgrade` no longer create them and remove the copies tagteam wrote: byte-for-byte package copies always — including exact copies of what an earlier release installed (through 3.12.0), verbatim or rendered with the project's configured or swapped agent names, since `setup` baked the names in until 3.12.0 — and older-version copies known only by their manifest hash only when git can restore them (tracked and clean). An old `docs/workflows.md` that exactly matches an earlier release is refreshed the same way. A file whose names no longer match `tagteam.yaml`, or that was edited at all, is yours. A copy you edited is kept and reported with the `--accept PATH` line that deletes it; an emptied directory is removed, one holding anything of yours is not. `tagteam bench` falls back to the package's review checklist when the project has none.
@@ -321,6 +328,7 @@ tagteam setup --preview                # classify and report, write nothing
 tagteam setup --accept docs/workflows.md    # overwrite (or, for a legacy flat skill or a retired template, delete) one custom path — needs it tracked and clean; --force lifts that
 tagteam setup --no-plugin              # force vendoring the handoff skill
 tagteam hook session-start             # the plugin's SessionStart hook body: cycle banner + version-skew warning
+tagteam hook pre-tool-use              # the kit agents' read-only guard (exit 0 rewrite / 3 not a kit agent / 2 deny)
 tagteam contract                       # print the handoff contract (for agents without the plugin, e.g. Codex); --path
 tagteam migrate                        # migrate a legacy project to tagteam.yaml
 tagteam state

@@ -44,7 +44,13 @@ class TestPluginTree:
         assert 'tagteam hook session-start --plugin-root "$CLAUDE_PLUGIN_ROOT"' in cmd
         assert cmd.startswith("command -v tagteam >/dev/null")
         assert cmd.endswith("|| true")
-        assert set(hooks["hooks"]) == {"SessionStart"}
+        # Phase 73: the kit agents' read-only guard (tests/test_hook_pre_tool_use.py runs it as shipped)
+        assert set(hooks["hooks"]) == {"SessionStart", "PreToolUse"}
+        pre = hooks["hooks"]["PreToolUse"]
+        assert [g["matcher"] for g in pre] == ["Bash"]
+        assert [h["command"] for g in pre for h in g["hooks"]] == ['sh "$CLAUDE_PLUGIN_ROOT/hooks/pre_tool_use.sh"']
+        assert (PLUGIN_SRC / "hooks" / "pre_tool_use.sh").is_file()
+        assert (PLUGIN_SRC / "hooks" / "validate_guard.py").is_file()
 
     def test_current_contract_hash_is_known(self):
         digest = hashlib.sha256(PACKAGED.read_bytes()).hexdigest()

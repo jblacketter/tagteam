@@ -84,6 +84,16 @@ When `TAGTEAM_STEP_B=1`, `docs/handoffs/<phase>_<type>.md` is auto-rendered on e
 
 **Read-only helpers.** Any process you delegate to while it is your turn — a brief drafter, a verifier subagent, a panel lens — must run with `TAGTEAM_READ_ONLY=1` in its environment. With it set, the CLI refuses every cycle-writing command (`cycle add`/`init`, `state set`, `rule`, `interject`, `pause`/`resume`, `gate run`, …) before anything touches disk, and never creates or migrates the project database; read commands (`cycle rounds`/`status`, `gate status`, `panel status`, `state`, `contract`, …) work as usual. The helper returns text; the turn's one cycle-writing call stays with you. Tagteam sets the variable itself for the children it spawns (panel lenses, the escalation briefer); headless lead/reviewer turns never get it.
 
+**The helper kit (Claude Code plugin, Phase 73).** The plugin ships three cheap, write-less helpers for the lead. Delegate the bulky steps to them and keep the digest instead of the transcript:
+
+| Agent | Use it for |
+|---|---|
+| `tagteam:test-runner` | one focused test file or test id while you work — never the full suite (the one-run rule stays with you and the gate) |
+| `tagteam:verifier` | re-checking one claim before it goes into a submission; it answers CONFIRMED / REFUTED / UNVERIFIABLE with evidence |
+| `tagteam:explore` | a search across many files, including earlier rounds in `docs/handoffs/`; it returns pointers, not dumps (no Bash) |
+
+Tagteam sets `TAGTEAM_READ_ONLY=1` for the kit's Bash itself: the plugin's PreToolUse hook rewrites each of their commands to start with `export TAGTEAM_READ_ONLY=1; ` and blocks the command if the tagteam CLI can't guard it. The agents' own instruction to add that prefix is a courtesy, not the enforcement. The guard needs a Claude Code version that reports which agent is calling; `tagteam doctor` says whether yours does. Without that, do not delegate to `test-runner` or `verifier`.
+
 **Mid-review amendment.** If new info arrives (e.g., the human arbiter answers an open question) while the reviewer is still on your submission and you haven't been handed back the turn, run:
 
 ```
