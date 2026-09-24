@@ -58,24 +58,54 @@ the turn facts, so any project and `tagteam job list` under read-only work
 and create nothing. Writes are atomic (temp file + replace) under the guarded
 `O_NOFOLLOW` rules that `watchlog` uses.
 
-**Who may write: two `O_EXCL` tokens decide it** (plan review r1). Each is a
-file created with `O_CREAT|O_EXCL`, so exactly one process ever holds it:
-- **`claim`** (the runner token), written with `{pid, ident, claimed_at}`.
-  - `start` writes the initial `job.json` (`status: starting`, no pid)
-    **before** it spawns, and never writes `job.json` again.
-  - The spawned `job run ID` creates `claim` first. It then records its own
-    pid/ident in `job.json`. A second `job run ID` finds `claim` taken and
-    exits non-zero having written nothing. So a fast child's result can't be
-    overwritten by the parent, and a duplicate runner can't poll or deliver.
-  - `start` waits up to 5 s for `claim` to appear. If it hasn't, `start`
-    tries to create `claim` itself (content `{"by": "start"}`). If `start`
-    wins, the child never ran: `start` takes `final` (below), records
-    `error: runner did not start`, and exits non-zero. If `start` loses, the
-    child owns the job.
-- **`final`** (the terminal token). Whoever creates it writes the terminal
-  `job.json` and does the delivery, so a job is finished and delivered
-  **exactly once**. That is the runner in every normal case, and the
-  canceller only for a confirmed-dead runner (below).
+**Who may write: two locks the OS releases** (plan review r1 and r2). A
+token file shuts other writers out, but it can't recover from a crash: a
+process that dies holding it leaves the job stuck for good. So ownership uses
+the same portable exclusive lock the cycle writer already uses
+(`dualwrite._os_lock`/`_os_unlock`: `fcntl.flock` on POSIX, `msvcrt.locking`
+on Windows). A dead holder's lock is released by the OS. There are two lock
+files, both created by `start` before it spawns the runner:
+- **`runner.lock` is held by the runner for its whole life.** It works like
+  the watcher's lifetime lock (`acquire_watcher_lock`). It is **ownership
+  and liveness in one**:
+  - `job run ID` acquires it non-blocking, retrying for up to 2 s, so a
+    reader's momentary probe can't turn a real start into a duplicate. If it
+    can't get the lock, another runner holds it, and `job run` exits
+    non-zero having written nothing.
+  - No "claim published but identity not written yet" window exists,
+    because holding the lock *is* the claim. The pid/ident the runner
+    records in `job.json` are for display only, never for liveness.
+  - Python opens descriptors non-inheritable (PEP 446), so the `gh`
+    children never hold the lock after the runner dies.
+- **`job.lock` is held briefly around every write of `job.json`.** It is a
+  blocking lock. Every writer (`start`'s timeout, the runner, `cancel`) does
+  three things under it:
+  - re-read `job.json`;
+  - apply its change;
+  - atomically replace the file (temp + `os.replace`, so a crash leaves the
+    old or the new record, never half of one).
+
+  **A terminal record is never replaced.** Its status and result are
+  immutable. The one later write allowed is its committer adding the
+  `delivery` field (see Delivery). A writer that finds the job already
+  terminal writes nothing and reports what it found. Crash recovery
+  therefore can't overwrite a committed CI result, and concurrent cancels
+  serialise and re-check. **Lock order:** the runner takes `runner.lock`
+  once, before it ever takes `job.lock`. Everyone else only *probes*
+  `runner.lock` non-blocking while holding `job.lock`. So there is no
+  deadlock.
+
+**Startup.** `start` writes `job.json` (`status: starting`) and the two
+lock files, then spawns the runner. It never writes `job.json` again,
+except for one deadline case:
+- The runner, holding `runner.lock`, takes `job.lock`, re-reads, and moves
+  `starting → running`. If the record is already terminal, it exits.
+- `start` waits up to 5 s for `running`. If the job is still `starting`,
+  `start` takes `job.lock`, re-reads, and if it is still `starting`, writes
+  `error: runner did not start within 5 s`.
+- A runner that starts late then finds the record terminal and exits. The
+  5 s deadline, applied under the lock, decides the race. No liveness
+  guess is involved.
 
 **Statuses:** `starting → running → succeeded | failed | timed-out |
 cancelled | error`.
@@ -84,35 +114,49 @@ cancelled | error`.
   unauthenticated, the target not found, or the runner did not start.
 
 **Liveness is derived on read, and the reader writes nothing.** For a
-non-terminal job, the reader looks at `claim`'s pid and ident:
-- **alive:** `pid_alive(pid)` and `identity(pid) == ident`.
-- **`lost` (confirmed dead):** the pid is not alive, or `identity(pid)` is a
-  *different* identity (the pid was reused).
-- **`unknown`:** the pid answers but `identity()` returns None (unverifiable).
-  It is shown as running with a caveat and is **never** treated as dead.
-- A `starting` job with no `claim` after 30 s reads as `lost`.
+non-terminal job, the reader opens the existing `runner.lock` read-only
+(`O_NOFOLLOW`) and tries the lock non-blocking:
+- **Busy:** a runner holds it, so the job is `running`.
+- **Acquired:** it is released at once. No process holds the runner lock,
+  and the OS would have kept it for a living holder, so this is **confirmed
+  dead**: the job reads `lost`.
+- **The probe can't be made** (the lock file is missing or can't be
+  opened): the job reads **`unknown`**. It is never treated as dead.
 
-**Cancel:**
-- `tagteam job cancel ID` always writes a `cancel` marker first.
-- **Live runner:** the runner sees the marker within one interval, takes
-  `final` and writes `cancelled`.
-- **Confirmed-dead (`lost`) runner:** no one else will ever finish the job,
-  so cancel takes `final` itself. It writes `status: cancelled` with
-  `error: "runner lost"` and delivers nothing (no CI answer is known). This is
-  durable: the job is now an ordinary finished job for `list` and retention.
-- **`unknown` runner:** cancel writes the marker only, and says it could not
-  confirm the runner is dead, so the job was not finalised.
+This replaces r2's pid/identity rule. `pid_alive`/`identity` answer "is
+*a* process with this pid alive", and the lock answers "does the owner
+still hold the job", which is the actual question. The reader creates
+nothing: the lock files exist from `start`, and a probe only opens them.
+
+**Cancel** (it never kills a process):
+- `tagteam job cancel ID` writes a `cancel` marker file, then takes
+  `job.lock` and re-reads:
+  - **already terminal:** it reports the status and writes nothing;
+  - **runner lock busy (live runner):** it leaves the job to the runner,
+    which sees the marker within one interval and commits `cancelled`
+    under `job.lock`;
+  - **runner lock free (`lost`: the runner died, or it was killed after
+    deciding its answer but before committing it):** no one else will
+    ever finish the job, so cancel commits `status: cancelled`,
+    `error: "runner lost"` itself. It delivers nothing, because no CI
+    answer is known. The job is now durably finished and is listed and
+    retained like any other;
+  - **`unknown`:** it leaves the marker only, and says it couldn't confirm
+    the runner is gone.
+- A cancel that dies part-way leaves either the old record or the
+  committed one, and the lock is released. The next cancel finishes the
+  job.
 - An uncancelled `lost` job stays `lost` in `list`. Retention prunes it,
   like a finished one, 7 days after `created_at`.
 
 ### The runner
 `tagteam job start ci-watch …` validates the target, writes `job.json`, and
 spawns `python -m tagteam job run <id>`, detached (a new session, stdout to
-`log.txt`), recording its pid and identity. The runner:
+`log.txt`). The runner (after the startup handshake above):
 - polls every `--interval` seconds (default 20, minimum 5), up to
   `--timeout` (default 60 min);
 - stops at the first definite answer, a cancel marker, or the timeout;
-- writes the result and delivers it.
+- commits the result under `job.lock`, then attempts delivery once.
 
 No model is involved, and no turn slot is taken, because a job is not a turn
 and must never block one.
@@ -171,7 +215,22 @@ Both are normalised to `pending | pass | skip | fail`.
 - `gh` exiting non-zero (not logged in, not found) is an `error` with its
   stderr's first line, and is never retried as if it were CI still running.
 
-### Delivery: one short result, said once
+### Delivery: one best-effort attempt, at most once
+**Delivery is attempted at most once, and it is best-effort**
+(plan review r2). Only the process that *committed* the terminal record
+attempts delivery. It does so after releasing `job.lock`. It then adds a
+`delivery` field (`notify: sent|failed|skipped`,
+`interjection: recorded|skipped|failed`) to the record under the lock. It
+has two possible gaps, both documented:
+- A committer that dies between the commit and delivery leaves a
+  delivery that is **missed, and never replayed**.
+- A committer that dies after sending, but before recording it, leaves a
+  record with **no `delivery` field**, and the job reads "delivery not
+  recorded".
+
+Crash-proof exactly-once delivery is out of scope. A lost-job cleanup
+(cancel) delivers nothing.
+
 - **`job.json` + `log.txt`:** always.
 - **A best-effort desktop notification** through `tagteam.notify`, which
   uses osascript, Windows toast or notify-send. For example: "CI green —
@@ -191,7 +250,7 @@ Both are normalised to `pending | pass | skip | fail`.
 tagteam job start ci-watch (--pr N [--expect-checks N] | --run ID
                              | --workflow NAME (--ref REF | --sha SHA) | --pypi PKG==VER)
                   [--interval S] [--timeout M] [--to-lead] [--quiet]
-tagteam job run ID                     # internal: the runner (claims or exits)
+tagteam job run ID                     # internal: the runner (takes runner.lock or exits)
 tagteam job list [--all] [--json]      # running + the last 24 h (--all: everything)
 tagteam job status ID [--json]
 tagteam job log ID [-n N]
@@ -210,8 +269,9 @@ tagteam job cancel ID
   "✗ failed". A chip expands to the result and the log tail. A running job
   has **Cancel**, confirmed with its CLI line (`POST /api/jobs/cancel`,
   through the existing action pattern).
-- A `lost` job says so, and Cancel clears it. It is a job, not a turn, so
-  nothing is killed without an identity check.
+- A `lost` job says so, and Cancel finalises it (`cancelled` / `runner lost`);
+  an `unknown` one says so and Cancel only leaves the marker. Cancel never
+  kills a process.
 - The strip is refreshed by the existing SSE signature plus the live tick.
   The signature gains the max `jobs` mtime.
 
@@ -253,21 +313,39 @@ tagteam job cancel ID
    - cancel → `cancelled` within one interval;
    - a killed runner → `lost` on read, and the reader writes nothing;
    - **fast completion:** a runner that finishes before `start` returns
-     keeps its terminal result, and `start` never rewrites `job.json`;
-   - **duplicate runner:** a second `job run ID` exits non-zero, writes
-     nothing and delivers nothing;
-   - **cancel after runner death:** the job becomes `cancelled` /
-     `runner lost` durably, it is pruned by retention, and nothing is
-     delivered;
-   - **unverifiable identity** (`identity()` stubbed to None on a live pid)
-     reads `unknown`, and cancel doesn't finalise it;
-   - **runner never claims:** `start` takes the claim and records
-     `error: runner did not start`;
+     keeps its terminal result. `start`'s deadline write finds the record
+     terminal and writes nothing;
+   - **duplicate runner:** a second `job run ID`, while the first holds
+     `runner.lock`, exits non-zero, writes nothing and delivers nothing;
+   - **a probe doesn't block a real start:** a reader holding the
+     `runner.lock` probe when the runner starts doesn't make the runner
+     exit (the 2 s retry);
+   - **interrupted finaliser:** a real child process takes `runner.lock`
+     and `job.lock`, then `os._exit`s before the terminal write. The job
+     reads `lost`, and `cancel` commits `cancelled` / `runner lost`
+     durably, which then survives a re-read and a second cancel;
+   - **a canceller dies after taking `job.lock`:** a child takes `job.lock`
+     and exits without writing. The next cancel completes the job;
+   - **concurrent cancellers** on a lost job: exactly one commits, and the
+     other reports the terminal record;
+   - **recovery never overwrites a result:** a committed `succeeded` job
+     cancelled afterwards (and while `lost`) is unchanged;
+   - **missing lock file** reads `unknown`, never `lost`, and cancel
+     doesn't finalise it;
+   - **the runner never starts:** after `start`'s 5 s deadline the job is
+     `error: runner did not start`, and a late runner exits on the
+     terminal record;
+   - the lost job cancelled above is pruned by retention like a finished
+     one;
    - `list`, `status` and `log` create nothing and work read-only.
 5. **Delivery** (local calls only — this proves the notifier is called,
-   not that anything reaches a phone):
-   - exactly one notification per finished job (a stubbed `tagteam.notify`),
-     even with a duplicate runner or a racing cancel;
+   not that anything reaches a phone; at most once, best-effort):
+   - on the normal path, exactly one notification per finished job (a
+     stubbed `tagteam.notify`), and a `delivery` field in the record;
+   - a duplicate runner and a racing cancel add no notification;
+   - a lost-job cancel sends none;
+   - a committer killed between the commit and delivery leaves the result
+     committed, no `delivery` field, and no later replay;
    - a notifier that raises doesn't change the result;
    - `--quiet` sends none;
    - `--to-lead` records one interjection for the lead with `by: job:<id>`,
@@ -294,6 +372,9 @@ tagteam job cancel ID
 - **The model summary is deferred** (see Out). The deterministic failure
   result ships first; whether a cheap-model summary earns its tokens is
   measured later.
+- **Liveness by lock probe, not pid.** A probe that briefly takes a free
+  lock is the one moment a reader holds anything. It is released at once,
+  and the runner's 2 s acquire retry absorbs it.
 - **Desktop notification on by default** (accepted in r1). It is
   best-effort and desktop-only; the phone push is not tagteam's.
 - **`--ref` resolves locally.** A watch on a ref that exists only on the
