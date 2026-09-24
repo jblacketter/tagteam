@@ -4,7 +4,7 @@
 - [x] Planning: approved round 1 (2026-09-24) at `b9f5635` (arbiter decisions amended in: CORS off; hub usage incl. cost_usd promised as an estimate)
 - [x] Implementation: branch `phase-74-versioned-read-api`
 - [x] Implementation Review: approved round 2 (2026-09-24) at `ad9d980`; gate 2,567 passed, 5 skipped
-- [ ] Complete: PR open, merge pending.
+- [ ] Complete: PR #61 open, merge pending.
 
 ## Closeout
 ```
