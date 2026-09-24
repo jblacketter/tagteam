@@ -1,7 +1,7 @@
 {
   "state": "in-progress",
-  "ready_for": "lead",
-  "round": 3,
+  "ready_for": "reviewer",
+  "round": 4,
   "phase": "subagent-kit",
   "type": "plan",
   "lead": "claude",
