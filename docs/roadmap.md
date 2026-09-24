@@ -18,7 +18,7 @@ the top. Each phase is engine + CLI first, cockpit surface second. tagteam stays
 - **Depends on:** Phase 69
 
 ### Phase 73: Subagent kit
-- **Status:** In progress — plan in review. See `docs/phases/subagent-kit.md`. Proposed in `docs/research/2026-09-14-better-tagteam/` (02, steps 3–4). Reopens the question Phase 57 deferred, from the need side.
+- **Status:** In progress — plan approved round 4 (2026-09-24); implementation in review. See `docs/phases/subagent-kit.md`. Proposed in `docs/research/2026-09-14-better-tagteam/` (02, steps 3–4). Reopens the question Phase 57 deferred, from the need side.
 - **Description:** Ship `plugin/agents/` with a small kit of cheap, tool-restricted helpers the lead delegates to — `test-runner` (focused runs, returns a digest instead of raw output), `verifier` (no write tools), `explore` — all run with `TAGTEAM_READ_ONLY=1`. The top model orchestrates and analyses; helpers absorb verbose output. Claude-side only (Codex has no equivalent; reviewer savings come from gate / panel / effort). Savings are measured with Phase 55's usage data before and after, in tokens and window state, never dollars.
 - **Depends on:** Phase 72
 

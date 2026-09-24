@@ -1,5 +1,6 @@
 """Phase 48: ``tagteam hook session-start`` — the body of the plugin's
-SessionStart hook.
+SessionStart hook. Phase 73: ``tagteam hook pre-tool-use`` — the read-only
+guard for the plugin's kit agents (see ``pre_tool_use``).
 
 Prints one status line when the cwd is a tagteam project with a readable
 ``handoff-state.json``, plus a version-skew warning when the plugin declares a
@@ -90,11 +91,71 @@ def session_start(argv: list[str], *, cwd: Path | None = None, out=None) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# Phase 73: the kit agents' read-only guard
+# ---------------------------------------------------------------------------
+
+KIT_PREFIX = "tagteam:"                        # plugin-scoped agent names: tagteam:test-runner, …
+READ_ONLY_EXPORT = "export TAGTEAM_READ_ONLY=1; "
+
+# The verdict is the exit code, so the plugin's shell wrapper can act on it
+# without parsing JSON (it validates a rewrite separately, plugin-side):
+GUARD_REWRITE = 0      # kit agent: stdout is the rewrite
+GUARD_DENY = 2         # unusable input for a payload the wrapper matched
+GUARD_NOT_KIT = 3      # verified: the top-level identity is not a kit agent — pass untouched
+
+
+def guard_decision(payload) -> tuple[int, dict | None, str]:
+    """(exit code, hook output or None, reason). Pure: no I/O."""
+    if not isinstance(payload, dict):
+        return GUARD_DENY, None, "tagteam guard: the hook input is not a JSON object"
+    agent = payload.get("agent_type")
+    if not (isinstance(agent, str) and agent.startswith(KIT_PREFIX)):
+        return GUARD_NOT_KIT, None, ""
+    tool_input = payload.get("tool_input")
+    command = tool_input.get("command") if isinstance(tool_input, dict) else None
+    if not isinstance(command, str):
+        return GUARD_DENY, None, f"tagteam guard: {agent}: the Bash input has no command string"
+    new_input = dict(tool_input)                 # every other field kept as it was
+    if not command.startswith(READ_ONLY_EXPORT):
+        new_input["command"] = READ_ONLY_EXPORT + command
+    # No permissionDecision: normal Bash permission evaluation still applies.
+    out = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": new_input}}
+    return GUARD_REWRITE, out, ""
+
+
+def pre_tool_use(stdin=None, out=None, err=None) -> int:
+    """``tagteam hook pre-tool-use``: read the PreToolUse payload on stdin.
+
+    A kit agent's (top-level ``agent_type`` ``tagteam:*``) Bash command is
+    rewritten to start with ``export TAGTEAM_READ_ONLY=1; `` (exit 0, the
+    rewrite on stdout); a non-kit caller exits 3 with no output; unusable
+    input exits 2 with the reason on stderr. The plugin's wrapper blocks on
+    anything it can't positively verify, including an older CLI without
+    this subcommand (exit 1)."""
+    stdin = stdin or sys.stdin
+    out = out or sys.stdout
+    err = err or sys.stderr
+    try:
+        payload = json.loads(stdin.read())
+    except (ValueError, UnicodeDecodeError, OSError):
+        print("tagteam guard: the hook input is not valid JSON", file=err)
+        return GUARD_DENY
+    code, output, reason = guard_decision(payload)
+    if output is not None:
+        print(json.dumps(output), file=out)
+    if reason:
+        print(reason, file=err)
+    return code
+
+
 def hook_command(args: list[str]) -> int:
     if not args or args[0] in ("-h", "--help"):
-        print("usage: tagteam hook session-start [--plugin-root DIR]")
+        print("usage: tagteam hook session-start [--plugin-root DIR] | pre-tool-use")
         return 0 if args else 1
     if args[0] == "session-start":
         return session_start(args[1:])
+    if args[0] == "pre-tool-use":
+        return pre_tool_use()
     print(f"unknown hook: {args[0]}", file=sys.stderr)
     return 1
