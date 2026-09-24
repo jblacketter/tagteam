@@ -83,20 +83,24 @@ layers: a shell wrapper in `hooks.json` and the Python guard.
   payload mentions `"agent_type"` with a `tagteam:` value. Every other Bash
   call exits 0 with no output and no Python start. Its overhead is
   **measured and reported** (criterion 2), not promised.
-- **Guard.** For a kit payload it runs `tagteam hook pre-tool-use`. It
-  passes the guard's output through **only if** the CLI exited 0 **and**
-  the output is a JSON object carrying `hookSpecificOutput`. In **every**
-  other case it **exits 2** with a reason on stderr, which Claude Code
-  treats as blocking:
-  - `tagteam` not on PATH;
-  - an **older CLI** without the subcommand (today's `hook.py` returns 1
-    for an unknown hook, and a plain exit 1 is non-blocking);
-  - any non-zero exit;
-  - empty or invalid output.
+- **Guard.** For a payload the prefilter matched, it runs
+  `tagteam hook pre-tool-use`. The **guard's exit code is its verdict**, and
+  the wrapper checks the *content* of a rewrite, not just a key's presence
+  (plan review r2). The wrapper needs no JSON parser for this:
 
-  The reason names the fix: "upgrade the tagteam CLI to ≥ <minVersion>".
-  A kit helper's Bash never runs unguarded because the CLI and the plugin
-  are at different versions.
+  | guard exit | meaning | wrapper does |
+  |---|---|---|
+  | `0` | kit call, rewritten | passes stdout through, exit 0, **only if** stdout contains `"updatedInput"` **and** the literal prefix `export TAGTEAM_READ_ONLY=1; `. Otherwise it **exits 2** as unusable: `{}`, `{"hookSpecificOutput": {}}`, empty or garbage output all block. |
+  | `3` | **verified non-kit**: the top-level `agent_type` is not `tagteam:*` (a prefilter false positive) | exits 0 with **no output**: the command passes untouched |
+  | `2` | guard deny (unparseable input) | exits 2, passing the guard's stderr reason |
+  | anything else | `127` (no CLI), `1` (an **older CLI** answering `unknown hook`; a plain exit 1 is non-blocking in Claude Code), a crash | **exits 2** with "tagteam kit agents need the tagteam CLI ≥ <minVersion> to run Bash read-only" |
+
+  Exit 3 can only come from a CLI that has the guard: today's `hook.py`
+  exits 1 for an unknown hook, and a missing CLI gives 127. So "pass
+  untouched" is reachable only through a guard that parsed the payload and
+  found no kit identity. Everything the wrapper can't positively verify
+  blocks. A kit helper's Bash never runs unguarded because the CLI and the
+  plugin are at different versions.
 
 **The guard (`tagteam hook pre-tool-use`, Python) decides the identity:**
 - It parses the payload. The **top-level** `agent_type` must start with
@@ -111,9 +115,11 @@ layers: a shell wrapper in `hooks.json` and the Python guard.
   - An already-prefixed command is left alone (idempotent).
   - It sets **no** `permissionDecision` that would auto-allow the command,
     so normal Bash permission evaluation still applies.
-- A prefilter false positive (not a kit agent) returns an empty JSON object:
-  no change.
-- Unparseable input for a payload the wrapper matched is a deny.
+- For a prefilter false positive (the top-level identity is not a kit
+  agent), it **exits 3 with no output**, and the wrapper lets the command
+  through untouched.
+- For unparseable input on a payload the wrapper matched, it **exits 2**
+  with a reason on stderr (a deny).
 
 **When `agent_type` is missing (plan review r1).** The hook can't tell a
 kit helper from the main session without the identity, and no other field
@@ -210,7 +216,19 @@ Measurement happens through use instead:
    - a kit payload with **no CLI**, an **old CLI** (a fake `tagteam` that
      answers `unknown hook`, exit 1), a CLI that **exits 0 with empty
      output**, and one that prints **invalid output**: each **exits 2**
-     with a reason naming the upgrade.
+     with a reason naming the upgrade;
+   - **a prefilter false positive, with the real CLI**: a payload whose
+     *text* matches the prefilter (a `"agent_type": "tagteam:…"` string
+     nested in `tool_input`) while its **top-level** identity is the main
+     session or another agent. The wrapper exits 0 with **no output**, so
+     the command passes untouched;
+   - **exit 0 with a `hookSpecificOutput` key but no usable result** (a
+     fake CLI printing `{"hookSpecificOutput": {}}`), and one printing
+     `updatedInput` **without** the read-only prefix: both **exit 2**;
+   - a guard deny (unparseable input, real CLI): exit 2, with the guard's
+     reason;
+   - the normal permission flow: the rewritten output carries no
+     `permissionDecision`.
 4. **The contract:** `SKILL.md` names the three agents with when to use
    each, and says the prefix instruction in the agent bodies is not the
    enforcement. The plugin copy equals the packaged copy. The shipped-docs
