@@ -1,7 +1,7 @@
 # Phase 73: Subagent kit
 
 ## Status
-- [ ] Planning: DRAFT — plan cycle not opened yet
+- [ ] Planning: in review (plan cycle opened 2026-09-24)
 - [ ] Implementation
 - [ ] Implementation Review
 - [ ] Complete
@@ -51,7 +51,6 @@ on long impl turns with many test runs, and none on a short plan turn.
 - `tagteam doctor`: one line saying whether the kit's agents are available
   (the plugin is installed and at a version that ships them).
 - Tests, plus **one live check in a real Claude Code session** (below).
-- **The measurement** (below).
 
 **Out**
 - Codex-side helpers.
@@ -108,24 +107,18 @@ it already does for panel lenses and the briefer. `SKILL.md` stays the one
 contract: the packaged copy is updated with it, the plugin/package parity
 test covers that, and so does `TestShippedDocsAudit`.
 
-### Measurement: savings in tokens and window, never dollars
-- **What exists.** Headless turns record `model_usage` per model, and
-  subagent requests are included in it (Agent SDK cost-tracking). So
-  `tagteam usage --by model` shows haiku and sonnet tokens beside the lead's
-  own once the kit is used. Interactive turns record nothing, and the recent
-  phases ran interactively, which is why Phase 55's data holds no "before"
-  for them.
-- **What this phase does:** a small, bounded A/B in a scratch project. The
-  same fixture impl task (a failing focused test to fix, then verify) is run
-  twice as a **headless lead turn**, once with the kit's agents available
-  and told to use them, once without. The comparison is the lead model's
-  input and cache-read tokens, total tokens per model, the turn count and
-  the wall clock, all from the recorded usage rows. The cost is two
-  headless turns on the arbiter's subscription.
-- **What it doesn't claim:** one A/B pair is an anecdote, not a pass. The
-  closeout reports the numbers as a single observation, and the ongoing
-  measure is `tagteam usage --by model` on real headless turns as they
-  happen.
+### Measurement: no A/B in this phase (the arbiter's decision, 2026-09-24)
+The roadmap asks for savings measured before and after with Phase 55's usage
+data. The arbiter chose to **skip a dedicated before/after comparison**. It
+would cost two headless lead turns and yield a single observation.
+Measurement happens through use instead:
+- Headless turns record `model_usage` per model, and subagent requests are
+  included in it (Agent SDK cost-tracking).
+- So once the kit is used in headless turns, `tagteam usage --by model`
+  shows its haiku and sonnet tokens beside the lead's own.
+- Interactive turns record nothing, so there is no "before" for the recent
+  phases.
+- The closeout says plainly that the savings are **unmeasured** at merge.
 
 ## Files
 - `plugin/agents/test-runner.md`, `plugin/agents/verifier.md`,
@@ -168,9 +161,6 @@ test covers that, and so does `TestShippedDocsAudit`.
    scratch project, asking `tagteam:verifier` to run
    `echo $TAGTEAM_READ_ONLY` prints `1`, and asking it to run
    `tagteam cycle add …` is refused by the CLI's read-only guard.
-7. **The A/B above is run once**, and its numbers (tokens per model, the
-   lead's input/cache-read tokens, turns, minutes) are recorded in the
-   closeout as one observation.
 
 ## Risks and open questions for the reviewer
 - **The hook runs on every Bash call** in every session with the plugin.
@@ -184,10 +174,6 @@ test covers that, and so does `TestShippedDocsAudit`.
   Claude Code version, the fallback is **deny unless already prefixed**:
   the agent bodies tell the helper to start every command with the export,
   and the hook enforces it. That is a smaller change of the same shape.
-- **The A/B costs two headless lead turns** on the arbiter's subscription.
-  It is the only way this phase can say anything about savings, because
-  interactive turns record no usage. The arbiter may prefer to skip it and
-  let real headless use measure over time.
 - **`explore` overlaps Claude Code's built-in Explore.** It is kept because
   it is pinned to haiku, is tagteam-aware, and is read-only for tagteam by
   the hook. Built-in Explore is none of those.
