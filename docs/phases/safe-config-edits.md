@@ -1,10 +1,25 @@
 # Phase 71b: Safe config edits
 
 ## Status
-- [ ] Planning: plan cycle open (round 2 — r1: saved vs effective, preview-bound writes, one writer lock, expected-tree check)
-- [ ] Implementation
+- [x] Planning: approved round 2 (2026-09-23) at `3b496be`. r1: saved vs effective, preview-bound writes, one writer lock, expected-tree check.
+- [x] Implementation: branch `phase-71b-safe-config-edits`
 - [ ] Implementation Review
 - [ ] Complete
+
+## Implementation notes
+**Found by testing:** in the first cut, the no-op check ran *before* the layout refusals. A duplicated key or an alias that parses to the requested value slipped through as "already set", without the layout ever being checked. The locator now always runs first, so layout refusals apply even to a no-op.
+
+**Found by looking** (a scratch project, `tagteam serve --theme cockpit`, Playwright MCP): a toggle labelled "Gate: Off" reads two ways, as a state or as an action. Each boolean now shows its saved state in words ("Gate — saved: off") next to an explicit **Turn on / Turn off** button.
+
+**Driven in the page:**
+- the preview modal showed the diff, what the engine will do, and the CLI line with `--expect`;
+- an external edit while the modal was open meant the confirm was refused with a 409, the file kept the external edit byte for byte, and there was one POST and no retry;
+- a fresh attempt wrote exactly one line, and `tagteam config keys` agreed;
+- `resend_minutes: 5` in an invalid watcher block was refused with the resolver's reason, and the field returned to the saved 3.
+
+**Deviations from the plan text:**
+- A YAML file indented with tabs does not parse at all, so it is refused as "does not parse — fix it by hand" before the tab check, which remains as a defence.
+- The Chromium test harness now awaits an optional `DONE` promise, with `--virtual-time-budget`, so it can drive the asynchronous preview-then-confirm flow.
 
 ## Summary
 Phase 71's Rules tab shows the `tagteam.yaml` rules read-only and names the

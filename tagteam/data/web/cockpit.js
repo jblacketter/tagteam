@@ -124,6 +124,9 @@
     $('confirm-title').textContent = title;
     $('confirm-body').textContent = body || '';
     $('confirm-cli').textContent = cli || '';
+    // Phase 71b: a config edit shows its diff above the CLI line
+    $('confirm-diff').textContent = labels.diff || '';
+    $('confirm-diff').classList.toggle('hidden', !labels.diff);
     $('confirm-ok').textContent = labels.ok || 'Run';
     $('confirm-ok').className = 'btn ' + (labels.danger ? 'btn-danger-solid' : 'btn-primary');
     $('confirm-cancel').textContent = labels.cancel || 'Cancel';
@@ -688,8 +691,9 @@
     var right = el('div');
     right.appendChild(el('div', 'r-text', r.text));
     var meta = 'Applies: ' + r.applies + ' · source: ' + r.source;
-    if (r.change && r.change !== 'orders') meta += ' · to change: ' + r.change + ' in tagteam.yaml';
+    if (r.change && r.change !== 'orders' && !(r.edits && r.edits.length)) meta += ' · to change: ' + r.change + ' in tagteam.yaml';
     right.appendChild(el('div', 'r-meta', meta));
+    if (r.edits && r.edits.length) right.appendChild(renderEdits(r.edits));
     row.appendChild(left); row.appendChild(right);
     return row;
   }
@@ -820,6 +824,60 @@
     $('rules-last').textContent = p.last_decision ? ('Last approval: ' + p.last_decision) : '';
   }
   // ---------- end Phase 71 ----------
+
+  // ---------- Phase 71b: safe tagteam.yaml edits on the Rules rows ----------
+  // Each control shows the SAVED value the payload reports (never the effective one); a change
+  // first fetches the server's preview (diff + what the engine will do + base) and the confirmed
+  // write sends that base back, so a file changed in between is refused — and never retried.
+  function renderEdits(edits) {
+    var box = el('div', 'rule-edits');
+    edits.forEach(function (e) {
+      if (e.kind === 'bool') {
+        // the saved state as words, the action on the button (a toggle labelled with its state reads two ways)
+        var word = e.saved === true ? 'on' : (e.saved === false ? 'off' : (e.saved_state === 'invalid' ? 'invalid value' : 'not set'));
+        var grp = el('span', 'rule-bool');
+        grp.appendChild(el('span', 'r-saved', e.label + ' — saved: ' + word));
+        var b = el('button', 'btn btn-small rule-switch', e.saved === true ? 'Turn off' : 'Turn on');
+        b.type = 'button';
+        b.dataset.key = e.key;
+        b.addEventListener('click', function () { configEdit(b, e.key, !(e.saved === true)); });
+        grp.appendChild(b);
+        box.appendChild(grp);
+      } else {
+        var f = el('form', 'rule-minutes');
+        var inp = document.createElement('input');
+        inp.type = 'number'; inp.min = '0'; inp.step = '1'; inp.dataset.key = e.key;
+        inp.value = (e.saved_state === 'set') ? String(e.saved) : '';
+        inp.placeholder = e.saved_state === 'invalid' ? 'invalid' : 'not set';
+        var go = el('button', 'btn btn-small', 'Save');
+        go.type = 'submit';
+        f.appendChild(el('span', 'muted small', e.label)); f.appendChild(inp); f.appendChild(go);
+        f.addEventListener('submit', function (ev) {
+          if (ev && ev.preventDefault) ev.preventDefault();
+          var n = Number(inp.value);
+          if (inp.value === '' || !isFinite(n) || n < 0 || Math.floor(n) !== n) { toast('err', 'Minutes must be a whole number ≥ 0.'); return; }
+          configEdit(go, e.key, n);
+        });
+        box.appendChild(f);
+      }
+      if (e.not_in_effect) box.appendChild(el('div', 'rules-shadow', e.not_in_effect));
+    });
+    return box;
+  }
+
+  function configEdit(btn, key, value) {
+    return postJSON('/api/config/set', { key: key, value: value, preview: true }).then(function (r) {
+      var b = r.body || {};
+      if (!r.ok) { toast('err', b.message || ('Refused (' + r.status + ')')); loadRules(); return; }
+      if (b.noop) { toast('ok', (b.message || '').split('\n')[0]); loadRules(); return; }
+      var detail = 'engine after the change: ' + b.engine + ((b.notes && b.notes.length) ? ' · ' + b.notes.join(' · ') : '');
+      confirmModal('Change tagteam.yaml — ' + key, detail, b.cli, function () {
+        // exactly one write, bound to the previewed bytes; a refusal is reported, not retried
+        act(btn, '/api/config/set', { key: key, value: value, expect: b.base }, { onDone: function () { loadRules(); } });
+      }, { ok: 'Write tagteam.yaml', diff: b.diff });
+    }).catch(function (e) { toast('err', 'Request failed: ' + e); });
+  }
+  // ---------- end Phase 71b ----------
 
   // ---------- Tabs ----------
   function showTab(name) {

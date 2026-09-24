@@ -1424,7 +1424,8 @@ def _run(fn, args: list[str], project_dir: str | Path) -> dict:
 
 _FN_NAMES = {"pause_command": "pause", "resume_command": "resume",
              "interject_command": "interject", "cancel_turn_command": "cancel-turn",
-             "rule_command": "rule", "brief_command": "brief", "orders_command": "orders"}
+             "rule_command": "rule", "brief_command": "brief", "orders_command": "orders",
+             "config_command": "config"}
 
 
 def _cli_line(fn, args: list[str]) -> str:
@@ -1497,6 +1498,8 @@ def _plan(action: str, params: dict, *, by: str):
         return controls.rule_command, args
     if action == "orders":                 # Phase 71: the Rules tab
         return _plan_orders(params, by)
+    if action == "config/set":             # Phase 71b: safe tagteam.yaml edits
+        return _plan_config(params, by)
     raise ValueError(f"Unknown action: {action}")
 
 
@@ -1508,7 +1511,26 @@ def run_action(action: str, params: dict, project_dir: str | Path,
         fn, args = _plan(action, params, by=by or web_user())
     except ValueError as e:
         return {"ok": False, "message": str(e), "rc": 400, "cli": None}
+    if action == "config/set" and (params or {}).get("preview") is True:
+        return config_preview(project_dir, params)
     return _run(fn, args, project_dir)
+
+
+def config_preview(project_dir: str | Path, params: dict) -> dict:
+    """Phase 71b: the preview a confirmation shows — the diff, what the
+    engine will do, and `base` (the sha256 the confirmed write must send
+    back). A read: no lock, nothing written."""
+    from tagteam import config_edit as ce
+    key, value = params["key"], params["value"]
+    try:
+        p = ce.preview(project_dir, key, value)
+    except ce.Refused as e:
+        return {"ok": False, "message": str(e), "rc": 1, "cli": None}
+    text = ce._fmt_plan(p, preview_only=True, by=None, root=Path(project_dir))
+    kind = ce.SAFE_KEYS[key][0]
+    return {"ok": True, "noop": p.noop, "diff": p.diff, "base": p.base, "engine": p.engine,
+            "notes": p.notes, "message": text,
+            "cli": f"tagteam config set {key} {ce.render(kind, value)} --expect {p.base}"}
 
 
 def watcher_events_payload(project_dir: str | Path, n: int = 50, chatter: bool = True) -> dict:
@@ -1556,11 +1578,33 @@ def _types_words(types) -> str:
     return "no review type"
 
 
+_EDIT_LABELS = {"gatekeeper.enabled": "Gate", "gatekeeper.on_submit": "Runs at submission",
+                "panel.enabled": "Panel", "briefer.enabled": "Brief", "watcher.resend_minutes": "Minutes"}
+
+
+def _edits(config: dict, keys: list[str], effective_main, problems) -> list[dict]:
+    """Phase 71b: the row's editable keys with their SAVED values. The
+    control shows `saved`; `not_in_effect` says why the engine differs."""
+    from tagteam import config_edit as ce
+    out = []
+    for i, key in enumerate(keys):
+        state, value = ce.saved(config, key)
+        kind = ce.SAFE_KEYS[key][0]
+        e = {"key": key, "kind": kind, "label": _EDIT_LABELS[key], "saved_state": state,
+             "saved": value if state == "set" else None, "not_in_effect": None}
+        if i == 0 and state == "set" and value != effective_main:
+            e["not_in_effect"] = (f"saved: {ce.render(kind, value)} · not in effect: "
+                                  + ("; ".join(problems) or "the engine uses a different value"))
+        out.append(e)
+    return out
+
+
 def _gate_row(config: dict) -> dict:
     from tagteam.gatekeeper import resolve_gatekeeper
     g = resolve_gatekeeper(config)
     applies = "submit" if g.on_submit else "watcher"
-    row = {"key": "gate", "label": "Gate before the reviewer's turn", "on": g.enabled,
+    edits = _edits(config, ["gatekeeper.enabled", "gatekeeper.on_submit"], g.enabled, g.problems)
+    row = {"key": "gate", "label": "Gate before the reviewer's turn", "on": g.enabled, "edits": edits,
            "source": "tagteam.yaml gatekeeper", "change": "gatekeeper.enabled",
            "applies": _APPLIES[applies], "warnings": [f"gatekeeper: {p}" for p in g.problems]}
     if not g.enabled:
@@ -1584,9 +1628,10 @@ def _gate_row(config: dict) -> dict:
 def _panel_row(config: dict, root: Path) -> dict:
     from tagteam.panel import resolve_panel
     p = resolve_panel(config, root)
+    edits = _edits(config, ["panel.enabled"], p.enabled, p.problems)
     # Any problem with a PRESENT block is shown — a malformed mapping or enable value included
     # (impl r1 review); an absent block, or a valid disabled one, has none and stays quiet.
-    row = {"key": "panel", "label": "Reviewer panel", "on": p.enabled,
+    row = {"key": "panel", "label": "Reviewer panel", "on": p.enabled, "edits": edits,
            "source": "tagteam.yaml panel", "change": "panel.enabled",
            "applies": _APPLIES["watcher"],
            "warnings": [f"panel: {x}" for x in p.problems] if "panel" in config else []}
@@ -1607,7 +1652,8 @@ def _panel_row(config: dict, root: Path) -> dict:
 def _briefer_row(config: dict, root: Path) -> dict:
     from tagteam.briefer import resolve_briefer
     b = resolve_briefer(config, root)
-    row = {"key": "briefer", "label": "Escalation brief", "on": b.enabled,
+    edits = _edits(config, ["briefer.enabled"], b.enabled, b.problems)
+    row = {"key": "briefer", "label": "Escalation brief", "on": b.enabled, "edits": edits,
            "source": "tagteam.yaml briefer", "change": "briefer.enabled",
            "applies": _APPLIES["watcher"],
            "warnings": [f"briefer: {x}" for x in b.problems] if "briefer" in config else []}
@@ -1632,6 +1678,7 @@ def _resend_row(config: dict) -> dict:
     if problems:
         text += " (The watcher block is invalid, so the default applies.)"
     return {"key": "resend", "label": "Re-send a stuck turn", "on": minutes > 0,
+            "edits": _edits(config, ["watcher.resend_minutes"], minutes, problems),
             "value": "never" if minutes == 0 else f"{minutes} min", "text": text,
             "source": "tagteam.yaml watcher" if isinstance(config.get("watcher"), dict) and not problems
             else "default", "change": "watcher.resend_minutes", "applies": _APPLIES["watcher"],
@@ -1733,6 +1780,30 @@ def rules_payload(project_dir: str | Path) -> dict:
             "orders_file": orders.ORDERS_FILE, "text_max": ORDER_TEXT_MAX,
             # a malformed/unsafe file is refused by every project write — say so, don't invite one
             "project_orders_ok": eff["warn"] is None}
+
+
+def _plan_config(params: dict, by: str):
+    """POST /api/config/set → `tagteam config set KEY VALUE --expect SHA`.
+    Strict JSON types (the Phase 71 r1 lesson): a bool key takes a JSON
+    boolean, `resend_minutes` a non-negative JSON integer. A confirmed write
+    must carry the preview's `expect` (its `base`)."""
+    from tagteam import config_edit as ce
+    key = params.get("key")
+    if not isinstance(key, str) or key not in ce.SAFE_KEYS:
+        raise ValueError(f"'key' must be one of: {', '.join(ce.SAFE_KEYS)}")
+    kind = ce.SAFE_KEYS[key][0]
+    value = params.get("value")
+    if kind == "bool" and not isinstance(value, bool):
+        raise ValueError(f"'{key}' takes a JSON boolean")
+    if kind == "minutes" and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+        raise ValueError(f"'{key}' takes a whole number of minutes >= 0")
+    args = ["set", key, ce.render(kind, value)]
+    if params.get("preview") is True:
+        return ce.config_command, args + ["--preview"]
+    expect = params.get("expect")
+    if not isinstance(expect, str) or not _re.fullmatch(r"[0-9a-f]{64}", expect):
+        raise ValueError("'expect' (the preview's base) is required to write")
+    return ce.config_command, args + ["--expect", expect, "--by", by]
 
 
 def _plan_orders(params: dict, by: str):

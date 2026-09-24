@@ -455,3 +455,11 @@ table.u th { color: var(--text-dim); font-weight: 500; }
 .rules-free { display: flex; gap: 6px; }
 .rules-free input { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--line); color: var(--text); border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 13px; }
 @media (max-width: 640px) { .rule-row { grid-template-columns: 1fr; } }
+
+/* ---- Phase 71b: editable Rules rows ---- */
+.rule-edits { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
+.rule-bool { display: inline-flex; gap: 6px; align-items: center; margin-right: 10px; font-size: 12px; color: var(--text-dim); }
+.rule-minutes { display: inline-flex; gap: 6px; align-items: center; }
+.rule-minutes input { width: 72px; background: var(--bg); border: 1px solid var(--line); color: var(--text); border-radius: 6px; padding: 3px 6px; font: inherit; font-size: 12px; }
+.rule-edits .rules-shadow { flex-basis: 100%; }
+.confirm-diff { max-height: 40vh; overflow: auto; white-space: pre; font-size: 12px; }

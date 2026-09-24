@@ -297,6 +297,11 @@ def _slice() -> str:
     return js[js.index("// ---------- Phase 71: Rules tab"):js.index("// ---------- end Phase 71")]
 
 
+def _slice_71b() -> str:
+    js = (WEB / "cockpit.js").read_text(encoding="utf-8")
+    return js[js.index("// ---------- Phase 71b: safe tagteam.yaml edits"):js.index("// ---------- end Phase 71b")]
+
+
 class TestSliceIsPresentationOnly:
     def test_no_html_injection_and_no_derivation(self):
         block = _slice()
@@ -346,7 +351,9 @@ def _run_rules_in_chromium(scenario_js: str) -> dict:
       function $(id) { return document.getElementById(id); }
       function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
       function fmtTs(ts) { return String(ts || ''); }
-      var POSTS = [], TOASTS = [];
+      var POSTS = [], TOASTS = [], DONE = null;
+      function postJSON() { return Promise.resolve({ ok: false, status: 500, body: {} }); }
+      function confirmModal() {}
       function toast(k, m) { TOASTS.push(k + ':' + m); }
       function getJSON() { return Promise.resolve({ ok: true, body: PAYLOAD }); }
       var ACTS = [];
@@ -355,13 +362,15 @@ def _run_rules_in_chromium(scenario_js: str) -> dict:
     page = ("<!DOCTYPE html><html><head><meta charset='utf-8'><style>" + css + "</style></head><body>"
             + "<main class='main' style='width:900px'>" + panel + "</main>"
             + "<pre id='RESULT'></pre><script>var PAYLOAD = " + json.dumps(_PAYLOAD) + ";" + shims
-            + _slice() + "\n" + scenario_js
-            + "\ndocument.getElementById('RESULT').textContent = JSON.stringify(RESULT);</script></body></html>")
+            + _slice() + "\n" + _slice_71b() + "\n" + scenario_js
+            + "\nPromise.resolve(DONE).then(function () { document.getElementById('RESULT').textContent = JSON.stringify(RESULT); });"
+            + "</script></body></html>")
     with tempfile.TemporaryDirectory() as d:
         f = Path(d) / "rules.html"
         f.write_text(page, encoding="utf-8")
         r = subprocess.run([chrome, "--headless", "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
-                            "--window-size=1000,1400", f"--user-data-dir={d}/profile", "--dump-dom", f.as_uri()],
+                            "--window-size=1000,1400", "--virtual-time-budget=5000",
+                            f"--user-data-dir={d}/profile", "--dump-dom", f.as_uri()],
                            capture_output=True, text=True, timeout=90)
     assert r.returncode == 0, r.stderr[-2000:]
     m = re.search(r"<pre id=\"RESULT\">(.*?)</pre>", r.stdout, re.S)
@@ -469,3 +478,108 @@ class TestRulesTabInARealBrowser:
         assert r["afterRefused"] == "half a thought" and r["afterCancel"] == "half a thought"
         assert r["afterSuccess"] == ""
         assert r["posted"] == [{"op": "add", "text": "half a thought", "run": True}] * 2
+
+
+# ---------------------------------------------------------------------------
+# Phase 71b: editable rows, the preview, and preview-bound writes
+# ---------------------------------------------------------------------------
+
+class TestConfigEditsApi:
+    def test_rows_carry_saved_values_and_not_in_effect(self, proj):
+        _cfg(proj, "gatekeeper:\n  enabled: true\n  scope: invalid\nwatcher:\n  resend_minutes: 3\n  bogus: 1\n")
+        rows = _rows(capi.rules_payload(proj))
+        g = {e["key"]: e for e in rows["gate"]["edits"]}
+        assert g["gatekeeper.enabled"]["saved"] is True and rows["gate"]["on"] is False
+        assert g["gatekeeper.enabled"]["not_in_effect"].startswith("saved: true · not in effect:")
+        assert g["gatekeeper.on_submit"]["saved_state"] == "absent"
+        w = rows["resend"]["edits"][0]
+        assert w["saved"] == 3 and rows["resend"]["value"] == "15 min" and "bogus" in w["not_in_effect"]
+        assert rows["panel"]["edits"][0]["saved_state"] == "absent" and "edits" not in rows["stale"]
+
+    @pytest.mark.parametrize("params", [
+        {"key": "agents.lead.name", "value": "x", "preview": True},
+        {"key": "gatekeeper.enabled", "value": "true", "preview": True},
+        {"key": "gatekeeper.enabled", "value": 1, "preview": True},
+        {"key": "watcher.resend_minutes", "value": True, "preview": True},
+        {"key": "watcher.resend_minutes", "value": -1, "preview": True},
+        {"key": "watcher.resend_minutes", "value": 2.5, "preview": True},
+        {"key": "gatekeeper.enabled", "value": True},                       # a write without `expect`
+        {"key": "gatekeeper.enabled", "value": True, "expect": "abc"}])
+    def test_bad_params_are_400(self, params):
+        with pytest.raises(ValueError):
+            capi._plan("config/set", params, by="web:jack")
+
+    def test_preview_then_stale_write_through_the_server(self, proj):
+        _cfg(proj, "serve:\n  theme: cockpit\ngatekeeper:\n  enabled: false  # keep\n")
+        f = proj / "tagteam.yaml"
+        with Served(proj, "cockpit") as s:
+            before = f.read_bytes()
+            pv = s.client.post("/api/config/set", {"key": "gatekeeper.enabled", "value": True, "preview": True},
+                               headers=s.auth())["json"]
+            assert pv["ok"] and "+  enabled: true  # keep" in pv["diff"] and pv["engine"] == "gate: ON"
+            assert pv["cli"].endswith("--expect " + pv["base"]) and f.read_bytes() == before
+            f.write_text(f.read_text() + "# hand edit\n")                 # after the preview
+            edited = f.read_bytes()
+            r = s.client.post("/api/config/set", {"key": "gatekeeper.enabled", "value": True, "expect": pv["base"]},
+                              headers=s.auth())
+            assert r["status"] == 409 and "changed since the preview" in r["json"]["message"]
+            assert f.read_bytes() == edited
+            pv2 = s.client.post("/api/config/set", {"key": "gatekeeper.enabled", "value": True, "preview": True},
+                                headers=s.auth())["json"]
+            r = s.client.post("/api/config/set", {"key": "gatekeeper.enabled", "value": True, "expect": pv2["base"]},
+                              headers=s.auth())
+            assert r["status"] == 200 and r["json"]["ok"], r
+            assert f.read_text().endswith("enabled: true  # keep\n# hand edit\n")
+            assert s.client.post("/api/config/set", {"key": "gatekeeper.enabled", "value": False,
+                                                     "preview": True})["status"] in (401, 403)
+
+    def test_a_refused_preview_is_409_with_the_reason(self, proj):
+        (proj / "tagteam.yaml").write_text("agents:\n  lead:\n    name: someone\n  reviewer:\n    name: other\n")
+        res = capi.run_action("config/set", {"key": "briefer.enabled", "value": True, "preview": True}, proj)
+        assert res["ok"] is False and "escalation brief: OFF" in res["message"]
+
+
+class TestConfigEditsInARealBrowser:
+    def test_preview_confirm_and_a_stale_refusal_is_not_retried(self):
+        r = _run_rules_in_chromium(r"""
+          PAYLOAD.enforced[1].edits = [
+            { key: 'gatekeeper.enabled', kind: 'bool', label: 'Gate', saved_state: 'set', saved: false, not_in_effect: null },
+            { key: 'gatekeeper.on_submit', kind: 'bool', label: 'Runs at submission', saved_state: 'absent', saved: null, not_in_effect: null }];
+          PAYLOAD.enforced[2].edits = [
+            { key: 'panel.enabled', kind: 'bool', label: 'Panel', saved_state: 'set', saved: true,
+              not_in_effect: 'saved: true · not in effect: panel: lens brief not found' }];
+          var CALLS = [], MODAL = null;
+          postJSON = function (url, data) {
+            CALLS.push(data);
+            if (data.preview) return Promise.resolve({ ok: true, status: 200, body: { ok: true, noop: false,
+              diff: '-  enabled: false\n+  enabled: true\n', base: 'b'.repeat(64), engine: 'gate: ON', notes: [],
+              cli: 'tagteam config set gatekeeper.enabled true --expect ' + 'b'.repeat(64) } });
+            return Promise.resolve({ ok: false, status: 409, body: { ok: false, message: 'changed since the preview' } });
+          };
+          confirmModal = function (title, body, cli, onOk, labels) { MODAL = { title: title, body: body, cli: cli, diff: labels.diff, ok: onOk }; };
+          act = function (btn, url, data, opts) { CALLS.push({ act: data }); return postJSON(url, data); };
+          renderRules(PAYLOAD);
+          var RESULT = {
+            saved: Array.prototype.map.call(document.querySelectorAll('.rule-bool .r-saved'), function (x) { return x.textContent; }),
+            buttons: Array.prototype.map.call(document.querySelectorAll('.rule-switch'), function (x) { return x.textContent; }),
+            shadow: (document.querySelector('.rule-row[data-key="panel"] .rules-shadow') || {}).textContent,
+            gateHint: document.querySelector('.rule-row[data-key="gate"] .r-meta').textContent };
+          document.querySelector('.rule-switch[data-key="gatekeeper.enabled"]').click();
+          DONE = new Promise(function (res) { setTimeout(res, 50); }).then(function () {
+            RESULT.modal = { title: MODAL.title, diff: MODAL.diff, cli: MODAL.cli };
+            MODAL.ok();                                              // confirm → the stale write is refused
+            return new Promise(function (res) { setTimeout(res, 50); });
+          }).then(function () {
+            RESULT.calls = CALLS;
+          });
+        """)
+        assert r["saved"] == ["Gate — saved: off", "Runs at submission — saved: not set", "Panel — saved: on"]
+        assert r["buttons"] == ["Turn on", "Turn on", "Turn off"]
+        assert r["shadow"].startswith("saved: true · not in effect")
+        assert "to change:" not in r["gateHint"]
+        assert r["modal"]["title"] == "Change tagteam.yaml — gatekeeper.enabled"
+        assert r["modal"]["diff"].startswith("-  enabled: false") and r["modal"]["cli"].endswith("b" * 64)
+        writes = [c for c in r["calls"] if "act" in c]
+        assert r["calls"][0] == {"key": "gatekeeper.enabled", "value": True, "preview": True}
+        assert writes == [{"act": {"key": "gatekeeper.enabled", "value": True, "expect": "b" * 64}}]
+        assert len([c for c in r["calls"] if c.get("expect")]) == 1            # exactly one write POST, no retry
