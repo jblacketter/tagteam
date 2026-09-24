@@ -3,8 +3,27 @@
 ## Status
 - [x] Planning: approved round 2 (2026-09-23) at `3b496be`. r1: saved vs effective, preview-bound writes, one writer lock, expected-tree check.
 - [x] Implementation: branch `phase-71b-safe-config-edits`
-- [ ] Implementation Review
-- [ ] Complete
+- [x] Implementation Review: approved round 2 (2026-09-23) at `f23224a`; gate 2,469 passed, 5 skipped
+- [ ] Complete: PR open, awaiting the arbiter's merge.
+
+## Closeout
+```
+Phase report: safe-config-edits — plan approved r2 · impl approved r2
+  plan   2 rounds · 1 change request · 0 bounces
+  impl   2 rounds · 1 change request · 0 bounces · gate 2 runs, 16m 15s
+  time   start→approve 1h 18m · implementation before first submit 51m 56s
+         lead 4m 15s (2 spans, 2 unknown) · reviewer 5m 46s (4 spans) · gate 16m 16s (2 spans)  (elapsed; includes relay wait)
+  usage  no usage rows stored under this phase
+  turns  matched 0 of 8 · no token data 0 · unmatched 6 · unknown 2
+```
+- **Plan r1:** no-ops were decided on effective values, not saved ones. A confirmed write was not bound to the bytes it previewed. The re-read before `os.replace` was not a real compare-and-swap. The expected-tree check broke on an appended block.
+- **Impl r1:**
+  - quoted or duplicate spellings bypassed the text locator;
+  - the page offered no explicit OFF for an absent or invalid boolean;
+  - a pending minutes edit was lost on refresh;
+  - the diff was unreadable when the file had no final newline.
+
+  Every item has a regression test.
 
 ## Implementation notes
 **Found by testing:** in the first cut, the no-op check ran *before* the layout refusals. A duplicated key or an alias that parses to the requested value slipped through as "already set", without the layout ever being checked. The locator now always runs first, so layout refusals apply even to a no-op.
