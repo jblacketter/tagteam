@@ -3,8 +3,26 @@
 ## Status
 - [x] Planning: approved round 1 (2026-09-24) at `b9f5635` (arbiter decisions amended in: CORS off; hub usage incl. cost_usd promised as an estimate)
 - [x] Implementation: branch `phase-74-versioned-read-api`
-- [ ] Implementation Review
-- [ ] Complete
+- [x] Implementation Review: approved round 2 (2026-09-24) at `ad9d980`; gate 2,567 passed, 5 skipped
+- [ ] Complete: PR open, merge pending.
+
+## Closeout
+```
+Phase report: versioned-read-api-for-other-dashboards — plan approved r1 · impl approved r2
+  plan   1 round · 0 change requests · 0 bounces · 1 amendment
+  impl   2 rounds · 1 change request · 0 bounces · gate 2 runs, 17m 32s
+  time   start→approve 33m 53s · implementation before first submit 7m 51s
+         lead 1m 33s (1 span, 2 unknown) · reviewer 6m 56s (3 spans) · gate 17m 33s (2 spans)  (elapsed; includes relay wait)
+  usage  no usage rows stored under this phase
+  turns  matched 0 of 6 · no token data 0 · unmatched 4 · unknown 2
+```
+- **Plan r1 (amended with the arbiter's decisions):** CORS stays off, and the hub row's `usage` block, `cost_usd` included, is promised as an API-equivalent estimate.
+- **Impl r1:** a project with unreadable files is isolated into a hub row with `error` and `watcher: null`, and the r1 declaration rejected that. The hub row's `watcher` is now `object|null` (unknown, not "not running"), with a regression over a real hub payload holding a malformed project beside a healthy one.
+- **Found on the way:** a fixture's raw usage INSERT had been failing silently. It now uses `db.add_usage`, and the test asserts the row.
+
+## Implementation notes
+- **No payload producer changed.** Only the info endpoints gained `api_version` / `tagteam` / `stable`. Everything else is a declaration over what was already served.
+- **Coverage, not just shape.** `check(..., seen)` records the declared paths found present and non-null. The tests require every declaration to be exercised by some fixture. This is measured per row shape across groups, because a `ready` phase can't have unmet dependencies.
 
 ## Summary
 Today only tagteam's own pages read tagteam's JSON endpoints. `cockpit.js`
