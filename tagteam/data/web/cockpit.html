@@ -129,18 +129,29 @@
         <div class="empty small hidden" id="reviewer-empty">No reviews yet.</div>
       </section>
     </div>
+    <!-- Phase 69: tabs grouped by intent — Now · Roadmap · Rules · History · Usage (panel IDs inside kept) -->
     <nav class="tabs" role="tablist">
-      <button class="tab active" data-tab="feed" id="tab-feed" role="tab">Rounds</button>
-      <button class="tab" data-tab="diff" id="tab-diff" role="tab">Diff</button>
-      <button class="tab" data-tab="usage" id="tab-usage" role="tab">Usage</button>
-      <button class="tab" data-tab="notes" id="tab-notes" role="tab">Notes <span class="count" id="notes-count"></span></button>
+      <button class="tab active" data-tab="now" id="tab-now" role="tab">Now <span class="count" id="notes-count"></span></button>
+      <button class="tab" data-tab="roadmap" id="tab-roadmap" role="tab">Roadmap</button>
       <button class="tab" data-tab="rules" id="tab-rules" role="tab">Rules</button>
+      <button class="tab" data-tab="history" id="tab-history" role="tab">History</button>
+      <button class="tab" data-tab="usage" id="tab-usage" role="tab">Usage</button>
     </nav>
 
-    <div class="panel active" id="panel-feed" role="tabpanel">
-      <div class="panel-head"><span id="feed-title">Rounds — what each side said, newest first</span><span class="spacer"></span><span class="muted" id="feed-meta"></span></div>
-      <div id="feed-list"></div>
-      <div class="empty small hidden" id="feed-empty">No rounds yet for this phase.</div>
+    <div class="panel active" id="panel-now" role="tabpanel">
+      <section class="subpanel" id="panel-notes">
+      <div class="panel-head"><span>Notes — a note the next turn receives in its prompt (tagteam interject)</span></div>
+      <form class="note-form" id="note-form">
+        <textarea id="note-text" rows="2" placeholder="Note for the next turn…"></textarea>
+        <div class="row">
+          <label>to <select id="note-to"><option value="">next turn</option><option value="lead">lead</option><option value="reviewer">reviewer</option></select></label>
+          <span class="spacer"></span>
+          <button class="btn btn-primary" type="submit" id="btn-interject">Leave note</button>
+        </div>
+      </form>
+      <div id="notes-list"></div>
+      <div class="empty small hidden" id="notes-empty">No notes for this phase.</div>
+    </section>
       <!-- Phase 45: the flat, newest-first list of every turn (Phase 43) stays for the record -->
       <details id="all-activity" class="all-activity"><summary>all activity <span class="muted small" id="activity-meta"></span></summary>
         <div class="activity" id="activity" aria-live="polite"></div>
@@ -149,7 +160,23 @@
       </details>
     </div>
 
-    <div class="panel" id="panel-diff" role="tabpanel">
+    <!-- Phase 69: the roadmap board — Done · In progress · Up next (ready / blocked); Start lives here -->
+    <div class="panel" id="panel-roadmap" role="tabpanel">
+      <div class="panel-head"><span>Roadmap — what is done, in progress, and up next</span><span class="spacer"></span><button class="btn btn-small" id="btn-roadmap-refresh">Refresh</button></div>
+      <div class="banner hidden" id="roadmap-problems"></div>
+      <div class="muted small hidden" id="roadmap-warnings"></div>
+      <div class="muted small hidden" id="roadmap-guard"></div>
+      <div id="roadmap-groups"></div>
+    </div>
+
+    <div class="panel" id="panel-history" role="tabpanel">
+      <section class="subpanel" id="panel-feed">
+      <div class="panel-head"><span id="feed-title">Rounds — what each side said, newest first</span><span class="spacer"></span><span class="muted" id="feed-meta"></span></div>
+      <div id="feed-list"></div>
+      <div class="empty small hidden" id="feed-empty">No rounds yet for this phase.</div>
+    </section>
+      <details class="history-diff" id="history-diff"><summary>Diff — scope diff of the current submission</summary>
+        <section class="subpanel" id="panel-diff">
       <div class="panel-head">
         <span id="diff-title">Scope diff of the current submission</span>
         <span class="spacer"></span>
@@ -159,6 +186,8 @@
       <div class="banner hidden" id="diff-banner"></div>
       <div id="diff-list"></div>
       <div class="empty small hidden" id="diff-empty">No attributable paths yet.</div>
+    </section>
+      </details>
     </div>
 
     <div class="panel" id="panel-usage" role="tabpanel">
@@ -173,20 +202,6 @@
       <details><summary>By cycle</summary><div id="usage-cycle"></div></details>
       <details><summary>By process</summary><div id="usage-agent"></div></details>
       <div class="empty small hidden" id="usage-empty">No turns recorded yet — turns run by the watcher (or from this page) write usage rows.</div>
-    </div>
-
-    <div class="panel" id="panel-notes" role="tabpanel">
-      <div class="panel-head"><span>Notes — a note the next turn receives in its prompt (tagteam interject)</span></div>
-      <form class="note-form" id="note-form">
-        <textarea id="note-text" rows="2" placeholder="Note for the next turn…"></textarea>
-        <div class="row">
-          <label>to <select id="note-to"><option value="">next turn</option><option value="lead">lead</option><option value="reviewer">reviewer</option></select></label>
-          <span class="spacer"></span>
-          <button class="btn btn-primary" type="submit" id="btn-interject">Leave note</button>
-        </div>
-      </form>
-      <div id="notes-list"></div>
-      <div class="empty small hidden" id="notes-empty">No notes for this phase.</div>
     </div>
 
     <!-- Phase 71: what governs this project's runs. Enforced (the engine does it) and advisory

@@ -687,6 +687,174 @@ def _project_root() -> str:
     return _resolve_project_root()
 
 
+
+# ---------------------------------------------------------------------------
+# Phase 69: the roadmap board — one pure classifier, one file-only reading
+# ---------------------------------------------------------------------------
+# `classify()` is shared by `board()` and `launch.launch_intent()`; neither
+# calls the other. Every parsed phase lands in exactly ONE group.
+
+# A status that declares work under way (matched at the start of the
+# normalized status). Such a phase is never offered Start.
+DECLARED_IN_PROGRESS = ("in progress", "in review", "approved")
+LIVE_CYCLE_STATES = ("in-progress", "escalated", "needs-human")
+ENDED_CYCLE_STATES = ("approved", "done")
+
+
+def is_declared_in_progress(status: str | None) -> bool:
+    norm = normalize_status(status)
+    return any(norm.startswith(w) for w in DECLARED_IN_PROGRESS)
+
+
+def classify(phases: list[RoadmapPhase], *, state: dict | None = None,
+             cycle_status: dict | None = None,
+             completed: Iterable[str] | None = None) -> dict:
+    """Pure: {"done", "in_progress", "ready", "blocked"} lists of
+    {phase, why, done_by, unmet, note}. First match wins:
+    done (terminal status → done_by roadmap; in the run's completed →
+    done_by run) · in_progress (current: a live cycle or an approved plan;
+    approved: an approved impl the roadmap does not yet mark terminal;
+    declared: the status says work is under way) · ready / blocked (the
+    rest, by unmet dependencies; an aborted current cycle lands here)."""
+    from tagteam.state import normalize_phase_key
+    st = state or {}
+    cur = normalize_phase_key(st["phase"]) if st.get("phase") else None
+    ctype = st.get("type")
+    cstate = (cycle_status or {}).get("state") if cycle_status else None
+    done = _normalize_completed(completed)
+    by_slug = {p.slug: p for p in phases}
+    groups: dict[str, list] = {"done": [], "in_progress": [], "ready": [], "blocked": []}
+    for p in phases:
+        entry = {"phase": p, "why": None, "done_by": None, "unmet": [], "note": None}
+        is_cur = cur is not None and p.slug == cur
+        if is_terminal_status(p.status):
+            entry["done_by"] = "roadmap"
+            groups["done"].append(entry)
+        elif p.slug in done:
+            entry["done_by"] = "run"
+            groups["done"].append(entry)
+        elif is_cur and (cstate in LIVE_CYCLE_STATES
+                         or (ctype == "plan" and cstate in ENDED_CYCLE_STATES)
+                         or (cycle_status is None and st.get("status") in ("ready", "working"))):
+            entry["why"] = "current"
+            groups["in_progress"].append(entry)
+        elif is_cur and ctype == "impl" and cstate in ENDED_CYCLE_STATES:
+            entry["why"] = "approved"
+            groups["in_progress"].append(entry)
+        elif is_declared_in_progress(p.status):
+            entry["why"] = "declared"
+            groups["in_progress"].append(entry)
+        else:
+            entry["unmet"] = unmet_dependencies(p, by_slug, done)
+            if is_cur and cstate == "aborted":
+                entry["note"] = f"last cycle aborted ({ctype}, round {(cycle_status or {}).get('round')})"
+            groups["blocked" if entry["unmet"] else "ready"].append(entry)
+    # "ready" in the order the queue would pick them (topological, stable)
+    try:
+        order = {slug: i for i, slug in enumerate(topological_queue(phases, completed=done)[0])}
+    except ValueError:
+        order = {}
+    groups["ready"].sort(key=lambda e: order.get(e["phase"].slug, len(order) + phases.index(e["phase"])))
+    placed = sum(len(v) for v in groups.values())
+    if placed != len(phases):                      # the invariant: every phase exactly once
+        raise AssertionError(f"roadmap classify placed {placed} of {len(phases)} phases")
+    return groups
+
+
+def _row(e: dict) -> dict:
+    p = e["phase"]
+    return {"slug": p.slug, "number": (f"{p.number}{p.suffix}" if p.number is not None else None),
+            "name": p.name, "status": p.status, "depends_on": list(p.depends_on),
+            "unmet": list(e["unmet"]), "line": getattr(p, "line", None), "why": e["why"],
+            "done_by": e["done_by"], "note": e["note"]}
+
+
+def board(project_root: str | Path) -> dict:
+    """The roadmap as the arbiter needs to see it. File-only (roadmap,
+    state, the current cycle's status file); creates nothing; safe under
+    TAGTEAM_READ_ONLY. Ready rows carry the launch intent Start would send
+    (`launch.launch_intent(phase=…)`), or none while the graph has problems."""
+    from tagteam.state import read_state
+    root = Path(project_root)
+    rp = root / "docs" / "roadmap.md"
+    out = {"problems": [], "warnings": [], "current": None, "run": None,
+           "groups": {"done": [], "in_progress": [], "ready": [], "blocked": []}}
+    if not rp.exists():
+        out["problems"] = ["no docs/roadmap.md — run `tagteam quickstart`"]
+        return out
+    text = rp.read_text(encoding="utf-8")
+    out["warnings"] = ([f"unparsed phase heading (line {n}): {l}" for n, l in unparsed_phase_headings(text)]
+                       + [f"placeholder phase heading (line {n}): {l} — rename it to make it a phase"
+                          for n, l in placeholder_phase_headings(text)])
+    try:
+        phases, problems = graph_problems(rp)
+    except ValueError as e:
+        out["problems"] = [str(e)]
+        return out
+    out["problems"] = list(problems)
+    try:
+        state = read_state(str(root)) or {}
+    except Exception:
+        state = {}
+    cycle = None
+    if state.get("phase") and state.get("type"):
+        try:
+            from tagteam.hub_api import read_cycle_status_file
+            cycle = read_cycle_status_file(root, state["phase"], state["type"])
+        except Exception:
+            cycle = None
+    completed = active_run_completed(root)
+    groups = classify(phases, state=state, cycle_status=cycle, completed=completed)
+    if state.get("phase"):
+        out["current"] = {"phase": state.get("phase"), "type": state.get("type"),
+                          "round": (cycle or {}).get("round", state.get("round")),
+                          "state": (cycle or {}).get("state") or state.get("status")}
+    out["run"] = {"mode": state.get("run_mode") or "single-phase", "completed": completed}
+    from tagteam import launch as _launch
+    for name, entries in groups.items():
+        rows = []
+        for e in entries:
+            r = _row(e)
+            r["start"] = None
+            if name == "ready" or (name == "in_progress" and e["why"] == "current"):
+                try:
+                    it = _launch.launch_intent(root, phase=e["phase"].slug)
+                except Exception as ex:                  # never fail the board
+                    it = {"command": None, "reason": f"{type(ex).__name__}: {ex}"}
+                r["start"] = it
+            rows.append(r)
+        out["groups"][name] = rows
+    return out
+
+
+def _print_board(b: dict) -> None:
+    for p in b["problems"]:
+        print(f"problem: {p}")
+    for w in b["warnings"]:
+        print(f"warn: {w}")
+    titles = {"in_progress": "In progress", "ready": "Up next — ready",
+              "blocked": "Up next — blocked", "done": "Done"}
+    for g in ("in_progress", "ready", "blocked", "done"):
+        rows = b["groups"][g]
+        print(f"\n{titles[g]} ({len(rows)})")
+        for r in rows:
+            num = f"{r['number']}: " if r["number"] else ""
+            extra = ""
+            if g == "blocked":
+                extra = f"  waits for: {', '.join(r['unmet'])}"
+            elif g == "done" and r["done_by"] == "run":
+                extra = f"  completed in this run — the roadmap still says: {r['status']}"
+            elif g == "in_progress" and r["why"] == "declared":
+                extra = "  (the roadmap marks this in progress — change its status to start it again)"
+            print(f"  {num}{r['name']} [{r['slug']}] — {r['status']}{extra}")
+            if r.get("note"):
+                print(f"      note: {r['note']}")
+            st = r.get("start") or {}
+            if g in ("ready", "in_progress") and st.get("command"):
+                print(f"      start: {st['command']}")
+            elif g == "ready" and st.get("reason"):
+                print(f"      not startable now: {st['reason']}")
+
 def roadmap_command(args: list[str]) -> int:
     """Handle `python -m tagteam roadmap [subcommand]`."""
     if not args:
@@ -776,6 +944,14 @@ def roadmap_command(args: list[str]) -> int:
             return 1
         completed = active_run_completed(_project_root())
         print(graph_text(phases, mermaid=mermaid, completed=completed), end="")
+        return 0
+
+    if subcmd == "board":                       # Phase 69
+        b = board(_project_root())
+        if "--json" in rest:
+            print(json.dumps(b, indent=2, default=str))
+        else:
+            _print_board(b)
         return 0
 
     if subcmd == "ready":

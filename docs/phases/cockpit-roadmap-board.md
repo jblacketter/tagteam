@@ -1,10 +1,34 @@
 # Phase 69: Cockpit roadmap board
 
 ## Status
-- [ ] Planning: plan cycle open (round 2 — r1: exhaustive grouping incl. run-completed/aborted; one board-wide launch guard + endpoint refusal)
-- [ ] Implementation
+- [x] Planning: approved round 2 (2026-09-23) at `243ae32`. r1: exhaustive classifier; one board-wide launch guard + endpoint refusal.
+- [x] Implementation: branch `phase-69-cockpit-roadmap-board`
 - [ ] Implementation Review
 - [ ] Complete
+
+## Implementation notes
+**Driven in a real page:** a scratch project whose document order differs from its dependency order (A done, B depends on C, C, D, E marked "In review"), served with the test suite's fake agents and a 25-second lead turn.
+- The board showed Done / In progress / ready / blocked as expected. `tagteam roadmap board` printed the same groups, and it offered **C** (Data Model), where the old document-order logic would have offered the blocked B (Api Layer).
+- There were five tabs, no Start card, and the quiet line read "Nothing in progress. 2 phases ready on the Roadmap tab →".
+- **Start on one ready phase**, via the confirm with its CLI line, started the lead's turn. On refresh, `launch.available` was false with "the lead is busy in a conversation", and **no** Start was shown anywhere.
+- A stale Start for the **other** ready phase, sent straight to `/api/start/launch`, got a 409 "another start is in progress". The database held exactly one launch row and one lead turn.
+- Once the turn ended, both ready phases offered Start again.
+- **Looking at the page also fixed the quiet line**, which had read "no cycle in progress 2 phases ready…" (the intent's internal reason). It now reads "Nothing in progress."
+
+**Tests pinned to the old behaviour, updated as the approved plan intends** (`tests/test_launchpad.py`, `tests/test_roadmap.py`, `tests/test_cockpit_activity.py`, `tests/test_server_cockpit.py`):
+- document order became the first **ready** phase;
+- a phase whose status says "In progress" is no longer offered Start;
+- `_next_after` was removed;
+- the Start card's words and compact style were removed;
+- the tab names changed.
+
+Each changed assertion says why in a comment.
+
+**Also done:** the hub's **Start →** link (`#start`) now opens the Roadmap tab.
+
+**Left alone:** the Start card's `.card.start.compact` CSS is now unused.
+
+**Only table-tested:** the in-progress row's **Start implementation** was tested in Chromium with a fixture payload, not driven against a real approved plan. `last_failed` on a row was only covered by the payload code path.
 
 ## Summary
 The cockpit shows one phase: the Needs-you **Start** card. It is chosen by

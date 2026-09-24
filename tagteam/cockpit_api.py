@@ -1209,7 +1209,9 @@ def launch_view(project_dir: str | Path) -> dict | None:
             return None
         try:
             from tagteam import launch as _launch
-            if _launch.launch_key(_launch.launch_intent(root)) != row.get("key"):
+            # Phase 69: the board can start any ready phase — compare against the
+            # intent for THIS row's own phase, not the default next phase
+            if _launch.launch_key(_launch.launch_intent(root, phase=intent.get("phase"))) != row.get("key"):
                 return None
         except Exception:
             return None
@@ -1839,3 +1841,44 @@ def _plan_orders(params: dict, by: str):
     if op == "clear-run":
         return orders.orders_command, ["clear", "--run"]
     raise ValueError("'op' must be stop, add, remove or clear-run")
+
+
+
+# ---------------------------------------------------------------------------
+# Phase 69: GET /api/roadmap — the board plus ONE board-wide launch guard
+# ---------------------------------------------------------------------------
+
+def launch_availability(project_dir: str | Path, now: dict | None = None) -> dict:
+    """{available, reason}: may the page offer ANY Start right now? The
+    facts the old Start card used, server-side: an in-flight turn (a lead
+    conversation turn included), a pending launch, or a headline that says a
+    turn is starting / working / launching. Also enforced by `launch()`."""
+    n = now if now is not None else now_payload(project_dir)
+    inflight = n.get("inflight")
+    if inflight:
+        kind = inflight.get("kind") or ""
+        who = "the lead is busy in a conversation" if kind in ("lead", "conversation", "chat") \
+            else f"a turn is running ({kind or 'turn'})"
+        return {"available": False, "reason": who + " — Start is offered again when it ends"}
+    launch = n.get("launch") or {}
+    if launch.get("status") == "pending":
+        return {"available": False, "reason": "a start is in progress — wait for it to finish"}
+    hl = (n.get("headline") or {}).get("state")
+    if hl in ("working", "starting", "launching"):
+        return {"available": False, "reason": "a turn is starting or running — Start is offered again when it ends"}
+    return {"available": True, "reason": ""}
+
+
+def roadmap_payload(project_dir: str | Path) -> dict:
+    from tagteam import roadmap as _rm
+    b = _rm.board(project_dir)
+    n = now_payload(project_dir)
+    b["launch"] = launch_availability(project_dir, n)
+    lv = n.get("launch") or {}
+    if lv.get("status") == "failed" and lv.get("phase"):          # a failed Start shows on its row
+        for rows in b["groups"].values():
+            for r in rows:
+                if r["slug"] == lv["phase"]:
+                    r["last_failed"] = {"error": lv.get("error"), "finished_at": lv.get("finished_at"),
+                                        "log_path": lv.get("log_path")}
+    return b

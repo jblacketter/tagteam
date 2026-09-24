@@ -606,7 +606,7 @@ class TestSourceGuards:
         # UX pass 2026-08-17: one Start (the cockpit's own engine); no terminals from the page;
         # the tab for the lead is named after the lead; Feed reads "Rounds"
         assert "Launch terminals" not in js and "/api/session/start" not in js and "Start headless" not in js
-        assert ">Rounds<" in html
+        assert ">History<" in html and "Rounds — what each side said" in html     # Phase 69: Rounds lives under History
         # the lead lane is always visible: the chat refreshes on every pass, no tab condition
         assert "loadActivity(), loadLead(false)]" in js and "activeTab() === 'lead'" not in js
         assert 'name="tagteam-version"' not in html          # injected by the server, not shipped
@@ -794,7 +794,7 @@ class TestUxPassWords:
                     "Dispatch is on hold", "nothing is dispatching", "In-flight pointer", "Talk to the lead"):
             assert bad not in js and bad not in html, bad
         # and the words that replace them
-        for good in ("Start the watcher", "Turns are paused", "Chat with", "Leave note", "Rounds"):
+        for good in ("Start the watcher", "Turns are paused", "ready on the Roadmap tab", "Leave note", "Rounds"):   # Phase 69: the Start card's "Chat with" left with it
             assert good in js or good in html, good
         # Phase 68: who-has-the-ball is worded ONCE, server-side (cockpit_api.headline) — in the same plain
         # words, with none of the engine's. (Was: "is working" / "waiting on" / "watcher: on|off" in the JS.)
@@ -950,8 +950,9 @@ class TestViewportFit:
         assert "function fitLanes(" in js and "window.addEventListener('resize', fitLanes)" in js
         # Phase 68: renderOwedChip is gone; renderNow now ends at the watcher-button handler
         assert "fitLanes();" in js[js.index("function renderNow("):js.index("$('btn-watcher').addEventListener(")]
-        assert "scard.classList.add('compact')" in js
-        assert ".card.start.compact" in css and ".lanes .lane { min-height: 0; overflow: hidden; }" in css
+        # Phase 69: the Start card is gone (every Start lives on the Roadmap tab)
+        assert "scard.classList.add('compact')" not in js
+        assert ".lanes .lane { min-height: 0; overflow: hidden; }" in css
 
 
 class TestReviewerLanePerCycle:

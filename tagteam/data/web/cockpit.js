@@ -517,57 +517,12 @@
     var launchPending = n.launch && n.launch.status === 'pending';
     var startCard = false;
     var lead = (n.agents && n.agents.lead) || 'the lead';
-    // Phase 68b: since 68a a headless watcher hands an approved plan to the lead by itself, so the
-    // 'next step' can already be running when this renders — offering Start beside it contradicts the bar
-    var hlNow = (n.headline && n.headline.state) || '';
-    var busyNow = !!n.inflight || hlNow === 'working' || hlNow === 'starting' || hlNow === 'launching';
-    if (START && START.intent && !launchPending && !busyNow) {
-      var it = START.intent;
-      if (it.command) {
-        var canStart = !!(START.headless && START.headless.ok);
-        // compact: an invitation, one row — title · the command · Start; the
-        // explanation is one small line (the card is not the page's billboard)
-        var scard = cardShell('start', 'Next: ' + it.phase + ' — ' + typeWord(it.type), String(it.reason || '').replace(/no cycle in progress/, 'nothing in progress'));
-        scard.classList.add('compact');
-        var sbody = el('div', 'card-body');
-        var cmd = el('code', 'cmd', it.command); sbody.appendChild(cmd);
-        var what = el('div', 'muted small');
-        if (canStart) {
-          what.textContent = 'Start turns the watcher on (if it is off) and tells ' + lead + ' this. Prefer to talk first? Chat with ' + lead + ' below, then say it yourself.';
-        } else {
-          what.textContent = 'This page cannot run turns for both agents yet (' + ((START.headless && START.headless.errors) || []).join('; ') + '). Tell ' + lead + ' yourself, in its terminal.';
-        }
-        sbody.appendChild(what);
-        // Phase 43: a launch that failed for THIS intent says so under the card
-        if (n.launch && n.launch.status === 'failed') {
-          var lf = el('div', 'inline-error', 'Last Start failed' + (n.launch.finished_at ? ' ' + fmtTs(n.launch.finished_at) : '') + ': ' + plainError(n.launch.error) + (n.launch.log_path ? '\nlog: ' + n.launch.log_path : ''));
-          sbody.appendChild(lf);
-        }
-        scard.appendChild(sbody);
-        var srow = el('div', 'row');
-        var copyBtn = el('button', 'btn btn-small', 'Copy command'); copyBtn.title = 'copy the /handoff command';
-        copyBtn.addEventListener('click', function () { try { navigator.clipboard.writeText(it.command); toast('ok', 'Copied.'); } catch (e) { toast('err', 'Clipboard unavailable — select the command and copy it.'); } });
-        srow.appendChild(copyBtn);
-        var sfin = el('div', 'actions-final');
-        if (canStart) {
-          var hb = el('button', 'btn btn-primary', 'Start'); hb.title = 'tagteam watch --mode headless --pidfile (if needed) + tagteam lead "' + it.command + '"';
-          hb.addEventListener('click', function () {
-            act(hb, '/api/start/launch', { intent: it, ensure_watcher: true }, { confirm: { title: 'Start ' + it.phase + ' — ' + typeWord(it.type) + '?', body: 'Turns the watcher on for this project (if it is off) and sends ' + lead + ' the command below as the first message of a chat. Clicking twice does not start it twice.' }, onDone: function (r) {
-              if (r && r.body && (r.body.conversation_id || (r.body.existing && r.body.existing.conversation_id))) {
-                LEAD.current = r.body.conversation_id || r.body.existing.conversation_id;
-                try { localStorage.setItem('tagteam.cockpit.lead', LEAD.current); } catch (e) { /* ignore */ }
-                loadLead(true).then(function () { try { $('lead-text').focus(); } catch (e) { /* ignore */ } });
-              }
-            } });
-          });
-          sfin.appendChild(hb);
-        }
-        srow.appendChild(sfin); scard.appendChild(srow);
-        wrap.appendChild(scard); startCard = true;
-      } else if (it.reason && /not set up/.test(it.reason)) {
-        var nc = cardShell('stale', 'Not set up yet', '');
-        nc.appendChild(el('div', 'hint', it.reason)); wrap.appendChild(nc); cards++;
-      }
+    // Phase 69: the Start card is gone — every Start now lives on the Roadmap tab (a ready phase, or
+    // "Start implementation" on the phase in progress), behind ONE board-wide guard. What stays here
+    // is the not-set-up hint, which only the arbiter can act on.
+    if (START && START.intent && !START.intent.command && START.intent.reason && /not set up/.test(START.intent.reason)) {
+      var nc = cardShell('stale', 'Not set up yet', '');
+      nc.appendChild(el('div', 'hint', START.intent.reason)); wrap.appendChild(nc); cards++;
     }
 
     // Hold
@@ -635,11 +590,130 @@
       if (launchPending) eb.textContent = 'Starting ' + (n.launch.phase || '') + ' — ' + typeWord(n.launch.type) + ': ' + lead + ' is on it (' + fmtAge(n.launch.age_s) + ').';
       else if (n.inflight) eb.textContent = (n.inflight.agent || n.inflight.role) + ' is working — ' + inflightKind(n) + ' (' + fmtAge(n.inflight.age_s) + ').';
       else if (who) eb.textContent = 'Waiting on ' + who + ' — ' + st.phase + ', ' + typeWord(st.type) + ', round ' + st.round + ' (' + fmtAge(n.owed.age_s) + ').';
-      else if (!st.phase) eb.textContent = (START && START.intent && START.intent.reason) ? START.intent.reason : 'No phase in progress.';
+      // Phase 69: an intent WITH a command is an invitation (the board has it); only a reason nothing can start is shown
+      else if (!st.phase) eb.textContent = (START && START.intent && !START.intent.command && START.intent.reason) ? START.intent.reason + '.' : 'Nothing in progress.';
       else if (st.status === 'done') eb.textContent = st.phase + ' (' + typeWord(st.type) + ') is ' + cycleWord(st.result || 'done') + '.';
       else eb.textContent = 'Nothing is waiting on anyone right now.';
+      // Phase 69: point at the board — the count is the server's (START.ready_count)
+      if (!launchPending && !n.inflight && !who && START && START.ready_count) {
+        var go = el('button', 'link-btn', ' ' + START.ready_count + ' phase' + (START.ready_count === 1 ? '' : 's') + ' ready on the Roadmap tab →');
+        go.type = 'button';
+        go.addEventListener('click', function () { showTab('roadmap'); });
+        eb.appendChild(go);
+      }
     }
   }
+
+  // ---------- Phase 69: Roadmap board ----------
+  // Presents GET /api/roadmap. Grouping, readiness, dependencies and whether ANY Start may be offered
+  // (`launch.available`, one board-wide guard) are all server-side; this slice derives none of them.
+  var ROADMAP = { loaded: false, data: null };
+  var RM_TITLES = { in_progress: 'In progress', ready: 'Up next — ready', blocked: 'Up next — blocked', done: 'Done' };
+
+  function loadRoadmap() {
+    return getJSON('/api/roadmap').then(function (r) {
+      if (!r.ok) { toast('err', 'Could not load the roadmap (' + r.status + ')'); return; }
+      ROADMAP.loaded = true;
+      renderRoadmap(r.body || {});
+    });
+  }
+
+  function roadmapStart(btn, row) {
+    var it = row.start;
+    var lead = (NOW && NOW.agents && NOW.agents.lead) || 'the lead';
+    act(btn, '/api/start/launch', { intent: it, ensure_watcher: true }, {
+      confirm: { title: 'Start ' + it.phase + ' — ' + typeWord(it.type) + '?',
+                 body: 'Turns the watcher on for this project (if it is off) and sends ' + lead + ' the command below as the first message of a chat. Only one start runs at a time.' },
+      onDone: function (r) {
+        var b = (r && r.body) || {};
+        var cid = b.conversation_id || (b.existing && b.existing.conversation_id);
+        if (cid) {
+          LEAD.current = cid;
+          try { localStorage.setItem('tagteam.cockpit.lead', cid); } catch (e) { /* ignore */ }
+          loadLead(true);
+        }
+        loadRoadmap();
+      }
+    });
+  }
+
+  function renderRoadmapRow(group, r, launch) {
+    var row = el('div', 'rm-row');
+    row.dataset.slug = r.slug;
+    row.dataset.group = group;
+    var head = el('div', 'rm-head');
+    head.appendChild(el('span', 'rm-num', r.number ? r.number : ''));
+    head.appendChild(el('span', 'rm-name', r.name));
+    row.appendChild(head);
+    var status = el('div', 'rm-status', r.status || '');
+    status.title = r.status || '';
+    row.appendChild(status);
+    var meta = [];
+    if (r.depends_on && r.depends_on.length) meta.push('depends on: ' + r.depends_on.join(', '));
+    if (group === 'blocked') meta.push('waits for: ' + r.unmet.join(', '));
+    if (group === 'done' && r.done_by === 'run') meta.push('completed in this run — the roadmap still says: ' + r.status);
+    if (group === 'in_progress' && r.why === 'declared') meta.push('the roadmap marks this in progress — change its status to start it again');
+    if (group === 'in_progress' && r.why === 'approved') meta.push('implementation approved — awaiting merge');
+    if (r.note) meta.push(r.note);
+    if (meta.length) row.appendChild(el('div', 'rm-meta', meta.join(' · ')));
+    if (r.last_failed) row.appendChild(el('div', 'inline-error', 'Last Start failed: ' + plainError(r.last_failed.error) + (r.last_failed.log_path ? '\nlog: ' + r.last_failed.log_path : '')));
+    var it = r.start;
+    if ((group === 'ready' || group === 'in_progress') && it) {
+      var acts = el('div', 'rm-actions');
+      if (it.command) {
+        if (!launch.available) {
+          acts.appendChild(el('span', 'muted small rm-guard', launch.reason));
+        } else if (START && START.headless && START.headless.ok) {
+          var sb = el('button', 'btn btn-small btn-primary rm-start', it.type === 'impl' ? 'Start implementation' : 'Start');
+          sb.type = 'button';
+          sb.title = 'tagteam watch --mode headless --pidfile (if needed) + tagteam lead "' + it.command + '"';
+          sb.addEventListener('click', function () { roadmapStart(sb, r); });
+          acts.appendChild(sb);
+        } else {
+          acts.appendChild(el('span', 'muted small', 'This page cannot run turns for both agents yet — tell the lead yourself.'));
+        }
+        var cp = el('button', 'btn btn-small', 'Copy command');
+        cp.type = 'button';
+        cp.addEventListener('click', function () {
+          try { navigator.clipboard.writeText(it.command); toast('ok', 'Copied.'); }
+          catch (e) { toast('err', 'Clipboard unavailable — select the command and copy it.'); }
+        });
+        acts.appendChild(cp);
+        acts.appendChild(el('code', 'rm-cmd', it.command));
+      } else if (group === 'ready' && it.reason) {
+        acts.appendChild(el('span', 'muted small', it.reason));
+      }
+      if (acts.children.length) row.appendChild(acts);
+    }
+    return row;
+  }
+
+  function renderRoadmap(p) {
+    ROADMAP.data = p;
+    var probs = $('roadmap-problems');
+    probs.textContent = (p.problems || []).length ? ('docs/roadmap.md has problems — nothing can be started until they are fixed (tagteam roadmap check): ' + p.problems.join(' · ')) : '';
+    probs.classList.toggle('hidden', !(p.problems || []).length);
+    var warns = $('roadmap-warnings');
+    warns.textContent = (p.warnings || []).join(' · ');
+    warns.classList.toggle('hidden', !(p.warnings || []).length);
+    var launch = p.launch || { available: false, reason: '' };
+    var guard = $('roadmap-guard');
+    guard.textContent = launch.available ? '' : ('No Start right now: ' + launch.reason);
+    guard.classList.toggle('hidden', !!launch.available);
+    var box = $('roadmap-groups');
+    box.textContent = '';
+    ['in_progress', 'ready', 'blocked', 'done'].forEach(function (g) {
+      var rows = (p.groups && p.groups[g]) || [];
+      var sec = g === 'done' ? el('details', 'rm-group') : el('section', 'rm-group');
+      sec.dataset.group = g;
+      var title = RM_TITLES[g] + ' (' + rows.length + ')';
+      sec.appendChild(g === 'done' ? el('summary', 'rm-title', title) : el('h4', 'rm-title', title));
+      if (!rows.length) sec.appendChild(el('div', 'muted small', 'none'));
+      rows.forEach(function (r) { sec.appendChild(renderRoadmapRow(g, r, launch)); });
+      box.appendChild(sec);
+    });
+  }
+  // ---------- end Phase 69 ----------
 
   // ---------- Phase 71: Rules tab ----------
   // What governs this project's runs, as /api/rules states it. This slice PRESENTS the payload:
@@ -906,18 +980,25 @@
   // ---------- end Phase 71b ----------
 
   // ---------- Tabs ----------
+  // Phase 69: tabs grouped by intent. Older saved names map to where their panel now lives.
+  var TAB_ALIASES = { feed: 'history', diff: 'history', notes: 'now', lead: 'now' };
   function showTab(name) {
+    name = TAB_ALIASES[name] || name;
+    if (!$('tab-' + name)) name = 'now';
     document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === name); });
     document.querySelectorAll('.panel').forEach(function (p) { p.classList.toggle('active', p.id === 'panel-' + name); });
-    if (name === 'diff' && !diffLoaded) loadDiff();
     if (name === 'usage' && !usageLoaded) loadUsage();
-    if (name === 'notes' && !notesLoaded) loadNotes();
+    if (name === 'now' && !notesLoaded) loadNotes();
     if (name === 'rules' && !RULES.loaded) loadRules();
+    if (name === 'roadmap') loadRoadmap();
     try { localStorage.setItem('tagteam.cockpit.tab', name); } catch (e) { /* ignore */ }
   }
   document.querySelectorAll('.tab').forEach(function (t) { t.addEventListener('click', function () { showTab(t.dataset.tab); }); });
   $('btn-rules-refresh').addEventListener('click', function () { loadRules(); });
-  function activeTab() { var t = document.querySelector('.tab.active'); return t ? t.dataset.tab : 'feed'; }
+  $('btn-roadmap-refresh').addEventListener('click', function () { loadRoadmap(); });
+  // the diff still loads only when it is opened (it now sits under History)
+  $('history-diff').addEventListener('toggle', function () { if ($('history-diff').open && !diffLoaded) loadDiff(); });
+  function activeTab() { var t = document.querySelector('.tab.active'); return t ? t.dataset.tab : 'now'; }
 
   // ---------- Feed ----------
   function loadFeed() {
@@ -1150,10 +1231,11 @@
         var t = activeTab();
         // Phase 45: the lead lane is always visible — its chat refreshes on every pass
         var ps = [loadFeed(), loadActivity(), loadLead(false)];
-        if (t === 'notes' || notesLoaded) ps.push(loadNotes());
+        if (t === 'now' || notesLoaded) ps.push(loadNotes());
         if (t === 'usage' && usageLoaded) ps.push(loadUsage());
         if (t === 'rules' && RULES.loaded) ps.push(loadRules());
-        if (t === 'diff' && diffLoaded && reason !== 'tick') ps.push(loadDiff());
+        if (t === 'history' && $('history-diff').open && diffLoaded && reason !== 'tick') ps.push(loadDiff());
+        if (t === 'roadmap' && ROADMAP.loaded) ps.push(loadRoadmap());
         return Promise.all(ps);
       });
     }).catch(function (e) {
@@ -1861,7 +1943,7 @@
       st.appendChild(document.createTextNode(sentence + (slot.round ? ' (round ' + slot.round + ')' : '') + ' — ' + (slot.kind === 'gate' ? '' : 'streaming ') + where + ' · '));
       var see = el('button', 'link-btn', 'watch it'); see.type = 'button'; see.addEventListener('click', focusWorkingLane);
       st.appendChild(see); st.appendChild(document.createTextNode(', wait, or '));
-      var lnk = el('button', 'link-btn', 'leave a note for the next turn'); lnk.type = 'button'; lnk.addEventListener('click', function () { showTab('notes'); });
+      var lnk = el('button', 'link-btn', 'leave a note for the next turn'); lnk.type = 'button'; lnk.addEventListener('click', function () { showTab('now'); });
       st.appendChild(lnk); st.appendChild(document.createTextNode('. You can chat while turns are paused.'));
       return;
     }
@@ -2163,7 +2245,9 @@
     var saloon = document.querySelector('.theme-link[href$="theme=saloon"]');
     if (saloon) saloon.remove();
   }
-  try { var saved = localStorage.getItem('tagteam.cockpit.tab'); if (saved && $('tab-' + saved)) showTab(saved); } catch (e) { /* ignore */ }
+  try { var saved = localStorage.getItem('tagteam.cockpit.tab'); if (saved) showTab(saved); } catch (e) { /* ignore */ }
+  // Phase 69: the hub's "Start →" links to #start — Start now lives on the Roadmap tab
+  if (location.hash === '#start' || location.hash === '#roadmap') showTab('roadmap');
   refreshAll('boot');
   connectSSE();
   window.addEventListener('resize', fitLanes);

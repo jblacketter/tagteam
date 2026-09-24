@@ -6,9 +6,10 @@ Launch intent (one function, one consumer set — cockpit card, terminal
 copy command, hub row, `launch`):
 
   observed                                  → intent
-  no state / no cycle                        → next actionable roadmap phase, plan
+  no state / no cycle / aborted cycle        → first READY roadmap phase (dependencies met,
+                                               topological order — Phase 69), or the chosen one
   current cycle `plan` approved / done       → SAME phase, impl
-  current cycle `impl` approved / done       → next actionable phase AFTER it, plan
+  current cycle `impl` approved / done       → first READY phase (or the chosen one), plan
   ready / in-progress / escalated / needs-human / paused → none (reason)
   roadmap exhausted / no actionable phase    → none (never fabricated)
   setup missing (tagteam.yaml / roadmap)     → none (quickstart hint)
@@ -74,36 +75,52 @@ def _actionable_phases(root: Path) -> list:
     return [p for p in allp if not roadmap.is_terminal_status(p.status)]
 
 
-def _next_after(root: Path, phase: str | None) -> tuple:
-    """(RoadmapPhase | None, roadmap_present). Next actionable phase after
-    `phase` (by name/slug), or the first actionable one when `phase` is
-    None or unknown; the just-approved phase itself is skipped by name."""
+def _ready_choice(root: Path, st: dict, cs: dict | None, phase: str | None) -> tuple[str | None, str]:
+    """Phase 69: (slug to start, reason) from the roadmap's READY group —
+    dependency-aware, via the one classifier the board uses. With `phase`,
+    that phase if it is ready; otherwise the first ready phase in
+    topological order (the queue's order, not document order)."""
     from tagteam import roadmap
     rp = root / "docs" / "roadmap.md"
-    if not rp.exists():
-        return None, False
     try:
-        allp = roadmap.parse_roadmap(rp)
-    except ValueError:
-        return None, True
-    start = 0
-    if phase:
-        for i, p in enumerate(allp):
-            if p.slug == phase or roadmap._slugify(p.name) == phase:
-                start = i + 1
-                break
-    for p in allp[start:]:
-        if p.slug != phase and not roadmap.is_terminal_status(p.status):
-            return p, True
-    return None, True
+        phases, problems = roadmap.graph_problems(rp)
+    except ValueError as e:
+        return None, f"docs/roadmap.md: {e}"
+    if problems:
+        return None, "docs/roadmap.md has problems — run `tagteam roadmap check`"
+    groups = roadmap.classify(phases, state=st, cycle_status=cs,
+                              completed=roadmap.active_run_completed(root))
+    ready = [e["phase"].slug for e in groups["ready"]]
+    if phase is None:
+        if ready:
+            return ready[0], ""
+        nb = len(groups["blocked"])
+        return None, ("no phase is ready" + (f" ({nb} blocked by dependencies)" if nb else "")
+                      + " in docs/roadmap.md")
+    from tagteam.state import normalize_phase_key
+    key = normalize_phase_key(phase)
+    if key in ready:
+        return key, ""
+    for g, why in (("blocked", "waits for "), ("in_progress", "is in progress"), ("done", "is done")):
+        for e in groups[g]:
+            if e["phase"].slug == key:
+                if g == "blocked":
+                    return None, f"{key} {why}{', '.join(e['unmet'])}"
+                return None, f"{key} {why}"
+    return None, f"{key} is not a phase in docs/roadmap.md"
 
 
 def launch_intent(project_dir: str | Path, *, state: dict | None = None,
                   cycle_status: dict | None = None, paused: dict | None = None,
-                  _prefetched: bool = False) -> dict:
+                  _prefetched: bool = False, phase: str | None = None) -> dict:
     """See module docstring. Always returns {phase, type, command, reason,
     observed} — `command` is None when nothing may start. Read-only callers
-    (the hub) pass what they already read (`_prefetched=True`)."""
+    (the hub) pass what they already read (`_prefetched=True`).
+
+    Phase 69: `phase` names the phase the arbiter chose on the roadmap board.
+    A next phase is always a READY one (dependencies met — `roadmap.classify`),
+    never merely the next in document order."""
+    wanted = phase
     from tagteam.state import read_state
     root = Path(project_dir)
     observed = {"seq": None, "phase": None, "type": None, "round": None, "state": None}
@@ -129,6 +146,7 @@ def launch_intent(project_dir: str | Path, *, state: dict | None = None,
             paused = None
     observed["seq"] = st.get("seq")
     phase, ctype = st.get("phase"), st.get("type")
+    from tagteam.state import normalize_phase_key as _npk
     cstate = (cs or {}).get("state") if cs else None
     observed.update({"phase": phase, "type": ctype, "round": (cs or {}).get("round") if cs else st.get("round"),
                      "state": cstate or st.get("status")})
@@ -140,24 +158,25 @@ def launch_intent(project_dir: str | Path, *, state: dict | None = None,
         return {"phase": phase, "type": ctype, "command": None, "observed": observed,
                 "reason": f"a cycle is in progress ({phase} · {ctype} · {cstate}; turn: {turn})"}
     if phase and cstate in TERMINAL_CYCLE_STATES and ctype == "plan":
+        if wanted is not None and _npk(wanted) != _npk(phase):
+            return {"phase": wanted, "type": "plan", "command": None, "observed": observed,
+                    "reason": f"the plan for {phase} is approved — implement it first"}
         return {"phase": phase, "type": "impl", "command": f"{handoff_command(root)} start {phase} impl",
                 "observed": observed, "reason": "plan approved — implement it"}
     if phase and cstate in TERMINAL_CYCLE_STATES and ctype == "impl":
-        nxt, present = _next_after(root, phase)
+        nxt, why = _ready_choice(root, st, cs, wanted)
         if nxt is None:
-            return {"phase": None, "type": None, "command": None, "observed": observed,
-                    "reason": "no actionable phase left in docs/roadmap.md"}
-        return {"phase": nxt.slug, "type": "plan", "command": f"{handoff_command(root)} start {nxt.slug}",
+            return {"phase": wanted, "type": None, "command": None, "observed": observed, "reason": why}
+        return {"phase": nxt, "type": "plan", "command": f"{handoff_command(root)} start {nxt}",
                 "observed": observed, "reason": f"{phase} approved — next phase"}
     if phase and cs is None and st.get("status") in ("ready", "working"):
         return {"phase": phase, "type": ctype, "command": None, "observed": observed,
                 "reason": f"a cycle is in progress ({phase} · {ctype}; turn: {st.get('turn') or '?'})"}
-    # no state / no cycle
-    nxt, present = _next_after(root, None)
+    # no state / no cycle / an aborted cycle
+    nxt, why = _ready_choice(root, st, cs, wanted)
     if nxt is None:
-        return {"phase": None, "type": None, "command": None, "observed": observed,
-                "reason": "no actionable phase in docs/roadmap.md"}
-    return {"phase": nxt.slug, "type": "plan", "command": f"{handoff_command(root)} start {nxt.slug}",
+        return {"phase": wanted, "type": None, "command": None, "observed": observed, "reason": why}
+    return {"phase": nxt, "type": "plan", "command": f"{handoff_command(root)} start {nxt}",
             "observed": observed, "reason": "no cycle in progress"}
 
 
@@ -198,7 +217,20 @@ def start_payload(project_dir: str | Path, config: dict | None = None) -> dict:
         "headless": (["tagteam watch --mode headless --pidfile", f"tagteam lead {json.dumps(cmd)}"] if cmd else []),
         "interactive": (["tagteam session start", f"paste into the Lead: {cmd}"] if cmd else []),
     }
-    return {"intent": intent, "setup_ok": setup_ok,
+    ready_count = 0
+    if setup_ok:                     # Phase 69: the quiet Needs-you line points at the Roadmap tab
+        try:
+            from tagteam import roadmap as _rm
+            phases, problems = _rm.graph_problems(root / "docs" / "roadmap.md")
+            if not problems:
+                from tagteam.state import read_state
+                st = read_state(str(root)) or {}
+                cs = _cycle_status(root, st.get("phase"), st.get("type")) if st.get("phase") else None
+                ready_count = len(_rm.classify(phases, state=st, cycle_status=cs,
+                                               completed=_rm.active_run_completed(root))["ready"])
+        except Exception:
+            ready_count = 0
+    return {"intent": intent, "setup_ok": setup_ok, "ready_count": ready_count,
             "headless": {"ok": hok, "errors": herrs}, "watcher": watcher,
             "recommended": recommended, "commands": commands}
 
@@ -476,7 +508,8 @@ def launch(project_dir: str | Path, *, intent: dict, config: dict | None, by: st
     from tagteam import db, lead_chat
     from tagteam.dualwrite import writer_lock
     root = Path(project_dir)
-    live = launch_intent(root)
+    # Phase 69: recompute for the phase the client chose (the board offers any ready phase)
+    live = launch_intent(root, phase=(intent or {}).get("phase"))
     if not intent or intent.get("command") != live.get("command") or \
             (intent.get("observed") or {}) != (live.get("observed") or {}):
         return 409, {"ok": False, "error": "state changed — refresh and start again",
@@ -491,6 +524,31 @@ def launch(project_dir: str | Path, *, intent: dict, config: dict | None, by: st
     with writer_lock(root):
         conn = db.connect(project_dir=str(root))
         try:
+            # Phase 69: ONE start at a time. A different start while another
+            # is pending (its launcher alive), or while the turn slot is held,
+            # is refused before any row is claimed. An abandoned pending row
+            # (owner gone) is finalised as failed here — the existing orphan
+            # rule — so it never blocks forever. Same-key idempotency below
+            # is unchanged.
+            if db.get_launch(conn, key) is None:
+                busy = None
+                for other in db.pending_launches(conn):
+                    if _owner_gone(other.get("owner_pid"), other.get("owner_ident")):
+                        db.update_launch(conn, other["key"], ts=now, status="failed", finished_at=now,
+                                         error="orphaned: the launching process died",
+                                         partial_json=json.dumps(_partial_state(root, other)))
+                        continue
+                    busy = "another start is in progress — wait for it to finish"
+                    break
+                if busy is None:
+                    try:
+                        from tagteam.headless import slot_status
+                        if slot_status(root)["held"]:
+                            busy = "a turn is running (the turn slot is held) — wait for it to finish"
+                    except Exception:
+                        pass
+                if busy:
+                    return 409, {"ok": False, "error": busy, "intent": live}
             row, created = db.claim_launch(conn, key=key, ts=now, intent_json=json.dumps(live),
                                            owner_pid=me_pid, owner_ident=me_ident)
             if not created:
