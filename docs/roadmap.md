@@ -27,8 +27,8 @@ the top. Each phase is engine + CLI first, cockpit surface second. tagteam stays
 - **Description:** Deterministic first, cheap model second, top model last. A `tagteam job` concept: a recorded background task with a status, a log and a short result delivered to the lead — first job `ci-watch` (poll a GitHub Actions run / a PyPI version with `gh`, no model; on 2026-09-20 the lead polled five release runs by hand in the top model). A model is involved only to summarise a failure. The cockpit shows a Jobs strip.
 - **Depends on:** Phase 68
 
-### Phase 71b: Safe tagteam.yaml edits (CLI, then the Rules tab)
-- **Status:** Not started
+### Phase 71b: Safe config edits
+- **Status:** In review — plan cycle open (2026-09-23). See `docs/phases/safe-config-edits.md`.
 - **Description:** Split out of Phase 71 (plan review, 2026-09-23). The Rules tab shows `tagteam.yaml` rules read-only and names the key to change. Add editing of a small safe set (gate on/off and `on_submit`, panel on/off, briefer on/off, `watcher.resend_minutes`) through the CLI first, with a dry-run diff: targeted line edits that keep the file's comments and order (a PyYAML rewrite would drop them), validated by the same resolvers the engine uses before anything is written. Then the Rules tab offers the same edits.
 - **Depends on:** Phase 71
 
