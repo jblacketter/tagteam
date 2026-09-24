@@ -1,7 +1,7 @@
 # Phase 71b: Safe config edits
 
 ## Status
-- [ ] Planning: plan cycle open (round 1)
+- [ ] Planning: plan cycle open (round 2 — r1: saved vs effective, preview-bound writes, one writer lock, expected-tree check)
 - [ ] Implementation
 - [ ] Implementation Review
 - [ ] Complete
@@ -72,46 +72,92 @@ ending (`\n` or `\r\n`) and whether the file ended with a newline.
 - **Values are written canonically:** `true` / `false`, and integers in
   decimal.
 
-### Validation: the engine must agree, or nothing is written
-1. **The new text parses** with `yaml.safe_load` into a dict.
-2. **Nothing but the target changed:** the old and new parsed configs are
-   equal apart from the target key, using a deep compare with the target
-   removed from both. This guards the locator itself: an edit that changed
-   anything else is refused as an internal error, and nothing is written.
-3. **The engine does what was asked:** the resolver in the table above,
-   run on the new config, yields the requested value.
-   - If it does not, the edit is refused with the resolver's own problems,
-     for example: "`panel.enabled: true` is refused: the panel would still
-     be OFF — panel: the reviewer must validate for headless turns".
-   - A request that is already in effect is a no-op: "already `true`;
-     nothing written" (exit 0).
-   - Turning a feature **off** is always allowed, even when its block has
-     other problems. Off cannot fail, and it is the way out of a broken
-     configuration.
-4. **Problems elsewhere:** `validate_config` problems in *other* blocks
-   that were already there do not block the edit, and are reported as notes.
-   A problem the edit would *introduce* in another block is impossible by
-   step 2.
+### Saved versus effective (plan r1 review)
+Every decision about *what to write* uses the **saved** value: the target key
+as it is typed in the parsed file. It is `absent`, `invalid` (present but the
+wrong type, e.g. `enabled: "true"`), or `set` (a real bool, or an int ≥ 0).
+The **effective** value is what the engine's resolver yields, and it is
+checked separately, after the edit.
 
-### Writing: the same guarded write as the orders file
-- Refused under `TAGTEAM_READ_ONLY` before anything is read for writing.
-- `tagteam.yaml` must be a regular file, and no path component may be a
-  symlink (`safe_read._lstat_chain`).
-- It is read with `read_bounded` (256 KB cap). The write goes to a temp file
-  with `O_CREAT | O_EXCL | O_NOFOLLOW`, keeps the original file mode, then
-  `os.replace`.
-- **Compare-and-swap:** immediately before the replace, the file is read
-  again. If it no longer matches the bytes the edit was computed from, the
-  edit is refused ("tagteam.yaml changed while editing; nothing written").
-  Otherwise a hand edit could be silently overwritten.
-- It is never created: a missing `tagteam.yaml` is refused ("run tagteam
-  init").
+- **A no-op** happens only when the saved value is `set` and equal to the
+  requested value, with the right type. "already `false`; nothing written",
+  exit 0. An effective OFF never makes a disable a no-op. For example, with
+  `gatekeeper.enabled: true` and an invalid `scope`, the gate resolves OFF,
+  but `set gatekeeper.enabled false` still **writes** `false`. Repairing
+  `scope` later then leaves the gate OFF, as the arbiter asked. The same goes
+  for `watcher.resend_minutes: 3` in an invalid watcher block that resolves
+  to 15: setting it to 3 is a no-op on the saved value, and the output says
+  the block's other problem still keeps the effective value at 15.
+- **The payload and the controls use saved values.** Each editable row in
+  `/api/rules` carries
+  `edit: {key, kind: "bool"|"minutes", saved, saved_state: "absent"|"invalid"|"set"}`
+  beside its effective `on`/`value`. The switch shows the **saved** value.
+  When saved and effective differ, the row says "saved: on · not in effect:
+  <the resolver's reason>". So the arbiter can persist OFF even when an
+  invalid block already resolves OFF.
+
+### Validation: nothing is written unless all of this holds
+1. **The new text parses** with `yaml.safe_load` into a dict.
+2. **Nothing but the target changed, compared against an expected tree:**
+   `expected = deepcopy(old)`, then set `expected[block][key] = value`.
+   **Only the target's own parent** is normalised: when the block was
+   absent, or present but empty (`watcher:` parses to `None`), it becomes
+   `{}` before the key is set. No other empty mapping is touched. The check
+   is `new == expected`, which covers an absent block, an empty block, an
+   absent key and a present key. A mismatch means a locator bug: the edit is
+   refused as an internal error, and nothing is written.
+3. **The engine honours the request.** The resolver in the table above, run
+   on the new config, must yield the requested value for an **enable** (a
+   boolean set to `true`) and for **`resend_minutes`**. Otherwise the edit is
+   refused with the resolver's own problems, for example "the panel would
+   still be OFF: the reviewer must validate for headless turns". A
+   **disable** needs no resolver agreement: after `enabled: false` the
+   resolvers read OFF by construction. It is still subject to every file
+   and layout refusal (a flow-style block, a symlink, read-only mode, …).
+   "Off always succeeds" means "off is never refused *by the engine check*".
+4. **Other problems:** existing `validate_config` problems in other blocks do
+   not block the edit, and are reported as notes. Step 2 makes it impossible
+   for the edit to introduce a new one.
+
+### Writing: serialized, bound to what was previewed
+- **Refused under `TAGTEAM_READ_ONLY`** before anything else happens.
+- **Guarded file access:** `tagteam.yaml` must be a regular file, and no
+  path component may be a symlink (`safe_read._lstat_chain`). It is read with
+  `read_bounded` (256 KB). The write goes to a temp file with
+  `O_CREAT | O_EXCL | O_NOFOLLOW`, keeps the original mode, then
+  `os.replace`. `tagteam.yaml` is never created.
+- **One lock for all config writers** (plan r1 review):
+  - The whole critical section runs under the project's
+    `dualwrite.writer_lock(root)`: read, locate, validate, final re-read,
+    replace. That lock is a per-project thread RLock plus `fcntl.flock`
+    across processes, the same one every cycle/state write takes.
+  - Two tagteam writers (CLI, cockpit, or both) therefore never interleave.
+    The second reads the first one's result and applies its own edit on top,
+    so both edits survive.
+  - Previews and `keys` take no lock.
+- **The final re-read, stated honestly:** just before the replace, still
+  under the lock, the file is read again, and a mismatch with the bytes the
+  edit was computed from is refused. That catches an external editor that
+  wrote *before* this point. An uncooperative external tool that writes
+  between that re-read and `os.replace` can still lose its write, because
+  nothing short of that tool also taking the lock prevents it. The docs say
+  so.
+- **Bound to the preview** (plan r1 review):
+  - A preview reports `base`, the sha256 of the exact bytes it diffed.
+  - `config set … --expect SHA` refuses unless the file's bytes still hash to
+    `SHA` when the lock is taken: "tagteam.yaml changed since the preview —
+    preview again; nothing written" (exit 1; HTTP 409).
+  - The cockpit always sends the `base` it showed. On that refusal the page
+    reports it, **does not retry**, and fetches a fresh preview only when the
+    arbiter acts again.
+  - The CLI without `--expect` computes and writes in one locked step. That
+    is its own preview-free path.
 
 ### CLI
 ```
 tagteam config keys                     # the safe set, each with its current resolved value
-tagteam config set KEY VALUE --preview  # unified diff + what the engine will do; writes nothing
-tagteam config set KEY VALUE [--by NAME]
+tagteam config set KEY VALUE --preview  # unified diff + what the engine will do + `base: <sha256>`; writes nothing
+tagteam config set KEY VALUE [--expect SHA] [--by NAME]
 ```
 - Output is the unified diff (`--- tagteam.yaml` / `+++ tagteam.yaml
   (edited)`), then one line saying what the engine will do, for example
@@ -123,7 +169,7 @@ tagteam config set KEY VALUE [--by NAME]
 - Exit codes: 0 (written, or no-op), 1 (refused), 2 (usage).
 
 ### Cockpit
-- `POST /api/config/set`, body `{key, value}`, uses the existing action
+- `POST /api/config/set`, body `{key, value, expect}` (`expect` is the preview's `base`, required on a confirmed write from the page), uses the existing action
   pattern (`_plan` → `config_edit.config_command`, `--by` web user,
   `{ok, message, cli}`).
   - `{preview: true}` runs the `--preview` form and returns its output (the
@@ -189,8 +235,9 @@ submission should mention it.
    - an edit whose resolver would not yield the requested value (enabling
      the panel without a headless reviewer, enabling the briefer without a
      provider), with the resolver's reason in the message.
-3. **Turning a feature off always succeeds**, including in a block with
-   other problems. After it, the resolver reads OFF.
+3. **Turning a feature off is never refused by the engine check**, including
+   in a block with other problems. After it, the resolver reads OFF. File and
+   layout refusals still apply, and are tested separately.
 4. **After every successful edit**, re-reading the file with the engine's
    resolver gives the requested value. The parsed config differs from the
    old one only at the target key (step 2, pinned by a property-style test
@@ -208,13 +255,39 @@ submission should mention it.
    the stale-watcher notice showing when a watcher runs.
 7. The existing Rules, cockpit and config tests pass. There is no change to
    how the engine reads `tagteam.yaml`.
+8. **Saved versus effective** (r1 review):
+   (a) `gatekeeper.enabled: true` with an invalid `scope`: effective OFF,
+       saved `true`, and the row shows "saved: on · not in effect: …";
+       `set gatekeeper.enabled false` **writes** `false`, not a no-op; then
+       repairing `scope` by hand leaves the gate OFF.
+   (b) `watcher.resend_minutes: 3` in a block with an unknown key: effective
+       15, saved 3; `set … 3` is a no-op that names the other problem;
+       `set … 5` is refused because the engine would still use 15; after
+       removing the bad key by hand, `set … 5` writes it and the resolver
+       reads 5.
+   (c) `panel.enabled: "true"` (invalid saved value): `set panel.enabled
+       false` writes a real `false`.
+9. **Absent and empty target blocks:** with `watcher` absent, or present as
+   an empty `watcher:`, setting `resend_minutes` writes it. The expected-tree
+   check passes, and no other empty mapping in the file is normalised
+   (there is a fixture with an unrelated empty block).
+10. **Bound to the preview:** preview → an external edit of `tagteam.yaml` →
+    confirm with the old `base` is refused (409), the file keeps the
+    external edit byte for byte, and the page makes no second POST. This is
+    tested at the API level and in real Chromium.
+11. **Serialized writers:** a deterministic interleaving test. Writer A
+    pauses inside the critical section (a test hook); writer B, editing a
+    different safe key, is started and verified to be blocked; A is released;
+    both edits are in the final file. It runs with two threads and again with
+    two processes, since the lock is `flock` across processes.
 
 ## Risks and open questions for the reviewer
 - **A narrow locator by design.** Anything unusual is refused rather than
   guessed at, and the parsed-equality check (validation step 2) backs up the
   locator: even a locator bug cannot write a config that differs anywhere
   but the target.
-- **Refusing an enable the engine would not honour.** I think this is right,
-  because writing `enabled: true` for something that stays OFF is the exact
-  confusion Phase 71 fixed. The alternative is to write it with a warning.
+- **Refusing an enable the engine would not honour.** The reviewer agreed in
+  r1.
+- **The external-editor race** is narrowed, not closed (see Writing). Only
+  the lock closes it, and a text editor does not take it.
 - `tagteam.yaml` stays in the scope check (see above).
