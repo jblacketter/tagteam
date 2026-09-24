@@ -3,8 +3,24 @@
 ## Status
 - [x] Planning: approved round 4 (2026-09-24) at `8f83364`. r1: explicit Claude Code support floor, and a fail-closed wrapper for old/failing CLIs; r2: exit-code verdicts; r3: structural validation plugin-side.
 - [x] Implementation: branch `phase-73-subagent-kit`
-- [ ] Implementation Review
-- [ ] Complete
+- [x] Implementation Review: approved round 1 (2026-09-24) at `30c8a8b`; gate 2,611 passed, 5 skipped
+- [ ] Complete: PR open, merge pending. The kit reaches users with the 3.14.9 release, whose version bump sets `tagteam.minVersion`.
+
+## Closeout
+```
+Phase report: subagent-kit — plan approved r4 · impl approved r1
+  plan   4 rounds · 3 change requests · 0 bounces
+  impl   1 round · 0 change requests · 0 bounces · gate 1 run, 8m 53s
+  time   start→approve 1h 18m · implementation before first submit 18m 10s
+         lead 3m 48s (3 spans, 2 unknown) · reviewer 11m 54s (5 spans) · gate 8m 53s (1 span)  (elapsed; includes relay wait)
+  usage  no usage rows stored under this phase
+  turns  matched 0 of 10 · no token data 0 · unmatched 8 · unknown 2
+```
+- **Plan r1:** without `agent_type`, no fallback enforces anything, so the support floor was made explicit; the wrapper owns blocking a missing, old or failing CLI; `explore` lost Bash.
+- **Plan r2:** a false positive must not be blocked, so the verdict became the guard's exit code.
+- **Plan r3:** substring checks are not validation, so structural validation moved plugin-side (both counterexamples are now tests).
+- **Impl r1:** approved with no findings. The reviewer additionally ran the shipped wrapper on a nested `agent_type` object with a non-kit identity (exit 0, silent).
+- **Savings: unmeasured at merge** (the arbiter's decision; no A/B).
 
 ## Implementation notes
 **Live checks, all in a scratch project,** with this branch's plugin loaded via
