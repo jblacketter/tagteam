@@ -4,7 +4,7 @@
 - [x] Planning: approved round 2 (2026-09-23) at `a7ee220`. r1: runtime resolvers; saved vs effective stop.
 - [x] Implementation: branch `phase-71-cockpit-rules-tab`
 - [x] Implementation Review: approved round 2 (2026-09-23) at `33ae377`; gate 2,399 passed, 5 skipped
-- [ ] Complete: PR #57 open, awaiting the arbiter's merge.
+- [x] Complete: PR #57 merged 2026-09-23 (rebase).
 
 ## Closeout
 ```
