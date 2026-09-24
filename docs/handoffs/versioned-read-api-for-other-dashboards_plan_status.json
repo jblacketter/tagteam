@@ -1,6 +1,6 @@
 {
-  "state": "in-progress",
-  "ready_for": "reviewer",
+  "state": "approved",
+  "ready_for": null,
   "round": 1,
   "phase": "versioned-read-api-for-other-dashboards",
   "type": "plan",
@@ -12,5 +12,13 @@
     "dirty_paths": [],
     "captured_at": "2026-09-24T05:02:18.020975+00:00",
     "source": "plan-init"
+  },
+  "impl_boundary": {
+    "sha": "b9f56352b329d02d4f1760e6cd98d1a5c7a3ecd5",
+    "dirty": {
+      "docs/handoffs/versioned-read-api-for-other-dashboards_plan_rounds.jsonl": "04008351c4b1a8e70062cb0c43de4313678ffa4b794a60f0f1baec32455fca52"
+    },
+    "captured_at": "2026-09-24T05:04:00.199017+00:00",
+    "source": "plan-approve"
   }
 }

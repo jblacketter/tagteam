@@ -676,9 +676,10 @@ class CockpitRouter:
                     row["slot"] = _slot_view(self.project_dir)
                     h._send_json(row)
             elif path == "/api/cockpit/info":
+                from tagteam import read_api      # Phase 74: the version of the promise + its endpoints
                 h._send_json({"mode": self.mode, "max_sse": self.max_sse,
                                  "sse_active": self.sse_state["active"],
-                                 "project_dir": self.project_dir})
+                                 "project_dir": self.project_dir, **read_api.info_fields("cockpit")})
             else:
                 return False
         except Exception as exc:  # never a traceback to the browser

@@ -1,8 +1,8 @@
 # Phase 74: Versioned read API for other dashboards
 
 ## Status
-- [ ] Planning: in review (plan cycle opened 2026-09-24)
-- [ ] Implementation
+- [x] Planning: approved round 1 (2026-09-24) at `b9f5635` (arbiter decisions amended in: CORS off; hub usage incl. cost_usd promised as an estimate)
+- [x] Implementation: branch `phase-74-versioned-read-api`
 - [ ] Implementation Review
 - [ ] Complete
 
