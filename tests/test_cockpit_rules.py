@@ -574,7 +574,7 @@ class TestConfigEditsInARealBrowser:
           });
         """)
         assert r["saved"] == ["Gate — saved: off", "Runs at submission — saved: not set", "Panel — saved: on"]
-        assert r["buttons"] == ["Turn on", "Turn on", "Turn off"]
+        assert r["buttons"] == ["Turn on", "Set on", "Set off", "Turn off"]      # absent → both explicit choices
         assert r["shadow"].startswith("saved: true · not in effect")
         assert "to change:" not in r["gateHint"]
         assert r["modal"]["title"] == "Change tagteam.yaml — gatekeeper.enabled"
@@ -583,3 +583,69 @@ class TestConfigEditsInARealBrowser:
         assert r["calls"][0] == {"key": "gatekeeper.enabled", "value": True, "preview": True}
         assert writes == [{"act": {"key": "gatekeeper.enabled", "value": True, "expect": "b" * 64}}]
         assert len([c for c in r["calls"] if c.get("expect")]) == 1            # exactly one write POST, no retry
+
+
+class TestConfigEditsRecoveryAndRefresh:
+    def test_an_invalid_boolean_can_be_set_off_from_the_page(self):
+        """impl r1 review: briefer.enabled: "true" whose enable is refused —
+        the page must still be able to send an explicit false."""
+        r = _run_rules_in_chromium(r"""
+          PAYLOAD.enforced[2].edits = [{ key: 'briefer.enabled', kind: 'bool', label: 'Brief',
+            saved_state: 'invalid', saved: null, not_in_effect: null }];
+          var CALLS = [], MODAL = null;
+          postJSON = function (url, data) {
+            CALLS.push(data);
+            if (data.preview && data.value === true) return Promise.resolve({ ok: false, status: 409, body: { ok: false, message: 'refused: escalation brief: OFF' } });
+            if (data.preview) return Promise.resolve({ ok: true, status: 200, body: { ok: true, noop: false, diff: 'd', base: 'c'.repeat(64), engine: 'escalation brief: OFF', notes: [], cli: 'x' } });
+            return Promise.resolve({ ok: true, status: 200, body: { ok: true, message: 'Written' } });
+          };
+          confirmModal = function (t, b, cli, onOk) { MODAL = onOk; };
+          act = function (btn, url, data, opts) { CALLS.push({ act: data }); return postJSON(url, data).then(function (res) { if (opts.onDone) opts.onDone(res); }); };
+          renderRules(PAYLOAD);
+          var RESULT = { buttons: Array.prototype.map.call(document.querySelectorAll('.rule-switch'), function (b) { return b.textContent + '=' + b.dataset.value; }),
+                         saved: document.querySelector('.rule-bool .r-saved').textContent };
+          document.querySelector('.rule-switch[data-value="false"]').click();
+          DONE = new Promise(function (res) { setTimeout(res, 50); }).then(function () {
+            MODAL();
+            return new Promise(function (res) { setTimeout(res, 50); });
+          }).then(function () { RESULT.calls = CALLS; });
+        """)
+        assert r["buttons"] == ["Set on=true", "Set off=false"] and r["saved"] == "Brief — saved: invalid value"
+        assert r["calls"][0] == {"key": "briefer.enabled", "value": False, "preview": True}
+        assert r["calls"][1] == {"act": {"key": "briefer.enabled", "value": False, "expect": "c" * 64}}
+
+    def test_a_pending_minutes_edit_survives_a_background_refresh(self):
+        r = _run_rules_in_chromium(r"""
+          PAYLOAD.enforced.push({ key: 'resend', label: 'Re-send a stuck turn', on: true, value: '15 min', text: 't',
+            source: 'default', change: 'watcher.resend_minutes', applies: 'when the watcher starts',
+            edits: [{ key: 'watcher.resend_minutes', kind: 'minutes', label: 'Minutes', saved_state: 'set', saved: 15, not_in_effect: null }] });
+          var CALLS = [];
+          postJSON = function (url, data) { CALLS.push(data); return Promise.resolve({ ok: false, status: 409, body: { ok: false, message: 'refused' } }); };
+          renderRules(PAYLOAD);
+          var inp = document.querySelector('.rule-minutes input');
+          inp.focus(); inp.value = '7'; inp.dispatchEvent(new Event('input'));
+          renderRules(PAYLOAD);                                           // SSE / the live tick
+          var a = document.querySelector('.rule-minutes input');
+          var RESULT = { value: a.value, focused: document.activeElement === a };
+          document.querySelector('.rule-minutes button').click();          // Save sends the pending 7 …
+          DONE = new Promise(function (res) { setTimeout(res, 50); }).then(function () {
+            renderRules(PAYLOAD);                                         // … refused → back to the saved value
+            RESULT.sent = CALLS[0];
+            RESULT.afterRefusal = document.querySelector('.rule-minutes input').value;
+          });
+        """)
+        assert r["value"] == "7" and r["focused"] is True
+        assert r["sent"] == {"key": "watcher.resend_minutes", "value": 7, "preview": True}
+        assert r["afterRefusal"] == "15"
+
+    def test_setting_off_an_invalid_boolean_persists_through_the_api(self, proj):
+        (proj / "tagteam.yaml").write_text(
+            'agents:\n  lead:\n    name: someone\n  reviewer:\n    name: other\nbriefer:\n  enabled: "true"\n')
+        on = capi.run_action("config/set", {"key": "briefer.enabled", "value": True, "preview": True}, proj)
+        assert on["ok"] is False
+        pv = capi.run_action("config/set", {"key": "briefer.enabled", "value": False, "preview": True}, proj)
+        assert pv["ok"], pv
+        w = capi.run_action("config/set", {"key": "briefer.enabled", "value": False, "expect": pv["base"]}, proj, by="web:jack")
+        assert w["ok"], w
+        import yaml
+        assert yaml.safe_load((proj / "tagteam.yaml").read_text())["briefer"]["enabled"] is False

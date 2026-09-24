@@ -817,9 +817,11 @@
     stale.classList.toggle('hidden', !sc);
     renderStopEditor(p);
     var rows = $('rules-enforced');
+    if (typeof captureEditFocus === 'function') captureEditFocus();   // Phase 71b: a field being edited keeps focus
     rows.textContent = '';
     // the stop order is the editor above (its "Now:" line is the stop row's statement)
     (p.enforced || []).forEach(function (r) { if (r.key !== 'stop') rows.appendChild(renderRuleRow(r)); });
+    if (typeof restoreEditFocus === 'function') restoreEditFocus();
     renderAdvisory(p);
     $('rules-last').textContent = p.last_decision ? ('Last approval: ' + p.last_decision) : '';
   }
@@ -837,17 +839,28 @@
         var word = e.saved === true ? 'on' : (e.saved === false ? 'off' : (e.saved_state === 'invalid' ? 'invalid value' : 'not set'));
         var grp = el('span', 'rule-bool');
         grp.appendChild(el('span', 'r-saved', e.label + ' — saved: ' + word));
-        var b = el('button', 'btn btn-small rule-switch', e.saved === true ? 'Turn off' : 'Turn on');
-        b.type = 'button';
-        b.dataset.key = e.key;
-        b.addEventListener('click', function () { configEdit(b, e.key, !(e.saved === true)); });
-        grp.appendChild(b);
+        // a SET value toggles; an absent or invalid one offers BOTH explicit choices, so a real
+        // `false` can be persisted even when the enable would be refused (impl r1 review)
+        var choices = e.saved_state === 'set' ? [!(e.saved === true)] : [true, false];
+        choices.forEach(function (want) {
+          var label = e.saved_state === 'set' ? (want ? 'Turn on' : 'Turn off') : (want ? 'Set on' : 'Set off');
+          var b = el('button', 'btn btn-small rule-switch', label);
+          b.type = 'button';
+          b.dataset.key = e.key;
+          b.dataset.value = String(want);
+          b.addEventListener('click', function () { configEdit(b, e.key, want); });
+          grp.appendChild(b);
+        });
         box.appendChild(grp);
       } else {
         var f = el('form', 'rule-minutes');
         var inp = document.createElement('input');
         inp.type = 'number'; inp.min = '0'; inp.step = '1'; inp.dataset.key = e.key;
-        inp.value = (e.saved_state === 'set') ? String(e.saved) : '';
+        // a pending edit outlives the tab's refreshes (SSE, the live tick); it ends at an
+        // explicit boundary: a completed write, a refusal, or a no-op (impl r1 review)
+        var pend = RULES_EDIT.pending[e.key];
+        inp.value = pend != null ? pend : ((e.saved_state === 'set') ? String(e.saved) : '');
+        inp.addEventListener('input', function () { RULES_EDIT.pending[e.key] = inp.value; });
         inp.placeholder = e.saved_state === 'invalid' ? 'invalid' : 'not set';
         var go = el('button', 'btn btn-small', 'Save');
         go.type = 'submit';
@@ -856,7 +869,7 @@
           if (ev && ev.preventDefault) ev.preventDefault();
           var n = Number(inp.value);
           if (inp.value === '' || !isFinite(n) || n < 0 || Math.floor(n) !== n) { toast('err', 'Minutes must be a whole number ≥ 0.'); return; }
-          configEdit(go, e.key, n);
+          configEdit(go, e.key, n, function () { delete RULES_EDIT.pending[e.key]; });
         });
         box.appendChild(f);
       }
@@ -865,15 +878,28 @@
     return box;
   }
 
-  function configEdit(btn, key, value) {
+  // pending minutes text per key, and which field had focus when the rows were rebuilt
+  var RULES_EDIT = { pending: {}, focus: null };
+  function captureEditFocus() {
+    var a = document.activeElement;
+    RULES_EDIT.focus = (a && a.closest && a.closest('.rule-minutes') && a.dataset) ? a.dataset.key : null;
+  }
+  function restoreEditFocus() {           // after the rebuilt rows are in the page (focus() on a detached node is a no-op)
+    if (!RULES_EDIT.focus) return;
+    var inp = document.querySelector('.rule-minutes input[data-key="' + RULES_EDIT.focus + '"]');
+    if (inp) inp.focus();
+  }
+
+  function configEdit(btn, key, value, onSettled) {
+    var settle = function () { if (onSettled) onSettled(); };
     return postJSON('/api/config/set', { key: key, value: value, preview: true }).then(function (r) {
       var b = r.body || {};
-      if (!r.ok) { toast('err', b.message || ('Refused (' + r.status + ')')); loadRules(); return; }
-      if (b.noop) { toast('ok', (b.message || '').split('\n')[0]); loadRules(); return; }
+      if (!r.ok) { settle(); toast('err', b.message || ('Refused (' + r.status + ')')); loadRules(); return; }
+      if (b.noop) { settle(); toast('ok', (b.message || '').split('\n')[0]); loadRules(); return; }
       var detail = 'engine after the change: ' + b.engine + ((b.notes && b.notes.length) ? ' · ' + b.notes.join(' · ') : '');
       confirmModal('Change tagteam.yaml — ' + key, detail, b.cli, function () {
         // exactly one write, bound to the previewed bytes; a refusal is reported, not retried
-        act(btn, '/api/config/set', { key: key, value: value, expect: b.base }, { onDone: function () { loadRules(); } });
+        act(btn, '/api/config/set', { key: key, value: value, expect: b.base }, { onDone: function () { settle(); loadRules(); } });
       }, { ok: 'Write tagteam.yaml', diff: b.diff });
     }).catch(function (e) { toast('err', 'Request failed: ' + e); });
   }

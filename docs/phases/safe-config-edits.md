@@ -17,6 +17,12 @@
 - a fresh attempt wrote exactly one line, and `tagteam config keys` agreed;
 - `resend_minutes: 5` in an invalid watcher block was refused with the resolver's reason, and the field returned to the saved 3.
 
+**Impl r1 review (all four reproduced and fixed):**
+1. **Quoted and duplicate spellings.** `safe_load` collapses duplicate keys and hides quoting, so the text-only locator could append a second `gatekeeper` block beside `"gatekeeper": {…}`. The locator is now checked against `yaml.compose`, whose node tree keeps every key with its quoting style and line. A quoted target name, or a duplicated block or leaf, is refused. The locator's header and key lines must match the parser's lines.
+2. **An explicit OFF from the page.** An absent or invalid saved boolean now offers both **Set on** and **Set off**. Before, the only action was the enable, so an invalid `briefer.enabled: "true"` whose enable is refused could not be persisted as a real `false`.
+3. **A pending minutes edit.** The pending text is now kept per key and survives refreshes. It is cleared when its write completes, on a refusal, or on a no-op. The field's focus is restored after the rows are back in the page.
+4. **The diff when the file has no final newline.** The diff is now rendered with separate `-` / `+` lines and git's `\ No newline at end of file` marker; before, the removed and added lines ran together on one line.
+
 **Deviations from the plan text:**
 - A YAML file indented with tabs does not parse at all, so it is refused as "does not parse — fix it by hand" before the tab check, which remains as a defence.
 - The Chromium test harness now awaits an optional `DONE` promise, with `--virtual-time-budget`, so it can drive the asynchronous preview-then-confirm flow.

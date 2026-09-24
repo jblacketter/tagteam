@@ -359,3 +359,46 @@ class TestBackstop:
         with pytest.raises(ce.Refused, match="internal: the edit would change more than"):
             ce.apply(proj, "gatekeeper.enabled", True)
         assert f.read_text() == REALISTIC
+
+
+
+class TestQuotedAndDuplicateSpellings:
+    """impl r1 review: safe_load collapses duplicates and hides quoting; the
+    parser's node tree does not."""
+
+    @pytest.mark.parametrize("text", [
+        '"gatekeeper": {enabled: false}\n',
+        '"gatekeeper":\n  enabled: false\n',
+        "'gatekeeper':\n  enabled: true\n",
+        '"gatekeeper":\n  enabled: false\ngatekeeper:\n  scope: true\n',
+        'gatekeeper:\n  scope: true\n"gatekeeper":\n  enabled: false\n',
+        'gatekeeper:\n  "enabled": false\n  enabled: false\n',
+        'gatekeeper:\n  "enabled": true\n',
+    ])
+    @pytest.mark.parametrize("value", [True, False])            # False covers the no-op spellings too
+    def test_refused_with_bytes_unchanged(self, proj, text, value):
+        f = _write(proj, text)
+        with pytest.raises(ce.Refused) as e:
+            ce.apply(proj, "gatekeeper.enabled", value)
+        assert "by hand" in str(e.value)
+        assert f.read_text() == text
+
+
+class TestReadableDiff:
+    def test_replacing_the_final_scalar_without_a_newline(self, proj):
+        _write(proj, "gatekeeper:\n  enabled: false")
+        d = ce.preview(proj, "gatekeeper.enabled", True).diff
+        lines = d.splitlines()
+        assert "-  enabled: false" in lines and "+  enabled: true" in lines
+        assert lines.count("\\ No newline at end of file") == 2
+
+    def test_appending_to_a_file_without_a_newline(self, proj):
+        _write(proj, "agents:\n  x: 1")
+        d = ce.preview(proj, "panel.enabled", False).diff
+        lines = d.splitlines()
+        assert lines[-5:] == ["+  x: 1", "+", "+panel:", "+  enabled: false", "\\ No newline at end of file"]
+        assert "-  x: 1" in lines
+
+    def test_an_ordinary_file_has_no_marker(self, proj):
+        _write(proj, REALISTIC)
+        assert "No newline" not in ce.preview(proj, "gatekeeper.enabled", True).diff
