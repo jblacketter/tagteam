@@ -3,8 +3,18 @@
 ## Status
 - [x] Planning: none needed. This is a test-only fix, so it goes straight to an impl cycle, as the arbiter's rule for small fixes says.
 - [x] Implementation: branch `phase-74a-launchpad-test-holds-the-fake-turn`
-- [ ] Implementation Review
-- [ ] Complete
+- [x] Implementation Review: approved round 2 (2026-09-24) at `3e94057`; gate 2,611 passed, 5 skipped (r1 was a gate bounce on the second race)
+- [ ] Complete: PR open, merge pending.
+
+## Closeout
+```
+Phase report: launchpad-test-holds-the-fake-turn — impl approved r2
+  impl   2 rounds · 0 change requests · 1 bounce · gate 2 runs, 18m 04s
+  time   start→approve 20m 57s
+         lead 1m 37s (1 span, 1 unknown) · reviewer 1m 16s (1 span) · gate 18m 04s (2 spans)  (elapsed; includes relay wait)
+  usage  no usage rows stored under this phase
+  turns  matched 0 of 3 · no token data 0 · unmatched 2 · unknown 1
+```
 
 ## Summary
 `tests/test_launchpad.py::TestServerEndpoints::test_watch_session_and_launch_endpoints`
