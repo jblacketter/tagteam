@@ -42,7 +42,7 @@ the top. Each phase is engine + CLI first, cockpit surface second. tagteam stays
 - **Description:** The arbiter's run-level instructions live in chat today ("go to the end of all phases unless you have a question", "commit at phase end but hold the PR for my approval" / "open the PR when you are done"). Make them durable: per-project standing orders with a per-run override, delivered to both agents in every turn (headless prompt, `cycle rounds`), like an interjection that is not consumed. Two kinds, kept distinct: **enforced** — when the run stops for the arbiter (after each phase · at the end of the roadmap · only on questions), a switch over the existing single-phase / full-roadmap machinery; **advisory** — git and PR conduct, which tagteam delivers but cannot enforce (it runs no git). Engine + CLI only.
 
 ### Phase 69: Cockpit roadmap board
-- **Status:** Not started
+- **Status:** In review — plan cycle open (2026-09-23). See `docs/phases/cockpit-roadmap-board.md`.
 - **Description:** The cockpit shows only the next phase (the Start card). Add `GET /api/roadmap` over `parse_roadmap()` / `ready_phases()` / `roadmap check` and a Roadmap tab: Done · In progress · Up next, with Up next split into ready and blocked-by-dependency and `roadmap check` problems shown inline. Start lives on a ready phase; the separate Start card goes away. Tabs are regrouped by intent: Now · Roadmap · Rules · History (rounds + diff) · Usage.
 - **Depends on:** Phase 68
 
