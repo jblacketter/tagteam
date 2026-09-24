@@ -23,7 +23,7 @@ the top. Each phase is engine + CLI first, cockpit surface second. tagteam stays
 - **Depends on:** Phase 72
 
 ### Phase 72: Jobs: background tasks and ci-watch
-- **Status:** Not started
+- **Status:** In progress — plan in review. See `docs/phases/jobs-background-tasks-and-ci-watch.md`.
 - **Description:** Deterministic first, cheap model second, top model last. A `tagteam job` concept: a recorded background task with a status, a log and a short result delivered to the lead — first job `ci-watch` (poll a GitHub Actions run / a PyPI version with `gh`, no model; on 2026-09-20 the lead polled five release runs by hand in the top model). A model is involved only to summarise a failure. The cockpit shows a Jobs strip.
 - **Depends on:** Phase 68
 
