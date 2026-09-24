@@ -129,6 +129,13 @@ any other watcher running, saying so.
   gate, panel, briefer and re-send settings in `tagteam.yaml` without losing
   its comments. An edit is written only when the engine would then do what
   you asked, and the preview shows the diff first.
+- `tagteam job start ci-watch --pr N` (or `--run ID`, `--workflow NAME --ref
+  REF`, `--pypi PKG==VER`): wait for CI or a release without a model. The job
+  polls in the background until it knows the answer, then tells you once: a
+  desktop notification, plus an interjection for the lead with `--to-lead`.
+  A `--workflow` watch is tied to the commit `--ref` names, so the previous
+  push's run can never answer it. `tagteam job list|status|log|cancel`. A job
+  is not a turn and never holds the turn slot.
 - `tagteam pause --reason "…"` / `tagteam resume` — hold dispatch without losing state.
 - `tagteam cancel-turn` — abandon an in-flight headless turn.
 - `tagteam serve` — the cockpit: talk to the lead, launch, watch, rule.

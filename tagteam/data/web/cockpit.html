@@ -39,6 +39,14 @@
       <span class="turn-cue">watcher <span id="turn-caret">▾</span></span>
     </button>
   </div>
+  <!-- JOBS STRIP (Phase 72): background jobs (`tagteam job`, e.g. ci-watch) — no model, not a turn.
+       Present only while there is a job running or finished in the last 24 h. A chip opens its
+       result and log tail; a running or lost job has Cancel, confirmed with its CLI line. -->
+  <div class="now-row jobs-strip hidden" id="jobs-strip" aria-label="Jobs">
+    <span class="lc-label">jobs</span>
+    <div class="js-chips" id="jobs-chips"></div>
+    <div class="js-detail hidden" id="jobs-detail" aria-live="polite"></div>
+  </div>
   <!-- WATCHER DRAWER (Phase 68): not a modal and not a tab — the lanes stay in
        view while it is open. Facts on the left, what the watcher did on the
        right (chatter hidden until asked for). Nothing is fetched while closed. -->

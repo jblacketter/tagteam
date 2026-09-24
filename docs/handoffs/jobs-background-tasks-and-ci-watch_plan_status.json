@@ -1,7 +1,7 @@
 {
-  "state": "in-progress",
-  "ready_for": "lead",
-  "round": 2,
+  "state": "approved",
+  "ready_for": null,
+  "round": 3,
   "phase": "jobs-background-tasks-and-ci-watch",
   "type": "plan",
   "lead": "claude",
@@ -12,5 +12,14 @@
     "dirty_paths": [],
     "captured_at": "2026-09-24T03:53:47.715630+00:00",
     "source": "plan-init"
+  },
+  "impl_boundary": {
+    "sha": "30dfa1b9e0b317015d2641776488511e291f1f01",
+    "dirty": {
+      "docs/handoffs/jobs-background-tasks-and-ci-watch_plan_rounds.jsonl": "11ac0d4169e9f1ccd38afb60d46d187555f02c868d8412e58f895f043d13a1d4",
+      "docs/handoffs/jobs-background-tasks-and-ci-watch_plan_status.json": "741b6139c72dc398b7e76c0e3d8bf47a29b58dd6088317c74b9911cb0b88b871"
+    },
+    "captured_at": "2026-09-24T04:01:38.881724+00:00",
+    "source": "plan-approve"
   }
 }

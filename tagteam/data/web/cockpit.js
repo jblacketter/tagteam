@@ -1251,6 +1251,7 @@
         var t = activeTab();
         // Phase 45: the lead lane is always visible — its chat refreshes on every pass
         var ps = [loadFeed(), loadActivity(), loadLead(false)];
+        ps.push(loadJobs());                            // Phase 72: the Jobs strip (file-only, cheap)
         if (t === 'now' || notesLoaded) ps.push(loadNotes());
         if (t === 'usage' && usageLoaded) ps.push(loadUsage());
         if (t === 'rules' && RULES.loaded) ps.push(loadRules());
@@ -1266,6 +1267,96 @@
       if (refreshQueued) { refreshQueued = false; refreshAll('queued'); }
     });
   }
+
+  // ---------- Phase 72: Jobs strip ----------
+  // Background jobs (`tagteam job`): no model, not a turn — this slice never reads or
+  // says anything about who has the ball. The server derives each job's `shown` state
+  // (running | starting | lost | unknown | a terminal status) from its runner lock; the
+  // page only presents it. The strip is absent while there are no jobs.
+  var JOBS = { list: [], open: null, fetchedAt: 0 };
+  var JOB_MARK = { succeeded: '✓ green', failed: '✗ failed', 'timed-out': 'timed out', cancelled: 'cancelled',
+                   error: 'error', running: 'running', starting: 'starting', lost: 'runner lost', unknown: 'running?' };
+  var JOB_TONE = { succeeded: 'ok', failed: 'warn', 'timed-out': 'warn', error: 'warn', lost: 'warn',
+                   running: 'running', starting: 'running', unknown: 'running' };
+  var JOB_LIVE = { running: true, starting: true, unknown: true };
+  function jobAge(j) { return (j.age_s || 0) + Math.floor((Date.now() - JOBS.fetchedAt) / 1000); }
+  function jobChipText(j) {
+    var mark = JOB_MARK[j.shown] || String(j.shown || '?');
+    return j.kind + ' · ' + j.label + ' · ' + (JOB_LIVE[j.shown] ? mark + ' ' + fmtAge(jobAge(j)) : mark);
+  }
+  function loadJobs() {
+    return getJSON('/api/jobs').then(function (r) {
+      if (!r.ok) return;
+      JOBS.list = (r.body && r.body.jobs) || [];
+      JOBS.fetchedAt = Date.now();
+      renderJobs();
+    });
+  }
+  function renderJobs() {
+    var chips = $('jobs-chips');
+    $('jobs-strip').classList.toggle('hidden', !JOBS.list.length);
+    var seen = {};
+    JOBS.list.forEach(function (j, i) {                 // keyed patch: one chip per job id, newest first
+      seen[j.id] = true;
+      var c = chips.querySelector('[data-job="' + j.id + '"]');
+      if (!c) {
+        c = el('button', 'check-chip job-chip'); c.type = 'button'; c.dataset.job = j.id;
+        c.addEventListener('click', function () { JOBS.open = JOBS.open === this.dataset.job ? null : this.dataset.job; renderJobs(); });
+      }
+      if (chips.children[i] !== c) chips.insertBefore(c, chips.children[i] || null);
+      c.className = 'check-chip job-chip' + (JOB_TONE[j.shown] ? ' ' + JOB_TONE[j.shown] : '') + (JOBS.open === j.id ? ' open' : '');
+      c.textContent = jobChipText(j);
+      c.title = j.summary || j.id;
+      c.setAttribute('aria-expanded', JOBS.open === j.id ? 'true' : 'false');
+    });
+    Array.prototype.slice.call(chips.children).forEach(function (c) { if (!seen[c.dataset.job]) chips.removeChild(c); });
+    if (JOBS.open && !seen[JOBS.open]) JOBS.open = null;
+    renderJobDetail();
+  }
+  function tickJobs() {
+    JOBS.list.forEach(function (j) {
+      if (!JOB_LIVE[j.shown]) return;
+      var c = $('jobs-chips').querySelector('[data-job="' + j.id + '"]');
+      if (c) c.textContent = jobChipText(j);
+    });
+  }
+  function renderJobDetail() {
+    var d = $('jobs-detail'), j = null;
+    JOBS.list.forEach(function (x) { if (x.id === JOBS.open) j = x; });
+    d.classList.toggle('hidden', !j);
+    d.textContent = '';
+    if (!j) return;
+    var head = el('div', 'jd-head');
+    head.appendChild(el('span', 'jd-title', j.kind + ' · ' + j.label + ' — ' + (JOB_MARK[j.shown] || j.shown)));
+    head.appendChild(el('span', 'jd-id', j.id));
+    d.appendChild(head);
+    var note = j.summary || '';
+    if (j.shown === 'lost') note = 'The runner is gone — nothing will finish this job. Cancel records it as cancelled (runner lost).';
+    else if (j.shown === 'unknown') note = 'The runner lock cannot be checked, so the job is not treated as dead.' + (note ? ' Last: ' + note : '');
+    if (note) d.appendChild(el('p', 'jd-summary', note));
+    ((j.result && j.result.failing) || []).forEach(function (f) {
+      var row = el('div', 'jd-fail', '✗ ' + f.name + ' ');
+      if (f.url && /^https:\/\//.test(f.url)) { var a = el('a', null, 'open ↗'); a.href = f.url; a.target = '_blank'; a.rel = 'noopener'; row.appendChild(a); }
+      d.appendChild(row);
+    });
+    var lines = (j.result && j.result.log_tail && j.result.log_tail.length) ? j.result.log_tail : (j.log || []);
+    if (lines.length) d.appendChild(el('pre', 'jd-log', lines.join('\n')));
+    if (j.delivery) d.appendChild(el('p', 'jd-meta', 'delivery: notify ' + j.delivery.notify + ', interjection ' + j.delivery.interjection));
+    else if (!JOB_LIVE[j.shown] && j.shown !== 'lost') d.appendChild(el('p', 'jd-meta', 'delivery: not recorded'));
+    if (j.cancellable) {
+      var lost = j.shown === 'lost';
+      var b = el('button', 'btn small', lost ? 'Clear (cancel)' : 'Cancel job'); b.type = 'button'; b.id = 'job-cancel';
+      b.addEventListener('click', function () {
+        act(b, '/api/jobs/cancel', { id: j.id }, { confirm: {
+          title: 'Cancel ' + j.kind + ' · ' + j.label + '?',
+          body: lost ? 'Its runner is gone; this records the job as cancelled. Nothing is killed and nothing is notified.'
+                     : 'The runner stops at its next poll (within one interval). Nothing is killed.',
+          labels: { ok: 'Cancel the job', cancel: 'Keep it', danger: true } } });
+      });
+      d.appendChild(b);
+    }
+  }
+  // ---------- end Phase 72
 
   // ---------- Phase 43: Cycle region + Activity log (text nodes only — the page holds the POST token) ----------
   // One outcome vocabulary for the strip, the lanes, the rows and the cards —
@@ -2283,6 +2374,7 @@
     if (NOW.paused && NOW.paused.age_s != null) NOW.paused.age_s += 1;
     if (NOW.launch && NOW.launch.age_s != null) NOW.launch.age_s += 1;
     tickTurnBar();
+    tickJobs();
     renderLaneAges();
   }
 })();

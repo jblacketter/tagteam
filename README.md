@@ -212,6 +212,10 @@ tagteam orders add "hold the PR for my approval" [--run]   # standing note (advi
 tagteam orders                                # effective orders and where each comes from
 tagteam config keys                           # the tagteam.yaml keys tagteam edits: saved vs what the engine uses
 tagteam config set gatekeeper.enabled true --preview   # the diff + what the engine will do; writes nothing
+tagteam job start ci-watch --pr 59 [--to-lead] # wait for CI without a model; says the answer once (desktop + lead note)
+tagteam job start ci-watch --workflow "Publish to PyPI" --ref v1.2.3   # bound to that commit, never the previous run
+tagteam job start ci-watch --pypi tagteam==1.2.3   # until /simple/ lists it (the JSON API lags)
+tagteam job list / status ID / log ID / cancel ID  # running + the last 24 h; `lost` = the runner is gone
 tagteam usage [--by role|cycle|model|kind] [--json]   # per-turn tokens and roll-ups (no dollars in text)
 tagteam report --phase P [--json]             # what a phase took: rounds, bounces, gate/turn time, usage coverage
 tagteam bench select | run --round P:T:N --cell claude:sonnet:high [--yes] | table   # replay reviews at other models/efforts
@@ -332,6 +336,7 @@ tagteam pause --reason "..." / tagteam resume / tagteam cancel-turn
 tagteam interject "note" [--to lead|reviewer] / --list / --retire ID
 tagteam orders [--json] / stop phase|roadmap|--unset / add "note" / remove ID / clear --run   # standing orders
 tagteam config keys / set KEY VALUE [--preview] [--expect SHA]   # safe tagteam.yaml edits (comments kept)
+tagteam job start ci-watch (--pr N | --run ID | --workflow NAME --ref REF|--sha SHA | --pypi PKG==VER) / list / status / log / cancel
 tagteam usage [--by role|cycle|model|kind]... [--json]
 tagteam report --phase P [--json]      # read-only phase measurement; paste into the phase doc's closeout
 tagteam bench select|run|table         # review bench: dry run unless --yes; ~1 reviewer turn per pair
