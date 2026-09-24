@@ -28,7 +28,7 @@ the top. Each phase is engine + CLI first, cockpit surface second. tagteam stays
 - **Depends on:** Phase 68
 
 ### Phase 71b: Safe config edits
-- **Status:** ✅ Approved — plan approved round 2, impl approved round 2 (2026-09-23); gate: 2,469 passed, 5 skipped at `f23224a`. PR #58 open. See `docs/phases/safe-config-edits.md`.
+- **Status:** ✅ Complete — plan approved round 2, impl approved round 2 (2026-09-23); gate: 2,469 passed, 5 skipped at `f23224a`. PR #58 merged 2026-09-23 (rebase). See `docs/phases/safe-config-edits.md`.
 - **Description:** Split out of Phase 71 (plan review, 2026-09-23). The Rules tab shows `tagteam.yaml` rules read-only and names the key to change. Add editing of a small safe set (gate on/off and `on_submit`, panel on/off, briefer on/off, `watcher.resend_minutes`) through the CLI first, with a dry-run diff: targeted line edits that keep the file's comments and order (a PyYAML rewrite would drop them), validated by the same resolvers the engine uses before anything is written. Then the Rules tab offers the same edits.
 - **Depends on:** Phase 71
 
