@@ -4,7 +4,7 @@
 - [x] Planning: approved round 2 (2026-09-23) at `243ae32`. r1: exhaustive classifier; one board-wide launch guard + endpoint refusal.
 - [x] Implementation: branch `phase-69-cockpit-roadmap-board`
 - [x] Implementation Review: approved round 2 (2026-09-24) at `2b064ca`; gate 2,499 passed, 5 skipped
-- [ ] Complete: PR #59 open, awaiting the arbiter's merge.
+- [x] Complete: PR #59 merged 2026-09-24 (rebase).
 
 ## Closeout
 ```
