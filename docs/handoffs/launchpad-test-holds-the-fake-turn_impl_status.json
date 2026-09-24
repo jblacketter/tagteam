@@ -1,7 +1,7 @@
 {
   "state": "in-progress",
-  "ready_for": "lead",
-  "round": 1,
+  "ready_for": "reviewer",
+  "round": 2,
   "phase": "launchpad-test-holds-the-fake-turn",
   "type": "impl",
   "lead": "claude",
