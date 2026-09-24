@@ -65,7 +65,7 @@ served today.
 | Endpoint | Promised |
 |---|---|
 | `GET /api/hub/info` | `app` (`"tagteam"`), `kind` (`"hub"`), `api_version` (int), `tagteam` (package version), `stable` (list of endpoint paths), `mounted` (list of project ids with a mounted cockpit) |
-| `GET /api/hub` | `ts`; `groups.needs_you` / `waiting` / `quiet` (lists of project rows) and `groups.hidden`. Row: `id`, `name`, `path`, `group`, `why`, `phase`, `type`, `round`, `turn`, `status`, `cycle_state`, `live`, `stale`, `last_activity`, `last_activity_age_s`, `paused` (object or null), `watcher.running` |
+| `GET /api/hub` | `ts`; `groups.needs_you` / `waiting` / `quiet` (lists of project rows) and `groups.hidden`. Row: `id`, `name`, `path`, `group`, `why`, `phase`, `type`, `round`, `turn`, `status`, `cycle_state`, `live`, `stale`, `last_activity`, `last_activity_age_s`, `paused` (object or null), `watcher.running`, `usage` (object or null: `turns`, `input_tokens`, `output_tokens`, `cost_usd` — the last is an API-equivalent estimate, number or null; the arbiter runs on subscriptions and pays no per-token dollars) |
 | `GET /api/hub/events` | SSE. An event named `change` means "re-read `/api/hub`". The payload is not promised. |
 
 **Cockpit** (`tagteam serve`, one project; also mounted by the hub at
@@ -81,9 +81,6 @@ served today.
 | `GET /api/events` | SSE. A `change` event means "re-read what you show". The payload is not promised. |
 
 **Deliberately not promised:**
-- `usage.cost_usd` on hub rows. The arbiter's rule is no dollar figures in
-  anything tagteam presents, and a promise would make it permanent. (It
-  stays in the payload for now; removing it is a separate decision.)
 - `state.history`, `inflight`, `launch` and `last_turn` internals.
 - Log paths and pids (process details, not facts).
 - Every other endpoint (`/api/activity`, `/api/tail`, `/api/lead*`,
@@ -155,23 +152,24 @@ A reader should treat anything not in `STABLE` as private.
    with the rule in its message. Adding a path is allowed with a digest
    update and no version bump.
 4. `docs/read-api.md` lists exactly the paths in `STABLE` (a test compares
-   them) and states the stability rules, the not-promised list (including
-   why `cost_usd` is excluded) and the no-CORS limit.
+   them) and states the stability rules, the not-promised list, what
+   `usage.cost_usd` is (an API-equivalent estimate, not a charge) and the
+   no-CORS limit.
 5. `/p/<id>/api/now` through the hub equals the project's own `/api/now` on
    every promised path.
 6. No payload loses or renames anything: the full suite passes unchanged
    apart from the new tests.
 
 ## Risks and open questions for the reviewer
-- **CORS stays off.** Cockpit mode is a local control surface with a POST
+- **CORS stays off: the arbiter's decision (2026-09-24).** Cockpit mode is a local control surface with a POST
   token. Opening reads to any origin would let any web page the arbiter
   visits read project state from localhost. superdash's stack is undecided,
   and a server-side reader needs nothing. If it turns out to be a
   browser-only page, a later phase can add an explicit allow-list
   (`serve.read_origins`).
-- **`cost_usd` in the hub payload.** It is excluded from the promise but
-  still served. Removing it now would be a change to a surface nobody
-  depends on yet; the arbiter may want it gone.
+- **`usage.cost_usd` is promised: the arbiter's decision (2026-09-24),**
+  who doesn't mind seeing dollars. It is documented as an API-equivalent
+  estimate, because the agents run on subscriptions.
 - **The granularity of the promise.** `headline` is promised, not the facts
   it is derived from. That is deliberate: Phase 68 made the headline the one
   place "who has the ball" is decided, and a second dashboard re-deriving it
