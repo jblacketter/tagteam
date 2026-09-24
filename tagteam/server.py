@@ -589,6 +589,10 @@ class CockpitRouter:
                 h._send_json(capi.rules_payload(self.project_dir))
             elif path == "/api/roadmap":         # Phase 69
                 h._send_json(capi.roadmap_payload(self.project_dir))
+            elif path == "/api/jobs":            # Phase 72 (file-only: never opens the database)
+                from tagteam import jobs as _jobs
+                h._send_json(_jobs.jobs_payload(self.project_dir,
+                                                include_all=(q.get("all") or "0") in ("1", "true", "yes")))
             elif path == "/api/watcher/events":
                 # `_qs` already returns one string per key (Phase 68 fix: 3.14.5 indexed it
                 # again, so n=200 meant 2)
@@ -901,6 +905,7 @@ class CockpitRouter:
             "/api/rule": "rule",
             "/api/orders": "orders",        # Phase 71
             "/api/config/set": "config/set",   # Phase 71b (`preview: true` returns the diff + base)
+            "/api/jobs/cancel": "jobs/cancel",   # Phase 72
         }
         action = actions.get(path)
         if action is None:

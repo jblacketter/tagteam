@@ -81,6 +81,20 @@ code, pre, .cli, .tail { font-family: var(--mono); font-size: 12.5px; }
 .watcher-drawer { display: grid; grid-template-columns: minmax(240px, 1fr) 3fr; gap: 16px; padding: 10px 14px 12px; border-top: 1px solid var(--line); background: var(--bg); }
 .watcher-drawer.hidden { display: none; }
 @media (max-width: 900px) { .watcher-drawer { grid-template-columns: 1fr; } }
+/* Phase 72: Jobs strip — under the turn bar, only while there is a job */
+.jobs-strip { gap: 8px; padding-top: 0; }
+.jobs-strip.hidden { display: none; }
+.js-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; max-width: 100%; }
+.job-chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.js-detail { flex: 1 1 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); font-size: 13px; }
+.js-detail.hidden { display: none; }
+.jd-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; }
+.jd-title { font-weight: 600; overflow-wrap: anywhere; }
+.jd-id, .jd-meta { color: var(--muted); font-family: var(--mono); font-size: 11.5px; }
+.jd-summary { margin: 4px 0; overflow-wrap: anywhere; }
+.jd-fail { color: var(--warn); overflow-wrap: anywhere; }
+.jd-fail a { color: var(--accent); }
+.jd-log { margin: 6px 0; max-height: 14em; overflow: auto; font: 12px/1.4 var(--mono); color: var(--text-dim); white-space: pre-wrap; overflow-wrap: anywhere; }
 .wd-title { margin: 0 0 6px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: var(--muted); }
 .wd-list { margin: 0 0 8px; display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 12.5px; }
 .wd-list dt { color: var(--text-dim); }

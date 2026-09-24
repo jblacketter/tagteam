@@ -1359,6 +1359,11 @@ def events_signature(project_dir: str | Path) -> dict:
     except Exception:
         pass
     sig["paused"] = h.pause_path(root).exists()
+    try:                                   # Phase 72: a job starting / polling / finishing
+        from tagteam import jobs as _jobs
+        sig["jobs"] = _jobs.signature(root)
+    except Exception:
+        sig["jobs"] = None
     inflight = h.read_inflight(root)
     if inflight is not None:
         pid = inflight.get("pid")
@@ -1427,7 +1432,7 @@ def _run(fn, args: list[str], project_dir: str | Path) -> dict:
 _FN_NAMES = {"pause_command": "pause", "resume_command": "resume",
              "interject_command": "interject", "cancel_turn_command": "cancel-turn",
              "rule_command": "rule", "brief_command": "brief", "orders_command": "orders",
-             "config_command": "config"}
+             "config_command": "config", "job_command": "job"}
 
 
 def _cli_line(fn, args: list[str]) -> str:
@@ -1502,6 +1507,12 @@ def _plan(action: str, params: dict, *, by: str):
         return _plan_orders(params, by)
     if action == "config/set":             # Phase 71b: safe tagteam.yaml edits
         return _plan_config(params, by)
+    if action == "jobs/cancel":            # Phase 72: the Jobs strip
+        from tagteam import jobs as _jobs
+        jid = _s("id")
+        if not _jobs.valid_id(jid):
+            raise ValueError("'id' must be a job id")
+        return _jobs.job_command, ["cancel", jid]
     raise ValueError(f"Unknown action: {action}")
 
 

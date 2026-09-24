@@ -1,8 +1,8 @@
 # Phase 72: Jobs: background tasks and ci-watch
 
 ## Status
-- [ ] Planning: in review (plan cycle opened 2026-09-23)
-- [ ] Implementation
+- [x] Planning: approved round 3 (2026-09-23)
+- [x] Implementation
 - [ ] Implementation Review
 - [ ] Complete
 

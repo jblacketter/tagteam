@@ -402,6 +402,8 @@ Commands:
   resume        Clear the pause; the watcher re-dispatches the owed turn once
   cancel-turn   Kill the in-flight headless turn (recorded as 'cancelled', then paused)
   interject     Leave an arbiter note for the next turn (--to lead|reviewer, --list, --retire)
+  job           Background jobs, no model: `job start ci-watch --pr N | --run ID | --workflow NAME
+                --ref REF | --pypi PKG==VER` polls until it knows, then says it once (list|status|log|cancel)
   usage         Per-turn token usage for this project (--by role|cycle|model|kind, --json)
   report        What a phase took: rounds, bounces, gate and turn time, usage coverage (--phase P, --json)
   bench         Review bench: replay recorded rounds at reviewer cells (select | run [--yes] | table)
@@ -496,6 +498,7 @@ READ_ONLY_COMMANDS: dict[str, "callable"] = {
     "orders": lambda rest: not rest or rest == ["--json"] or rest[0] in ("-h", "--help", "help"),  # Phase 70
     # Phase 71b: `config keys` and `config set … --preview` read; `config set` without it writes
     "config": lambda rest: bool(rest) and (rest[0] == "keys" or (rest[0] == "set" and "--preview" in rest)),
+    "job": _sub_in("list", "status", "log"),   # Phase 72: `start`/`cancel`/`run` write
 }
 # Never a helper's business: parents, humans and installers only. Refused with
 # any arguments — `--help` included (see `read_only_refusal`).
@@ -526,7 +529,7 @@ def _read_only_summary() -> list[tuple[str, tuple[str, ...] | None]]:
             ("interject --list", None), ("brief", None), ("hub list", None),
             ("registry list", None), ("usage", None), ("contract", None), ("tail", None), ("hook", None),
             ("doctor", None), ("report", None), ("watch", ("status", "log")), ("orders [--json]", None),
-            ("config keys", None), ("config set … --preview", None)]
+            ("config keys", None), ("config set … --preview", None), ("job", ("list", "status", "log"))]
 
 
 def main() -> int:
@@ -608,6 +611,9 @@ def _dispatch() -> int:
         from tagteam.orders import orders_command
 
         return orders_command(sys.argv[2:])
+    if command == "job":
+        from tagteam.jobs import job_command
+        return job_command(sys.argv[2:])
     if command == "config":
         from tagteam.config_edit import config_command
 
