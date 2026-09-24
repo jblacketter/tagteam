@@ -43,7 +43,9 @@ _ROW = [  # one project row in the hub's visible groups
     ("status", "string|null"), ("cycle_state", "string|null"), ("live", "bool"), ("stale", "bool"),
     ("last_activity", "string|null"), ("last_activity_age_s", "number|null"),
     ("paused", "object|null"), ("paused.reason", "string|null"),
-    ("watcher", "object"), ("watcher.running", "bool"),
+    # null = unknown: a project whose files can't be read is isolated into a row with
+    # `error` and no watcher inspection — never "not running" (impl review r1)
+    ("watcher", "object|null"), ("watcher.running", "bool"),
     ("usage", "object|null"), ("usage.turns", "int"), ("usage.input_tokens", "int"),
     ("usage.output_tokens", "int"),
     # an API-equivalent estimate of what the tokens would cost; the agents run on
@@ -122,7 +124,7 @@ STABLE: dict[str, dict[str, list[tuple]]] = {
 # fails until it is updated, and its message states the rule (additive → update
 # the digest; removal / rename / retype → bump API_VERSION and say so in
 # docs/read-api.md). The decision itself is part of review.
-STABLE_DIGEST = "be8c9689ed45eb4b"
+STABLE_DIGEST = "aaae1caf1e451e73"
 
 
 def stable_endpoints(kind: str) -> list[str]:

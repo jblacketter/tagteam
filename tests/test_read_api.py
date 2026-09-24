@@ -147,6 +147,21 @@ class TestEveryDeclaredPathAgainstRealPayloads:
         assert not missing, sorted(missing)
 
 
+class TestAnUnreadableProjectInTheHub:
+    def test_a_malformed_project_beside_a_healthy_one_satisfies_the_contract(self, tmp_path):
+        """impl review r1: an unreadable project is isolated into a row with
+        `error` and `watcher: null` (unknown) — the whole payload still holds."""
+        good = _proj(tmp_path, "good")
+        cycle_mod.init_cycle("feat", "plan", "Claude", "Codex", "first", str(good), updated_by="Claude")
+        bad = _proj(tmp_path, "bad")
+        (bad / "handoff-state.json").write_text("{broken")
+        p = hub_api.hub_payload([str(good), str(bad)], procs_snapshot=[], scratch_prefixes=())
+        rows = {r["name"]: r for g in ("needs_you", "waiting", "quiet") for r in p["groups"][g]}
+        assert rows["bad"]["error"] and rows["bad"]["watcher"] is None
+        assert isinstance(rows["good"]["watcher"], dict)
+        assert read_api.check(p, "hub", "/api/hub") == []
+
+
 class TestTheCheck:
     def _now(self, tmp_path):
         import uuid

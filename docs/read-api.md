@@ -48,6 +48,10 @@ field against real payloads.
   and are not part of this contract.
 - **SSE payloads are not promised.** `/api/events` and `/api/hub/events`
   promise only that an event named `change` means "re-read".
+- **A hub row's `watcher` may be null**: that means *unknown*, not "not
+  running". A project whose files can't be read is isolated into a row
+  (with an `error` message) instead of failing the whole hub response, and
+  its watcher is not inspected.
 - **`usage.cost_usd` is an estimate**: what the recorded tokens would cost
   at API prices. The agents run on subscriptions, so it is not a charge.
 - **Show the headline; don't re-derive it.** `headline` in `/api/now` is
@@ -115,7 +119,7 @@ field against real payloads.
 | `last_activity_age_s` | `number or null` |  |
 | `paused` | `object|null` |  |
 | `paused.reason` | `string or null` |  |
-| `watcher` | `object` |  |
+| `watcher` | `object or null` |  |
 | `watcher.running` | `bool` |  |
 | `usage` | `object|null` |  |
 | `usage.turns` | `int` |  |
