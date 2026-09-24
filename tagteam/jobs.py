@@ -36,6 +36,7 @@ No model is involved and no turn slot is taken — a job is not a turn.
 """
 from __future__ import annotations
 
+import contextvars
 import json
 import os
 import re
@@ -43,6 +44,7 @@ import secrets
 import stat
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -209,8 +211,19 @@ def _write_record(root: Path, jid: str, rec: dict) -> bool:
         return False
 
 
+def _refuse_read_only(detail: str) -> None:
+    """Phase 50's switch at the jobs' shared mutation boundary: direct callers
+    (the cockpit action, tests, other modules) are refused like the CLI."""
+    from tagteam.dualwrite import refuse_if_read_only
+    refuse_if_read_only(detail)
+
+
 def _append_log(root: Path, jid: str, msg: str) -> None:
-    """One timestamped line; bounded (rotates once to ``log.txt.1``). Never raises."""
+    """One timestamped line; bounded (rotates once to ``log.txt.1``). Never raises;
+    writes nothing under TAGTEAM_READ_ONLY."""
+    from tagteam.dualwrite import read_only
+    if read_only():
+        return
     try:
         rel = _job_rel(jid, "log.txt")
         fd = _open_guarded(root, rel, os.O_WRONLY | os.O_APPEND | os.O_CREAT)
@@ -342,6 +355,7 @@ def update_record(root: Path, jid: str, fn) -> tuple[dict | None, bool]:
     no change. A change to a terminal record other than adding ``delivery``
     is refused (nothing written)."""
     root = Path(root)
+    _refuse_read_only(f"job {jid}: write refused")
     with _JobLock(root, jid):
         rec = read_record(root, jid)
         if rec is None:
@@ -471,19 +485,75 @@ class WatchError(Exception):
     not found / bad data) — ``error``, never ``failed``, never retried."""
 
 
+class Interrupted(Exception):
+    """External work abandoned because a cancel arrived or the deadline
+    passed (impl review r1): the loop re-decides from the marker and clock."""
+
+
+# The runner's budget while it polls: (stop() -> bool, deadline on _clock()).
+# External work (gh, the PyPI fetch) checks it every STOP_CHECK_S and is
+# abandoned — gh is killed — as soon as either says stop.
+_BUDGET: contextvars.ContextVar = contextvars.ContextVar("tagteam_job_budget", default=(None, None))
+STOP_CHECK_S = 0.2
+_clock = time.monotonic
+
+
+def _should_stop() -> bool:
+    stop, deadline = _BUDGET.get()
+    return bool((stop is not None and stop()) or (deadline is not None and _clock() >= deadline))
+
+
 def _gh(root: Path, args: list[str]) -> str:
+    """One gh call: killed when the job is cancelled or its deadline passes
+    (``Interrupted``), or after GH_TIMEOUT_S (``WatchError``)."""
+    shown = " ".join(args[:2])
+    if _should_stop():
+        raise Interrupted(f"gh {shown} not started")
     try:
-        r = subprocess.run(["gh", *args], cwd=str(root), capture_output=True, text=True,
-                           timeout=GH_TIMEOUT_S, stdin=subprocess.DEVNULL)
+        p = subprocess.Popen(["gh", *args], cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             stdin=subprocess.DEVNULL, text=True)
     except FileNotFoundError:
         raise WatchError("gh not found on PATH (install GitHub CLI and run `gh auth login`)")
-    except subprocess.TimeoutExpired:
-        raise WatchError(f"gh {args[0]} {args[1] if len(args) > 1 else ''} timed out after {GH_TIMEOUT_S}s".strip())
-    if r.returncode != 0:
-        first = next((ln.strip() for ln in (r.stderr or r.stdout or "").splitlines() if ln.strip()),
-                     f"exit {r.returncode}")
-        raise WatchError(f"gh {' '.join(args[:2])}: {first}")
-    return r.stdout
+    t0 = _clock()
+    while True:
+        try:
+            out, err = p.communicate(timeout=STOP_CHECK_S)
+            break
+        except subprocess.TimeoutExpired:
+            stopping = _should_stop()
+            if stopping or _clock() - t0 >= GH_TIMEOUT_S:
+                p.kill()
+                p.communicate()
+                if stopping:
+                    raise Interrupted(f"gh {shown} abandoned")
+                raise WatchError(f"gh {shown} timed out after {GH_TIMEOUT_S}s")
+    if p.returncode != 0:
+        first = next((ln.strip() for ln in (err or out or "").splitlines() if ln.strip()),
+                     f"exit {p.returncode}")
+        raise WatchError(f"gh {shown}: {first}")
+    return out
+
+
+def _interruptible(fn, what: str):
+    """Run ``fn`` in a daemon thread, waiting in STOP_CHECK_S steps; abandon it
+    (``Interrupted``) the moment the budget says stop. For a blocking call
+    that can't be killed, like an HTTP fetch."""
+    box: dict = {}
+
+    def target():
+        try:
+            box["value"] = fn()
+        except BaseException as e:              # re-raised in the caller's thread
+            box["exc"] = e
+    t = threading.Thread(target=target, daemon=True)
+    t.start()
+    while t.is_alive():
+        t.join(STOP_CHECK_S)
+        if t.is_alive() and _should_stop():
+            raise Interrupted(f"{what} abandoned")
+    if "exc" in box:
+        raise box["exc"]
+    return box.get("value")
 
 
 def _gh_json(root: Path, args: list[str]):
@@ -624,9 +694,12 @@ def poll_pypi(root: Path, target: dict, mem: dict) -> tuple:
     base = os.environ.get(PYPI_SIMPLE_ENV) or PYPI_SIMPLE
     url = base.rstrip("/") + "/" + _pep503(pkg) + "/"
     req = urllib.request.Request(url, headers={"Accept": "application/vnd.pypi.simple.v1+json"})
-    try:
+
+    def fetch():
         with urllib.request.urlopen(req, timeout=20) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+            return json.loads(resp.read().decode("utf-8"))
+    try:
+        data = _interruptible(fetch, f"PyPI {url}")
     except urllib.error.HTTPError as e:
         if e.code == 404:
             return _wait(f"{pkg} not on the index yet")
@@ -693,10 +766,15 @@ def _hold_runner_lock(root: Path, jid: str) -> int | None:
 
 
 def _commit(root: Path, jid: str, status: str, result: dict | None = None,
-            error: str | None = None) -> tuple[dict | None, bool]:
+            error: str | None = None, meta: dict | None = None) -> tuple[dict | None, bool]:
+    """The terminal write, with the final poll's metadata (attempts,
+    last_poll_at, pinned_run) in the same record (impl review r1)."""
     def fn(r):
         if r.get("status") in TERMINAL:
             return None
+        for k, v in (meta or {}).items():
+            if v is not None:
+                r[k] = v
         r.update(status=status, finished_at=_now_iso())
         if result is not None:
             r["result"] = result
@@ -712,6 +790,7 @@ def run(root: str | Path, jid: str, out=None) -> int:
     cancel or the timeout, commit under job.lock, then deliver once."""
     out = out or sys.stdout
     root = Path(root)
+    _refuse_read_only(f"`tagteam job run {jid}` refused")
     if read_record(root, jid) is None:
         print(f"No job {jid}.", file=out)
         return 1
@@ -744,55 +823,88 @@ def run(root: str | Path, jid: str, out=None) -> int:
 
 
 def _loop(root: Path, jid: str, rec: dict) -> int:
+    """Poll until an answer, a cancel or the deadline. Cancel and the deadline
+    are honoured DURING external work (gh is killed, a fetch abandoned) and
+    during the wait (never past the deadline), and re-checked after every
+    poll, before an answer or an error is committed (impl review r1)."""
     target = rec.get("target") or {}
     interval = max(MIN_INTERVAL_S, int(rec.get("interval_s") or DEFAULT_INTERVAL_S))
     timeout_s = rec.get("timeout_s")
-    deadline = time.monotonic() + float(DEFAULT_TIMEOUT_MIN * 60 if timeout_s is None else timeout_s)
+    timeout_s = float(DEFAULT_TIMEOUT_MIN * 60 if timeout_s is None else timeout_s)
+    deadline = _clock() + timeout_s
+
+    def stop():
+        return _cancel_requested(root, jid)
+    token = _BUDGET.set((stop, deadline))
     mem: dict = {}
-    attempts = 0
-    last_note = None
-    while True:
-        if _cancel_requested(root, jid):
-            _append_log(root, jid, "cancel requested")
-            return _finish(root, jid, "cancelled", {"summary": f"{label(target)}: cancelled"})
-        if time.monotonic() >= deadline:
-            _append_log(root, jid, "timed out")
-            return _finish(root, jid, "timed-out",
-                           {"summary": f"{label(target)}: no answer in {int(rec.get('timeout_s') or 0) // 60} min"
-                                       + (f" (last: {last_note})" if last_note else "")})
-        attempts += 1
-        try:
-            kind, a, b = poll(root, target, mem)
-        except WatchError as e:
-            _append_log(root, jid, f"error: {e}")
-            return _finish(root, jid, "error", {"summary": f"{label(target)}: {e}"}, error=str(e))
+    st = {"attempts": 0, "last_poll_at": None, "note": None}
+
+    def meta():
+        return {"attempts": st["attempts"], "last_poll_at": st["last_poll_at"], "note": st["note"],
+                "pinned_run": mem.get("pinned_run")}
+
+    def flush_notes():
         for k in ("head_changed", "pin_note"):
             if mem.get(k):
                 _append_log(root, jid, mem.pop(k))
-        if kind == "done":
-            _append_log(root, jid, f"{a}: {b.get('summary')}")
-            return _finish(root, jid, a, b)
-        last_note = a
-        _append_log(root, jid, f"poll {attempts}: {a}")
 
-        def progress(r, _n=attempts, _note=a):
-            if r.get("status") != "running":
-                return None
-            r.update(attempts=_n, last_poll_at=_now_iso(), note=_note)
-            if mem.get("pinned_run"):
-                r["pinned_run"] = mem["pinned_run"]
-            return r
-        update_record(root, jid, progress)
-        waited = 0.0
-        while waited < interval:
-            if _cancel_requested(root, jid):
-                break
-            _sleep(1.0)
-            waited += 1.0
+    def stop_now():
+        """(status, result) when a cancel or the deadline ends the job now."""
+        if stop():
+            _append_log(root, jid, "cancel requested")
+            return "cancelled", {"summary": f"{label(target)}: cancelled"}
+        if _clock() >= deadline:
+            _append_log(root, jid, "timed out")
+            mins = int(timeout_s) // 60
+            span = f"{mins} min" if mins else f"{int(timeout_s)} s"
+            return "timed-out", {"summary": f"{label(target)}: no answer in {span}"
+                                            + (f" (last: {st['note']})" if st["note"] else "")}
+        return None
+
+    try:
+        while True:
+            ended = stop_now()
+            if ended:
+                return _finish(root, jid, *ended, meta=meta())
+            st["attempts"] += 1
+            st["last_poll_at"] = _now_iso()
+            try:
+                kind, a, b = poll(root, target, mem)
+                err = None
+            except Interrupted:
+                flush_notes()
+                continue                                    # the top of the loop decides which stop it was
+            except WatchError as e:
+                kind, a, b, err = "done", "error", {"summary": f"{label(target)}: {e}"}, str(e)
+            flush_notes()
+            ended = stop_now()                              # a cancel accepted mid-poll wins over its answer
+            if ended:
+                return _finish(root, jid, *ended, meta=meta())
+            if kind == "done":
+                _append_log(root, jid, (f"error: {err}" if err else f"{a}: {b.get('summary')}"))
+                return _finish(root, jid, a, b, error=err, meta=meta())
+            st["note"] = a
+            _append_log(root, jid, f"poll {st['attempts']}: {a}")
+            m = meta()
+
+            def progress(r, _m=m):
+                if r.get("status") != "running":
+                    return None
+                for k, v in _m.items():
+                    if v is not None:
+                        r[k] = v
+                return r
+            update_record(root, jid, progress)
+            wake = min(_clock() + interval, deadline)       # never sleep past the deadline
+            while _clock() < wake and not stop():
+                _sleep(min(1.0, max(0.0, wake - _clock())))
+    finally:
+        _BUDGET.reset(token)
 
 
-def _finish(root: Path, jid: str, status: str, result: dict, error: str | None = None) -> int:
-    rec, wrote = _commit(root, jid, status, result, error)
+def _finish(root: Path, jid: str, status: str, result: dict, error: str | None = None,
+            meta: dict | None = None) -> int:
+    rec, wrote = _commit(root, jid, status, result, error, meta)
     if not wrote:
         return 0            # someone else committed first; the committer delivers, not us
     deliver(root, jid, rec)
@@ -907,6 +1019,7 @@ def create(root: Path, kind: str, target: dict, *, interval_s: int, timeout_s: i
     """Write the job's directory, its lock files and the initial record
     (``starting``). Returns the id, or None when .tagteam/jobs is unusable."""
     root = Path(root)
+    _refuse_read_only("`tagteam job start` refused")
     jid = _new_id()
     while (root / _job_rel(jid)).exists():
         jid = _new_id()
@@ -933,6 +1046,7 @@ def start(root: Path, kind: str, target: dict, *, interval_s: int = DEFAULT_INTE
     under job.lock, a still-``starting`` job becomes ``error: runner did not
     start`` (a late runner then finds it terminal and exits)."""
     root = Path(root)
+    _refuse_read_only("`tagteam job start` refused")
     prune(root)
     jid = create(root, kind, target, interval_s=interval_s, timeout_s=timeout_s,
                  to_lead=to_lead, quiet=quiet, by=by)
@@ -967,6 +1081,7 @@ def cancel(root: Path, jid: str, by: str = "arbiter") -> tuple[str, dict | None]
     answer is known); unknown → marker only. Never kills a process.
     Returns (outcome, record): terminal | left-to-runner | finalised | unknown | missing."""
     root = Path(root)
+    _refuse_read_only(f"`tagteam job cancel {jid}` refused")
     if read_record(root, jid) is None:
         return "missing", None
     fd = _open_guarded(root, _job_rel(jid, "cancel"), os.O_WRONLY | os.O_CREAT)
@@ -1005,6 +1120,7 @@ def prune(root: Path, days: int = RETENTION_DAYS) -> list[str]:
     """Remove finished (and lost) jobs whose created_at is older than ``days``."""
     import shutil
     root = Path(root)
+    _refuse_read_only("job pruning refused")
     gone = []
     for jid in list_ids(root):
         rec = read_record(root, jid)

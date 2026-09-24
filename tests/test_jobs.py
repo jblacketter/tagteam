@@ -46,6 +46,9 @@ FAKE_GH = textwrap.dedent(r'''
     counts[key] = i + 1
     json.dump(counts, open(counts_path, "w"))
     r = seq[min(i, len(seq) - 1)]
+    if r.get("sleep"):
+        import time
+        time.sleep(r["sleep"])
     out = r.get("out", "")
     sys.stdout.write(out if isinstance(out, str) else json.dumps(out))
     sys.stderr.write(r.get("err", ""))
@@ -93,10 +96,19 @@ def gh(tmp_path, monkeypatch):
     return G()
 
 
+def _virtual_clock(monkeypatch):
+    off = [0.0]
+    real = time.monotonic
+    monkeypatch.setattr(jobs, "_clock", lambda: real() + off[0])
+    monkeypatch.setattr(jobs, "_sleep", lambda s: off.__setitem__(0, off[0] + s))
+    return off
+
+
 @pytest.fixture
 def fast(monkeypatch):
-    """In-process runs: no real sleeping; notifications captured."""
-    monkeypatch.setattr(jobs, "_sleep", lambda s: None)
+    """In-process runs: a virtual clock that `_sleep` advances (no real
+    sleeping, and the deadline arithmetic still holds); notifications captured."""
+    _virtual_clock(monkeypatch)
     sent = []
     monkeypatch.setattr(jobs, "_notify", lambda t, m: sent.append((t, m)) or True)
     return sent
@@ -330,7 +342,7 @@ class TestErrorIsNotFailed:
         empty.mkdir()
         monkeypatch.setenv("PATH", str(empty))
         _rc, rec, _ = _run_inproc(proj, _mk(proj, {"pr": 1}))
-        assert rec["status"] == "error" and "gh not found" in rec["error"] and rec["attempts"] == 0
+        assert rec["status"] == "error" and "gh not found" in rec["error"] and rec["attempts"] == 1
 
     @pytest.mark.parametrize("err", [
         "To get started with GitHub CLI, please run:  gh auth login\n",
@@ -578,14 +590,14 @@ class TestDelivery:
         assert rec["delivery"]["interjection"] == "skipped"
 
     def test_a_raising_notifier_does_not_change_the_result(self, proj, gh, monkeypatch):
-        monkeypatch.setattr(jobs, "_sleep", lambda s: None)
+        _virtual_clock(monkeypatch)
         monkeypatch.setattr(jobs, "_notify", lambda t, m: 1 / 0)
         gh.set({"run view": [{"out": {"status": "completed", "conclusion": "success", "name": "T", "jobs": []}}]})
         _rc, rec, _ = _run_inproc(proj, _mk(proj, {"run": 1}))
         assert rec["status"] == "succeeded" and rec["delivery"]["notify"].startswith("failed")
 
     def test_notifications_disabled_is_skipped_not_failed(self, proj, gh, monkeypatch):
-        monkeypatch.setattr(jobs, "_sleep", lambda s: None)
+        _virtual_clock(monkeypatch)
         gh.set({"run view": [{"out": {"status": "completed", "conclusion": "success", "name": "T", "jobs": []}}]})
         _rc, rec, _ = _run_inproc(proj, _mk(proj, {"run": 1}))          # TAGTEAM_NO_NOTIFY=1 from the fixture
         assert rec["delivery"]["notify"] == "skipped: TAGTEAM_NO_NOTIFY is set"
@@ -852,3 +864,149 @@ RESULT = { overflow: document.documentElement.scrollWidth > document.documentEle
            chipW: $('jobs-chips').children[0].getBoundingClientRect().width, vw: document.documentElement.clientWidth };
 """.replace("ROW", json.dumps(row)), width=390)
         assert not r["overflow"] and r["chipW"] <= r["vw"]
+
+
+
+# ---------------------------------------------------------------------------
+# impl review r1: cancel and the deadline are honoured DURING polling and waiting;
+# read-only at the shared mutation boundary; the final poll's metadata persists
+# ---------------------------------------------------------------------------
+
+def _cancel_after(proj, jid, delay):
+    def go():
+        time.sleep(delay)
+        (proj / jobs._job_rel(jid, "cancel")).write_text("{}")
+    t = threading.Thread(target=go, daemon=True)
+    t.start()
+    return t
+
+
+class TestCancelAndDeadlineDuringWork:
+    def test_a_cancel_accepted_mid_poll_wins_over_the_answer(self, proj, fast, monkeypatch):
+        jid = _mk(proj, {"pr": 1})
+        jobs.update_record(proj, jid, lambda r: dict(r, status="starting"))
+        seen = {}
+
+        def poll(root, target, mem):
+            seen["outcome"] = jobs.cancel(proj, jid)[0]          # the arbiter cancels while gh runs…
+            return jobs._done("succeeded", "PR #1: green")        # …and then CI answers green
+        monkeypatch.setattr(jobs, "poll", poll)
+        _rc, rec, _ = _run_inproc(proj, jid)
+        assert seen["outcome"] == "left-to-runner"
+        assert rec["status"] == "cancelled" and fast[0][0] == "CI watch cancelled"
+
+    def test_cancel_during_a_slow_gh_call_kills_it_promptly(self, proj, gh):
+        gh.set({"pr view": [{"sleep": 30, "out": _pr([_check("a")])["out"]}]})
+        jid = _mk(proj, {"pr": 1}, quiet=True)
+        _cancel_after(proj, jid, 0.5)
+        t0 = time.monotonic()
+        _rc, rec, _ = _run_inproc(proj, jid)
+        assert rec["status"] == "cancelled" and time.monotonic() - t0 < 3
+        assert rec["attempts"] == 1
+
+    def test_cancel_during_a_slow_log_fetch(self, proj, gh):
+        gh.set({"run view": [{"out": {"status": "completed", "conclusion": "failure", "name": "T",
+                                      "jobs": [{"name": "x", "conclusion": "failure", "url": "u"}]}}],
+                "run log": [{"sleep": 30, "out": "never"}]})
+        jid = _mk(proj, {"run": 3}, quiet=True)
+        _cancel_after(proj, jid, 0.5)
+        t0 = time.monotonic()
+        _rc, rec, _ = _run_inproc(proj, jid)
+        assert rec["status"] == "cancelled" and time.monotonic() - t0 < 3
+
+    def test_cancel_during_a_slow_pypi_fetch(self, proj, monkeypatch):
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                time.sleep(20)
+
+            def log_message(self, *a):
+                pass
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+        srv.daemon_threads = True
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            monkeypatch.setenv(jobs.PYPI_SIMPLE_ENV, f"http://127.0.0.1:{srv.server_port}/simple/")
+            jid = _mk(proj, {"pypi": "tagteam", "version": "9"}, quiet=True)
+            _cancel_after(proj, jid, 0.5)
+            t0 = time.monotonic()
+            _rc, rec, _ = _run_inproc(proj, jid)
+        finally:
+            srv.shutdown()
+        assert rec["status"] == "cancelled" and time.monotonic() - t0 < 3
+
+    def test_the_deadline_expires_during_external_work(self, proj, gh):
+        gh.set({"pr view": [{"sleep": 30, "out": _pr([_check("a")])["out"]}]})
+        jid = _mk(proj, {"pr": 1}, timeout_s=1, quiet=True)
+        t0 = time.monotonic()
+        _rc, rec, _ = _run_inproc(proj, jid)
+        assert rec["status"] == "timed-out" and time.monotonic() - t0 < 3
+        assert "no answer in 1 s" in rec["result"]["summary"]
+
+    def test_an_interval_longer_than_the_timeout_ends_at_the_deadline(self, proj, gh, monkeypatch):
+        off = _virtual_clock(monkeypatch)
+        monkeypatch.setattr(jobs, "_notify", lambda t, m: True)
+        gh.set({"pr view": [_pr([_check("a", status="IN_PROGRESS", conclusion="")])]})
+        jid = _mk(proj, {"pr": 1}, timeout_s=60, interval_s=120)
+        _rc, rec, _ = _run_inproc(proj, jid)
+        assert rec["status"] == "timed-out" and 59 <= off[0] <= 61, off[0]
+        assert rec["attempts"] == 1
+
+    def test_an_answer_that_arrives_after_the_deadline_is_not_accepted(self, proj, monkeypatch):
+        off = _virtual_clock(monkeypatch)
+        monkeypatch.setattr(jobs, "_notify", lambda t, m: True)
+
+        def poll(root, target, mem):
+            off[0] += 61                                   # the external work took 61 of 60 seconds
+            return jobs._done("succeeded", "green")
+        monkeypatch.setattr(jobs, "poll", poll)
+        _rc, rec, _ = _run_inproc(proj, _mk(proj, {"pr": 1}, timeout_s=60))
+        assert rec["status"] == "timed-out"
+
+    def test_a_committed_result_survives_a_late_cancel_and_deadline(self, proj, gh, fast):
+        gh.set({"run view": [{"out": {"status": "completed", "conclusion": "success", "name": "T", "jobs": []}}]})
+        jid = _mk(proj, {"run": 1})
+        _rc, rec, _ = _run_inproc(proj, jid)
+        (proj / jobs._job_rel(jid, "cancel")).write_text("{}")
+        assert jobs._commit(proj, jid, "timed-out", {"summary": "x"})[1] is False
+        assert jobs.read_record(proj, jid)["status"] == "succeeded"
+
+
+class TestReadOnlyAtTheBoundary:
+    def test_the_cockpit_action_and_direct_calls_are_refused(self, proj, monkeypatch):
+        from tagteam import cockpit_api as capi
+        from tagteam.dualwrite import ReadOnlyError
+        jid = _mk(proj, {"pr": 1})
+        jobs.update_record(proj, jid, lambda r: dict(r, status="running"))
+        d = proj / jobs._job_rel(jid)
+        snap = {f.name: f.read_bytes() for f in d.iterdir()}
+        monkeypatch.setenv("TAGTEAM_READ_ONLY", "1")
+        res = capi.run_action("jobs/cancel", {"id": jid}, proj)
+        assert res["ok"] is False and "refused" in res["message"]
+        for call in (lambda: jobs.cancel(proj, jid), lambda: jobs.start(proj, "ci-watch", {"pr": 2}),
+                     lambda: jobs.create(proj, "ci-watch", {"pr": 2}, interval_s=5, timeout_s=60, to_lead=False,
+                                         quiet=False, by="t"),
+                     lambda: jobs.update_record(proj, jid, lambda r: dict(r, note="x")),
+                     lambda: jobs.prune(proj), lambda: jobs.run(proj, jid, out=io.StringIO())):
+            with pytest.raises(ReadOnlyError):
+                call()
+        jobs._append_log(proj, jid, "must not be written")
+        assert {f.name: f.read_bytes() for f in d.iterdir()} == snap
+        assert jobs.list_ids(proj) == [jid]
+        # reads still work, and create nothing
+        assert jobs.jobs_payload(proj)["jobs"][0]["id"] == jid
+        assert {f.name: f.read_bytes() for f in d.iterdir()} == snap
+
+
+class TestFinalPollMetadata:
+    def test_a_run_already_complete_on_the_first_view_keeps_its_pin(self, proj, gh, fast, repo):
+        _old, new = repo
+        gh.set({"run list": [{"out": [{"databaseId": 905, "headSha": new, "status": "completed"}]}],
+                "run view": [{"out": {"status": "completed", "conclusion": "success", "name": "P", "jobs": []}}]})
+        _rc, rec, _ = _run_inproc(proj, _mk(proj, {"workflow": "P", "sha": new}))
+        assert rec["status"] == "succeeded" and rec["pinned_run"] == 905
+        assert rec["attempts"] == 1 and rec["last_poll_at"]
+
+    def test_the_final_poll_is_counted(self, proj, gh, fast):
+        gh.set({"pr view": [_pr([]), _pr([_check("a", status="IN_PROGRESS", conclusion="")]), _pr([_check("a")])]})
+        _rc, rec, _ = _run_inproc(proj, _mk(proj, {"pr": 1}))
+        assert rec["status"] == "succeeded" and rec["attempts"] == 3
