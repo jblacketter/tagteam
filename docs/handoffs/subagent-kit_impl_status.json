@@ -1,0 +1,24 @@
+{
+  "state": "in-progress",
+  "ready_for": "reviewer",
+  "round": 1,
+  "phase": "subagent-kit",
+  "type": "impl",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-24",
+  "baseline": {
+    "sha": "a07a16e9585879012f117d36e1af079cdd037e5e",
+    "dirty_paths": [],
+    "captured_at": "2026-09-24T05:45:25.222823+00:00",
+    "source": "copied-from-plan"
+  },
+  "impl_boundary": {
+    "sha": "7f7abd4e661f4341dc29082b71103338544e8b51",
+    "dirty": {
+      "docs/handoffs/subagent-kit_plan_rounds.jsonl": "e790a2d39d7e899cf2fe04da2c802df241186c71ed3af04beada7e5f59cd412e"
+    },
+    "captured_at": "2026-09-24T05:54:19.728485+00:00",
+    "source": "copied-from-plan"
+  }
+}
