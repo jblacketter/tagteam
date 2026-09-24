@@ -4,7 +4,7 @@
 - [x] Planning: approved round 2 (2026-09-23) at `3b496be`. r1: saved vs effective, preview-bound writes, one writer lock, expected-tree check.
 - [x] Implementation: branch `phase-71b-safe-config-edits`
 - [x] Implementation Review: approved round 2 (2026-09-23) at `f23224a`; gate 2,469 passed, 5 skipped
-- [ ] Complete: PR open, awaiting the arbiter's merge.
+- [ ] Complete: PR #58 open, awaiting the arbiter's merge.
 
 ## Closeout
 ```
