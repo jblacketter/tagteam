@@ -481,7 +481,7 @@ READ_ONLY_COMMANDS: dict[str, "callable"] = {
     "state": lambda rest: not rest or (rest[0] == "diagnose" and "--clean" not in rest),
     "gate": _sub_in("status", "list"),
     "panel": _sub_in("status", "lenses", "list"),
-    "roadmap": _sub_in("queue", "phases", "check", "graph", "ready"),
+    "roadmap": _sub_in("queue", "phases", "check", "graph", "ready", "board"),
     "interject": lambda rest: "--list" in rest,
     "brief": _no_flag("--generate"),
     "hub": _sub_in("list"),
@@ -522,7 +522,7 @@ def read_only_refusal(argv: list[str]) -> str | None:
 
 def _read_only_summary() -> list[tuple[str, tuple[str, ...] | None]]:
     return [("cycle", ("status", "rounds")), ("state", ("diagnose",)), ("gate", ("status", "list")),
-            ("panel", ("status", "lenses", "list")), ("roadmap", ("queue", "phases", "check", "graph", "ready")),
+            ("panel", ("status", "lenses", "list")), ("roadmap", ("queue", "phases", "check", "graph", "ready", "board")),
             ("interject --list", None), ("brief", None), ("hub list", None),
             ("registry list", None), ("usage", None), ("contract", None), ("tail", None), ("hook", None),
             ("doctor", None), ("report", None), ("watch", ("status", "log")), ("orders [--json]", None),

@@ -247,8 +247,8 @@ class TestCockpitPages:
             assert "access-control-allow-origin" not in r["headers"]
             assert r["headers"].get("cache-control") == "no-store"
             # zones + tabs present (round-3 IA)
-            for anchor in ('id="now"', 'id="needs-you"', 'id="watch"', 'data-tab="feed"',
-                           'data-tab="diff"', 'data-tab="usage"', 'data-tab="notes"', 'id="conn"'):
+            for anchor in ('id="now"', 'id="needs-you"', 'id="watch"', 'data-tab="now"',   # Phase 69 regroup
+                           'data-tab="roadmap"', 'data-tab="history"', 'data-tab="usage"', 'id="conn"'):
                 assert anchor in html, anchor
             # referenced assets resolve — and carry no wildcard CORS in cockpit mode
             for asset in ("/cockpit.css", "/cockpit.js"):

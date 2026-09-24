@@ -84,7 +84,9 @@ class TestLaunchIntent:
         assert it == {**it, "phase": "gamma-work", "type": "impl", "command": "/handoff start gamma-work impl"}
         _cycle(p, "gamma-work", "impl", "approved")
         it = L.launch_intent(p)
-        assert it["command"] == "/handoff start delta-work" and it["type"] == "plan"      # next actionable, skipping the just-approved
+        # Phase 69: Delta's roadmap status says "In progress" — a DECLARED phase is never offered
+        # Start, and nothing else is ready (Epsilon is deferred)
+        assert it["command"] is None and "no phase is ready" in it["reason"]
         # escalated → none
         _cycle(p, "delta-work", "plan", "escalated")
         it = L.launch_intent(p)
@@ -95,7 +97,7 @@ class TestLaunchIntent:
     def test_exhausted_setup_missing_and_paused(self, tmp_path):
         p = _proj(tmp_path, roadmap="# Roadmap\n\n### Phase 1: Only\n- **Status:** Complete\n")
         it = L.launch_intent(p)
-        assert it["command"] is None and "no actionable phase" in it["reason"]
+        assert it["command"] is None and "no phase is ready" in it["reason"]
         (p / "docs" / "roadmap.md").unlink()
         assert "quickstart" in L.launch_intent(p)["reason"]
         (p / "tagteam.yaml").unlink()
@@ -105,15 +107,18 @@ class TestLaunchIntent:
         it = L.launch_intent(p2)
         assert it["command"] is None and "paused" in it["reason"]
 
-    def test_impl_approved_with_roadmap_still_in_progress_skips_by_name(self, tmp_path):
+    def test_impl_approved_offers_the_first_ready_phase_not_the_next_in_document_order(self, tmp_path):
+        """Phase 69: `_next_after` (document order, the just-approved phase
+        skipped by name) is gone — the next phase is the first READY one."""
         p = _proj(tmp_path)
-        _cycle(p, "delta-work", "impl", "approved")   # roadmap says Delta "In progress" — skipped by name
+        _cycle(p, "delta-work", "impl", "approved")   # roadmap says Delta "In progress": in progress (approved)
         it = L.launch_intent(p)
-        assert it["command"] is None and "no actionable phase left" in it["reason"]   # gamma is before delta; nothing after
+        assert it["command"] == "/handoff start gamma-work"     # before Delta in the document, and ready
         p2 = _proj(tmp_path / "b", roadmap=ROADMAP.replace("### Phase 5: Epsilon Work\n- **Status:** Deferred (2026-05-03)",
                                                              "### Phase 5: Epsilon Work\n- **Status:** Not started"))
         _cycle(p2, "delta-work", "impl", "approved")
-        assert L.launch_intent(p2)["command"] == "/handoff start epsilon-work"
+        assert L.launch_intent(p2)["command"] == "/handoff start gamma-work"
+        assert L.launch_intent(p2, phase="epsilon-work")["command"] == "/handoff start epsilon-work"   # a chosen ready phase
 
     def test_start_payload_headless_gate(self, tmp_path, fake_path):
         p = _proj(tmp_path)
@@ -461,7 +466,9 @@ class TestHubIntent:
     def test_rows_carry_intent_and_only_actionable_get_a_command(self, tmp_path, fake_path):
         from tagteam import hub_api
         p_plan = _proj(tmp_path / "plan"); _cycle(p_plan, "gamma-work", "plan", "approved")
-        p_impl = _proj(tmp_path / "impl"); _cycle(p_impl, "gamma-work", "impl", "approved")
+        # Phase 69: a status of "In progress" is never offered — Delta must be plain "Not started" here
+        p_impl = _proj(tmp_path / "impl", roadmap=ROADMAP.replace("- **Status:** In progress", "- **Status:** Not started"))
+        _cycle(p_impl, "gamma-work", "impl", "approved")
         p_active = _proj(tmp_path / "act"); _cycle(p_active, "gamma-work", "plan", "in-progress")
         p_done = _proj(tmp_path / "done", roadmap="# R\n\n### Phase 1: Solo\n- **Status:** Complete\n")
         rows = {r["path"]: r for r in (hub_api.project_summary(x) for x in (p_plan, p_impl, p_active, p_done))}

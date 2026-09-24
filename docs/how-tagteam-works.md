@@ -283,9 +283,9 @@ tagteam serve --theme saloon                     # the legacy dashboard (identic
 
 | observed | intent |
 |---|---|
-| no state / no cycle | first actionable roadmap phase → `/tagteam:handoff start <phase>` |
+| no state / no cycle / an aborted cycle | the first **ready** roadmap phase (dependencies met, topological order — Phase 69), or the one chosen on the Roadmap tab → `/tagteam:handoff start <phase>` |
 | current plan cycle approved | **same phase**, implementation → `/tagteam:handoff start <phase> impl` |
-| current impl cycle approved | next actionable phase after it (skipped by name — the roadmap may still say "In progress") |
+| current impl cycle approved | the first ready phase, or the chosen one (the approved phase is *in progress — awaiting merge* until the roadmap marks it done) |
 | a cycle in progress / escalated / needs-human / paused | no Start (the card is absent; the reason is in the strip) |
 | roadmap exhausted / not set up | the reason (`no actionable phase in docs/roadmap.md` / `run tagteam quickstart`), no button |
 
@@ -327,7 +327,7 @@ tagteam hub                     # http://localhost:8090 — every registered pro
 tagteam hub --list [--json]     # the same triage as text
 ```
 
-One surface over every project `tagteam setup` registered (`~/.tagteam/projects.json`), ranked by intent: **Needs you** (escalations, questions, paused-after-failure — one **Open** per row), **Waiting** (turns owed to agents, oldest first; **stale** when nothing is dispatching, **abandoned?** past a day — with the CLI to run), **Quiet** (done / idle, collapsed to a count). Every row carries the project's launch intent; a row with a next step shows **Start →** (plan / implementation) linking to that project's cockpit Start card — the hub itself launches nothing. The strip shows how many are live, burn across projects (24 h / 7 d) and the shared subscription window (newest signal per provider/kind across *every* registered project — the subscription is one pool, so hidden projects count too; burn totals are for the visible projects only). **Open** takes you into that project's cockpit, mounted by the hub at `/p/<id>/` — same token, same loopback default — so ruling, pausing or interjecting anywhere is two clicks away.
+One surface over every project `tagteam setup` registered (`~/.tagteam/projects.json`), ranked by intent: **Needs you** (escalations, questions, paused-after-failure — one **Open** per row), **Waiting** (turns owed to agents, oldest first; **stale** when nothing is dispatching, **abandoned?** past a day — with the CLI to run), **Quiet** (done / idle, collapsed to a count). Every row carries the project's launch intent; a row with a next step shows **Start →** (plan / implementation) linking to that project's cockpit Roadmap tab — the hub itself launches nothing. The strip shows how many are live, burn across projects (24 h / 7 d) and the shared subscription window (newest signal per provider/kind across *every* registered project — the subscription is one pool, so hidden projects count too; burn totals are for the visible projects only). **Open** takes you into that project's cockpit, mounted by the hub at `/p/<id>/` — same token, same loopback default — so ruling, pausing or interjecting anywhere is two clicks away.
 
 The hub is read-only: it never migrates a project database (`mode=ro`), never rewrites the registry (`tagteam registry list` / `tagteam registry unregister PATH` are the only registry commands, and only `unregister` writes). Missing dirs, scratch paths and dirs without `tagteam.yaml` are hidden by default (`--all` / "show hidden"). `tagteam hub --registry PATH` reads a different registry file the same way (used by the screenshot seed in `docs/media/`).
 

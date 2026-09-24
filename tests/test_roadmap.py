@@ -1341,7 +1341,7 @@ class TestPlaceholderPhases:
         _write_roadmap(seeded, SEED); _write_roadmap(empty, "# Roadmap\n")
         for root in (seeded, empty):
             assert launch._actionable_phases(root) == []
-            assert launch._next_after(root, None) == (None, True)
+            assert launch.launch_intent(root)["command"] is None               # Phase 69: _next_after is gone
             with pytest.raises(ValueError, match="No phases found"):
                 graph_problems(root / "docs" / "roadmap.md")           # what the watcher catches
             with pytest.raises(ValueError, match="No phases found"):
