@@ -1,0 +1,16 @@
+{
+  "state": "in-progress",
+  "ready_for": "reviewer",
+  "round": 1,
+  "phase": "subagent-kit",
+  "type": "plan",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-24",
+  "baseline": {
+    "sha": "a07a16e9585879012f117d36e1af079cdd037e5e",
+    "dirty_paths": [],
+    "captured_at": "2026-09-24T05:45:25.222823+00:00",
+    "source": "plan-init"
+  }
+}
