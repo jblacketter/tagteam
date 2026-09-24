@@ -13,7 +13,7 @@ iTerm2 tabs (lead | watcher | reviewer) — lead lane left, reviewer lane right,
 the top. Each phase is engine + CLI first, cockpit surface second. tagteam stays a standalone package; superdash
 (a separate project) consumes it (Phase 74). -->
 ### Phase 74a: Launchpad test holds the fake turn
-- **Status:** ✅ Approved — impl approved round 2 (2026-09-24); gate: 2,611 passed, 5 skipped at `3e94057`. PR #63 open, merge pending. See `docs/phases/launchpad-test-holds-the-fake-turn.md`.
+- **Status:** ✅ Complete — impl approved round 2 (2026-09-24); gate: 2,611 passed, 5 skipped at `3e94057`. PR #63 merged 2026-09-24 (rebase). See `docs/phases/launchpad-test-holds-the-fake-turn.md`.
 - **Description:** `tests/test_launchpad.py::TestServerEndpoints::test_watch_session_and_launch_endpoints` flaked three times on CI: on `main` at `d49c632`, and on PRs #61 and #62. It asserted that a launched lead turn was still running, with its slot held, by relying on a fake turn lasting about 2 s (`FAKE_AGENT_SLEEP=1.0`). On a loaded runner the turn could finish first. Because `lead_chat.run_turn` releases the slot a moment before it finishes the row, a read in that gap saw the turn "running" with its slot free. The fix: the fake agent waits on a hold file the test controls (`FAKE_AGENT_HOLD`), so "still running" is a fact of the test, not a race. The r1 gate run surfaced a second test race of the same kind in `tests/test_jobs.py` (Phase 72): `_wait_terminal` returned before the runner had added `delivery`. Now it waits for the runner to exit.
 
 ### Phase 74: Versioned read API for other dashboards

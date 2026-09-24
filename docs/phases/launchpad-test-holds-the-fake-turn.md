@@ -4,7 +4,7 @@
 - [x] Planning: none needed. This is a test-only fix, so it goes straight to an impl cycle, as the arbiter's rule for small fixes says.
 - [x] Implementation: branch `phase-74a-launchpad-test-holds-the-fake-turn`
 - [x] Implementation Review: approved round 2 (2026-09-24) at `3e94057`; gate 2,611 passed, 5 skipped (r1 was a gate bounce on the second race)
-- [ ] Complete: PR #63 open, merge pending.
+- [x] Complete: PR #63 merged 2026-09-24 (rebase); its CI was green on the first run.
 
 ## Closeout
 ```
