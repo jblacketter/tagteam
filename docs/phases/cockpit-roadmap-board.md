@@ -3,8 +3,26 @@
 ## Status
 - [x] Planning: approved round 2 (2026-09-23) at `243ae32`. r1: exhaustive classifier; one board-wide launch guard + endpoint refusal.
 - [x] Implementation: branch `phase-69-cockpit-roadmap-board`
-- [ ] Implementation Review
-- [ ] Complete
+- [x] Implementation Review: approved round 2 (2026-09-24) at `2b064ca`; gate 2,499 passed, 5 skipped
+- [ ] Complete: PR open, awaiting the arbiter's merge.
+
+## Closeout
+```
+Phase report: cockpit-roadmap-board — plan approved r2 · impl approved r2
+  plan   2 rounds · 1 change request · 0 bounces
+  impl   2 rounds · 1 change request · 0 bounces · gate 2 runs, 17m 55s
+  time   start→approve 42m 59s · implementation before first submit 13m 39s
+         lead 3m 03s (2 spans, 2 unknown) · reviewer 8m 21s (4 spans) · gate 17m 56s (2 spans)  (elapsed; includes relay wait)
+  usage  no usage rows stored under this phase
+  turns  matched 0 of 8 · no token data 0 · unmatched 6 · unknown 2
+```
+- **Plan r1:** the grouping missed run-completed phases and stranded aborted ones. The Start guard covered only the current row.
+- **Impl r1:**
+  - a declared status beat an aborted cycle;
+  - an invalid roadmap still allowed Start implementation, and a stale POST for it went through;
+  - the refresh collapsed what the reader had opened.
+
+  All three are fixed with regression tests.
 
 ## Implementation notes
 **Driven in a real page:** a scratch project whose document order differs from its dependency order (A done, B depends on C, C, D, E marked "In review"), served with the test suite's fake agents and a 25-second lead turn.
