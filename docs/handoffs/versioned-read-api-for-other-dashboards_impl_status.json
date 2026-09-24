@@ -1,7 +1,7 @@
 {
-  "state": "in-progress",
-  "ready_for": "lead",
-  "round": 1,
+  "state": "approved",
+  "ready_for": null,
+  "round": 2,
   "phase": "versioned-read-api-for-other-dashboards",
   "type": "impl",
   "lead": "claude",
