@@ -161,6 +161,42 @@ def _eol_of(line: str) -> str:
     return line[len(_content(line)):]
 
 
+def _node_lines(text: str, block: str, leaf: str) -> tuple[int | None, int | None]:
+    """The parser's view (impl r1 review): `yaml.compose` keeps every mapping
+    key — duplicates and quoting included — where `safe_load` has already
+    collapsed them. Returns the 0-based lines of the target block's key and
+    of the leaf's key (None when absent); refuses every spelling the line
+    locator does not handle."""
+    import yaml
+    by_hand = f"edit {CONFIG_FILE} by hand"
+    try:
+        root = yaml.compose(text)
+    except yaml.YAMLError as e:
+        raise Refused(f"{CONFIG_FILE} does not parse ({str(e).splitlines()[0]}) — fix it by hand")
+    if root is None:
+        return None, None
+    if not isinstance(root, yaml.MappingNode):
+        raise Refused(f"{CONFIG_FILE} is not a mapping — fix it by hand")
+    hits = [(k, v) for k, v in root.value if isinstance(k, yaml.ScalarNode) and k.value == block]
+    if any(k.style for k, _ in hits):
+        raise Refused(f"`{block}` is written as a quoted key — {by_hand}")
+    if len(hits) > 1:
+        raise Refused(f"`{block}:` appears {len(hits)} times — {by_hand}")
+    if not hits:
+        return None, None
+    k, v = hits[0]
+    if isinstance(v, yaml.ScalarNode) and v.tag == "tag:yaml.org,2002:null" and v.value in ("", "~", "null"):
+        return k.start_mark.line, None
+    if not isinstance(v, yaml.MappingNode) or v.flow_style:
+        raise Refused(f"`{block}:` is not a plain block mapping — {by_hand}")
+    leaves = [lk for lk, _ in v.value if isinstance(lk, yaml.ScalarNode) and lk.value == leaf]
+    if any(lk.style for lk in leaves):
+        raise Refused(f"`{block}.{leaf}` is written as a quoted key — {by_hand}")
+    if len(leaves) > 1:
+        raise Refused(f"`{block}.{leaf}` appears {len(leaves)} times — {by_hand}")
+    return k.start_mark.line, (leaves[0].start_mark.line if leaves else None)
+
+
 def edit_text(text: str, key: str, value) -> str:
     """Return `text` with ONLY the target changed, or raise Refused."""
     block, leaf = key.split(".", 1)
@@ -175,8 +211,11 @@ def edit_text(text: str, key: str, value) -> str:
         if c.strip() in ("---", "...") or c.startswith("--- "):
             raise Refused(f"{CONFIG_FILE} has YAML document markers — {by_hand}")
 
+    node_block, node_leaf = _node_lines(text, block, leaf)
     header = re.compile(r"^" + re.escape(block) + r"\s*:(?P<rest>.*)$")
     heads = [i for i, l in enumerate(lines) if header.match(_content(l))]
+    if (heads[0] if len(heads) == 1 else None) != node_block and len(heads) <= 1:
+        raise Refused(f"the `{block}` block is laid out in a way tagteam does not edit — {by_hand}")
     if len(heads) > 1:
         raise Refused(f"`{block}:` appears {len(heads)} times — {by_hand}")
 
@@ -219,6 +258,8 @@ def edit_text(text: str, key: str, value) -> str:
     hits = [b for b in body if keyline.match(_content(lines[b]))]
     if len(hits) > 1:
         raise Refused(f"`{key}` appears {len(hits)} times — {by_hand}")
+    if (hits[0] if hits else None) != node_leaf:
+        raise Refused(f"`{key}` is laid out in a way tagteam does not edit — {by_hand}")
 
     if not hits:                                    # insert right after the header
         new_line = " " * ci + f"{leaf}: {rendered}"
@@ -338,11 +379,27 @@ def plan(data: bytes, key: str, value, root: Path) -> Plan:
         notes += [f"{CONFIG_FILE}: {p}" for p in validate_config(new)]
     except Exception:
         pass
-    diff = "".join(difflib.unified_diff(text.splitlines(keepends=True), new_text.splitlines(keepends=True),
-                                        fromfile=CONFIG_FILE, tofile=f"{CONFIG_FILE} (edited)"))
-    if diff and not diff.endswith("\n"):
-        diff += "\n"
+    diff = render_diff(text, new_text)
     return Plan(key, value, base, False, text, new_text, diff, describe_effective(key, eff), notes)
+
+
+_NO_EOL = "\\ No newline at end of file"
+
+
+def _diff_lines(text: str) -> list[str]:
+    """Lines for the diff, without their endings; a final line with no
+    newline carries git's marker, so a changed last line reads as its own
+    `-` / `+` lines (impl r1 review)."""
+    lines = text.splitlines()
+    if lines and not text.endswith(("\n", "\r")):
+        lines[-1] = lines[-1] + "\n" + _NO_EOL
+    return lines
+
+
+def render_diff(old: str, new: str) -> str:
+    out = list(difflib.unified_diff(_diff_lines(old), _diff_lines(new),
+                                    fromfile=CONFIG_FILE, tofile=f"{CONFIG_FILE} (edited)", lineterm=""))
+    return ("\n".join(out) + "\n") if out else ""
 
 
 def _write(root: Path, data: bytes) -> None:
