@@ -363,8 +363,10 @@ def _wait_terminal(proj, jid, timeout=30):
     t0 = time.monotonic()
     while time.monotonic() - t0 < timeout:
         rec = jobs.read_record(proj, jid)
-        if rec and rec.get("status") in jobs.TERMINAL:
-            return rec
+        # Phase 74a: terminal AND the runner gone — it adds `delivery` after the commit,
+        # so a record read at the commit alone could still change (it flaked in a gate run)
+        if rec and rec.get("status") in jobs.TERMINAL and jobs.probe_runner(proj, jid) != "busy":
+            return jobs.read_record(proj, jid)
         time.sleep(0.1)
     raise AssertionError(f"job {jid} not terminal: {jobs.read_record(proj, jid)}\n"
                          + (proj / jobs._job_rel(jid, 'runner.out')).read_text())

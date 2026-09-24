@@ -1,0 +1,16 @@
+{
+  "state": "in-progress",
+  "ready_for": "lead",
+  "round": 1,
+  "phase": "launchpad-test-holds-the-fake-turn",
+  "type": "impl",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-24",
+  "baseline": {
+    "sha": "0d12d734819782c57c8bafd1e937376ec1030c24",
+    "dirty_paths": [],
+    "captured_at": "2026-09-24T15:12:05.422868+00:00",
+    "source": "impl-init-fallback"
+  }
+}
