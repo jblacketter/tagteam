@@ -63,6 +63,25 @@ outside a test fix.
   0.01 s, the test fails every time on its first "still running"
   assertion, before this fix.
 
+## Round 1: a second flake, found by the gate
+The r1 gate run failed once on a different test:
+`tests/test_jobs.py::TestLifecycle::test_fast_completion_keeps_the_runners_result`
+(from Phase 72). It is a test race of the same kind.
+- The helper `_wait_terminal` returned the record as soon as the job was
+  terminal.
+- But the job runner adds the `delivery` field just *after* it commits the
+  result. That is by design: delivery is at most once, and recorded after
+  the commit.
+- A byte snapshot taken between the two writes then differed. The byte
+  diff lands at the sorted `delivery` key.
+- The cancel test beside it read `rec["delivery"]` on the same timing, so
+  it was exposed to the same race.
+
+**Fix:** `_wait_terminal` now returns only when the job is terminal **and**
+its runner has released `runner.lock` (`probe_runner != busy`), so the
+record is settled. Under load (4 busy loops on 8 cores) the two real-runner
+tests passed **20/20**.
+
 ## Success criteria
 1. The test passes with the hold in place, and fails as before if the hold
    is removed and the sleep shortened (checked by hand; not a committed
