@@ -579,7 +579,7 @@ the top. Each phase is engine + CLI first, cockpit surface second. tagteam stays
 
 ### Phase 44: Saloon rethink — archetype cast & theme packs (3.9)
 - **Depends on:** Phase 45
-- **Status:** Not started — promoted 2026-08-17 from the backlog; brainstorm in `docs/saloon-rethink.md`. Plan to be written when Phase 43 ships (it consumes Phase 43's per-role turn state and outcome vocabulary for the state → picture table).
+- **Status:** Deferred indefinitely (arbiter, 2026-09-23 — backburner; not part of the cockpit run). Promoted 2026-08-17 from the backlog; brainstorm in `docs/saloon-rethink.md`. Plan to be written when Phase 43 ships (it consumes Phase 43's per-role turn state and outcome vocabulary for the state → picture table).
 - **Description:** recast the fun theme around the loop's real roles (Host, Lead, Reviewer, Turn-keeper, Round clock, You-as-Arbiter) instead of feature mascots; three-beat first-run flow (init agents → start watcher → hand the user the kickoff message); every element bound to real state. Make the engine theme-driven so up to five settings can be trialed (saloon revised, alien spaceship, pirate ship, mission control, restaurant kitchen). Cockpit remains the serious surface; theme is a skin.
 
 ## Backlog
