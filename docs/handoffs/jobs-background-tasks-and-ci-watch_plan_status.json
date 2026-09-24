@@ -1,7 +1,7 @@
 {
   "state": "in-progress",
   "ready_for": "lead",
-  "round": 1,
+  "round": 2,
   "phase": "jobs-background-tasks-and-ci-watch",
   "type": "plan",
   "lead": "claude",
