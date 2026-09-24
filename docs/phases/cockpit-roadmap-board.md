@@ -1,7 +1,7 @@
 # Phase 69: Cockpit roadmap board
 
 ## Status
-- [ ] Planning: plan cycle open (round 1)
+- [ ] Planning: plan cycle open (round 2 — r1: exhaustive grouping incl. run-completed/aborted; one board-wide launch guard + endpoint refusal)
 - [ ] Implementation
 - [ ] Implementation Review
 - [ ] Complete
@@ -63,20 +63,37 @@ under `TAGTEAM_READ_ONLY`.
 row = {slug, number, name, status, depends_on, unmet, line, start: intent|null}
 ```
 
-**Grouping**, first match wins:
-1. **done**: the roadmap status is terminal.
-2. **in_progress**: the state's current phase, while its cycle exists and
-   has not ended with an impl approval that the roadmap already marks
-   terminal; or a phase whose status declares work under way (it starts with
-   `In progress`, `In review` or `✅ Approved`, the words this repo and the
-   seeded roadmap use). The row shows its status text verbatim. An approved,
-   unmerged phase (like 71b today) therefore reads "in progress", with its
-   own status explaining it is awaiting merge.
-3. **ready** / **blocked**: the remaining actionable phases, split by
-   `roadmap.ready_phases` / `blocked_phases`, using the active run's
-   `completed` list exactly as `tagteam roadmap ready` does. They are in
-   topological order (`topological_queue`), so "ready" lists what the queue
-   would pick first at the top.
+**Grouping: one pure classifier, exhaustive** (plan r1 review).
+`roadmap.classify(phases, *, state, cycle_status, completed) -> groups` is
+pure (no I/O, no intents). `board()` and `launch_intent()` both call it; they
+never call each other, so there is no recursion. Rules, first match wins:
+
+1. **done**
+   - `done_by: "roadmap"`: the roadmap status is terminal.
+   - `done_by: "run"`: the phase is in the active full-roadmap run's
+     `completed` list, even though the document status is stale (say, still
+     `Not started`). The row shows the provenance: "completed in this run —
+     the roadmap still says: Not started".
+2. **in_progress**, with the reason on the row:
+   - `current`: the state's current phase, while its cycle is live
+     (`in-progress`, `escalated`, `needs-human`) or its plan is approved and
+     not yet implemented;
+   - `approved`: the current impl cycle is approved but the roadmap is not
+     yet terminal. It is awaiting merge, and its status explains that;
+   - `declared`: any other phase whose status starts with `In progress`,
+     `In review` or `✅ Approved`. It is **not** offered Start. The row says
+     "the roadmap marks this in progress — change its status to start it
+     again", which is the explicit recovery for a stale declaration.
+3. **ready** / **blocked**: every other phase, split by unmet dependencies
+   (the run's `completed` counts as met).
+   - **An aborted current cycle is not in progress.** It falls here like any
+     other unfinished phase, and so can be started again, with a note:
+     "last cycle aborted (round N)". That matches the launch state machine,
+     which already treats `aborted` as non-blocking.
+
+**Invariant:** every parsed phase appears in exactly one group. That is
+asserted in `classify()` (a missed phase is a bug, raised in tests) and
+pinned by a test over every fixture.
 
 If the graph has problems, the groups are still built from `parse_roadmap`
 (so a broken roadmap still shows its phases), but **no row offers Start**,
@@ -84,29 +101,47 @@ and each problem is listed with its `(line N)` from Phase 66.
 
 ### 2. Start on a chosen phase: one server-side rule
 `launch.launch_intent(root, *, phase=None, …)` gains an optional `phase`,
-and its "next phase" branches stop using `_next_after`:
-- **No active cycle, or the current impl is approved:** the intent may
-  target **any ready phase**, meaning in the board's ready group, with no
+and its "next phase" branches stop using `_next_after`. Readiness comes from
+`classify()`:
+- **No active cycle, the current impl approved, or the current cycle
+  aborted:** the intent may target **any ready phase**, provided there are no
   graph problems. Without a `phase`, it targets the first ready phase in
   topological order. That fixes the document-order bug for the hub and for
   every other existing caller.
 - **Plan approved, awaiting impl:** the only intent is `start <phase> impl`
-  for *that* phase. Another phase cannot be started over an approved,
-  unimplemented plan. The board shows the reason on the ready rows, and the
-  in-progress row offers "Start implementation".
+  for *that* phase. The board shows the reason on the ready rows.
 - **A cycle in progress, dispatch paused, not set up:** no intent, the
   reason as today.
 
 `board()` attaches to each ready row the intent `launch_intent(root,
-phase=row)` returns. That is the **same** object `POST /api/start/launch`
-already receives, so the launch path keeps its guards. `launch()` recomputes
-the live intent **for the phase the client named**
-(`launch_intent(root, phase=intent["phase"])`) and requires `command` and
-`observed` to match, exactly as today. A phase that stopped being ready, or
-a state that moved on, gets a 409 "state changed — refresh and start
-again". The orphan reconciliation in `cockpit_api` (line ~1212), which
-compares launch keys, recomputes the intent for the row's own phase. The hub
-calls `launch_intent` without `phase` and gets the dependency-aware default.
+phase=row)` returns. That is the same object `POST /api/start/launch`
+already receives, so `launch()` recomputes the live intent **for the phase
+the client named** and requires `command` and `observed` to match; a phase
+that stopped being ready gets a 409. The orphan reconciliation in
+`cockpit_api` recomputes the intent for the row's own phase. The hub calls
+without `phase` and gets the dependency-aware default.
+
+**One board-wide launch guard** (plan r1 review). Before this phase, the
+Start card showed nothing while anything was busy (`inflight`, a pending
+launch, or the headline `working` / `starting` / `launching`). The board
+keeps that rule for **every** Start it shows: the ready rows and "Start
+implementation".
+- `cockpit_api.roadmap_payload()` = `board()` plus
+  `launch: {available: bool, reason}`. It is computed server-side from the
+  same facts the old card used: the in-flight marker (a lead conversation
+  turn included: "the lead is busy in a conversation"), a `pending` launch
+  row, and the headline state. When `available` is false, **no** row shows a
+  runnable Start; every Start slot shows the reason instead.
+- **The endpoint enforces it too.** `launch()` gains an up-front refusal,
+  inside its claim lock: if **another** launch row is `pending`, or the turn
+  slot is held, it returns 409 "another start is in progress — wait for it
+  to finish" **without** creating a launch row. Today a second, different
+  Start would claim its own row and then fail on the busy slot. It would
+  deliver no second turn, but it would leave a noisy failed launch; now it
+  is refused cleanly. The same-intent idempotency (a double click gives the
+  existing 202) is unchanged.
+- The CLI `roadmap board` is file-only and prints commands, not buttons, so
+  it carries no launch guard.
 
 ### 3. The Roadmap tab
 - There are four sections in intent order: **In progress** (open), **Up
@@ -121,9 +156,10 @@ calls `launch_intent` without `phase` and gets the dependency-aware default.
   - When the plan-approved rule blocks them, the reason replaces the
     buttons.
 - **The in-progress row** for the current cycle shows its round/state, plus
-  **Start implementation** when its plan is approved and the headline says
-  nothing is already running (the 68b rule: never offer Start beside a turn
-  that is running).
+  **Start implementation** when its plan is approved and `launch.available`
+  is true. The same board-wide guard applies to every Start, including the
+  68a automatic plan→impl handoff: while that turn is starting or working,
+  nothing is offered.
 - **Problems** go in a banner at the top, each with its line; **warnings**
   go in a quieter line.
 - The payload is presented, never derived. The slice never works out
@@ -163,7 +199,8 @@ ready`; `board` joins them).
 
 ## Files
 - `tagteam/roadmap.py`: `board()`, `_group()`, the `board` subcommand.
-- `tagteam/launch.py`: `launch_intent(phase=)`, a dependency-aware default,
+- `tagteam/roadmap.py`: `classify()`, the pure classifier shared by `board()` and `launch_intent()`.
+- `tagteam/launch.py`: `launch_intent(phase=)`, a dependency-aware default, the up-front "another start is in progress" refusal,
   the plan-approved rule, and `launch()` recomputing for the named phase.
   `_next_after` is removed, with its callers updated.
 - `tagteam/cockpit_api.py`: the orphan check recomputes for the row's
@@ -195,8 +232,11 @@ ready`; `board` joins them).
    declared in-progress statuses (including `✅ Approved`), ready, blocked
    (with `unmet`), an active full-roadmap run's `completed`, and a roadmap
    with graph problems (groups shown, no Start, problems with their lines).
-5. **`tagteam roadmap board [--json]`** and `GET /api/roadmap` return the
-   same structure. Both are file-only, create nothing, and work read-only.
+5. **`tagteam roadmap board [--json]`** and the `board` part of
+   `GET /api/roadmap` return the same structure. `board()` is file-only,
+   creates nothing, and works read-only, including on the graph-error path.
+   The API adds only the `launch` guard, computed from the facts `/api/now`
+   already reads.
 6. **The Start card is gone.** The quiet line points at the Roadmap tab with
    the server's ready count. No existing Needs-you card changes otherwise.
 7. **The tab regroup:** five tabs in the stated order, the old saved-tab
@@ -207,6 +247,26 @@ ready`; `board` joins them).
    The ready, blocked and in-progress rows are shown; Start from a ready row
    runs the lead's first turn; a problem roadmap is shown. Screenshots are
    listed, and states that were only table-tested are named.
+9. **Exhaustive grouping** (plan r1 review):
+   - every parsed phase appears exactly once in every fixture;
+   - A completed in the active run while its roadmap status is still
+     `Not started`, with B current: A is `done_by: run` with the stale status
+     shown, and B is in progress;
+   - a current **aborted** cycle whose dependencies are met: it is **ready**,
+     with the "last cycle aborted" note, and its Start intent is accepted;
+   - a `declared` in-progress phase shows the recovery text and no Start.
+10. **Board-wide launch guard** (plan r1 review), with two ready phases A and
+    B:
+    - start A (a blocking send stub: pending, before any cycle exists) and
+      read the board: `launch.available` is false, and neither A nor B has a
+      runnable Start;
+    - POST a stale Start for B: 409 "another start is in progress", no launch
+      row, no second lead turn;
+    - an unrelated lead conversation turn in flight makes `available` false,
+      with that reason;
+    - during the automatic plan→impl handoff (headline starting/working),
+      "Start implementation" is not offered.
+    Tested at the API level and in real Chromium.
 
 ## Risks and open questions for the reviewer
 - **Removing `_next_after` changes what the hub and `/api/start` propose**
@@ -216,5 +276,4 @@ ready`; `board` joins them).
   `✅ Approved`) are a small closed list, matched at the start of the status.
   Any other non-terminal status is ready or blocked. The list is one
   constant.
-- **Split?** The tab regroup (§5) is independent of the board. If you'd
-  rather review it separately, it can become 69b.
+- **The tab regroup stays in this phase** (the reviewer agreed in r1).
