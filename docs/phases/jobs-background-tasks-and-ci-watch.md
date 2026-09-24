@@ -4,7 +4,7 @@
 - [x] Planning: approved round 3 (2026-09-23) at `30dfa1b`. r1: commit-bound workflow selection, PR rollup, desktop-only delivery; r2: OS-released locks instead of token files, at-most-once delivery.
 - [x] Implementation: branch `phase-72-jobs-and-ci-watch`
 - [x] Implementation Review: approved round 2 (2026-09-24) at `241b4df`; gate 2,554 passed, 5 skipped
-- [x] Complete: PR #60 merged 2026-09-24 (rebase). Criterion 8 (the real 3.14.9 release watched by jobs) is done at release time and recorded here.
+- [x] Complete: PR #60 merged 2026-09-24 (rebase). Criterion 8 done: the 3.14.9 release was watched by jobs (below).
 
 ## Closeout
 ```
@@ -25,6 +25,34 @@ Phase report: jobs-background-tasks-and-ci-watch — plan approved r3 · impl ap
   - a cancel accepted mid-poll lost to the poll's answer, and neither a slow `gh` call nor the wait honoured cancel or the deadline;
   - the cockpit's cancel went past the read-only allowlist;
   - the final poll's pin and attempt count were not saved.
+
+## Criterion 8: the 3.14.9 release, watched by jobs (2026-09-24)
+The `v3.14.9` tag at `33c57cf` was pushed. Then two jobs were started
+instead of polling by hand:
+- `tagteam job start ci-watch --workflow "Publish to PyPI" --ref v3.14.9`
+- `tagteam job start ci-watch --pypi tagteam==3.14.9`
+
+The job logs, verbatim:
+```
+2026-09-24T15:47:51Z runner 18675 started: Publish to PyPI @ v3.14.9 (33c57cf)
+2026-09-24T15:47:53Z poll 1: Publish to PyPI in_progress (0/1 jobs done)
+2026-09-24T15:48:14Z poll 2: Publish to PyPI in_progress (0/1 jobs done)
+2026-09-24T15:48:36Z succeeded: Publish to PyPI #36022792715: success
+2026-09-24T15:48:36Z delivery: notify sent, interjection skipped
+2026-09-24T15:47:51Z runner 18684 started: PyPI tagteam==3.14.9
+2026-09-24T15:47:51Z poll 1: tagteam==3.14.9 not listed yet
+2026-09-24T15:48:12Z poll 2: tagteam==3.14.9 not listed yet
+2026-09-24T15:48:32Z poll 3: tagteam==3.14.9 not listed yet
+2026-09-24T15:48:52Z succeeded: PyPI tagteam==3.14.9 is listed
+2026-09-24T15:48:52Z delivery: notify sent, interjection skipped
+```
+- **The pin was the right run.** The job waited on the commit the tag names,
+  pinned that commit's run (`36022792715`) and judged it, so the previous
+  release's run could not answer.
+- **PyPI's `/simple/` listed the version about 60 s after the tag.**
+- **Two earlier `ci-watch` jobs had real work before this one:**
+  - on PR #61's re-run (green);
+  - on PR #62 (red), which flagged the launchpad flake fixed in Phase 74a.
 
 ## Implementation notes
 **Driven in a real page:** a scratch project with a fake `gh` on PATH, detached runners started with `tagteam job start`, `tagteam serve`, and Playwright.
