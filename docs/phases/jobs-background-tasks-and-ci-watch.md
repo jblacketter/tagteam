@@ -1,10 +1,39 @@
 # Phase 72: Jobs: background tasks and ci-watch
 
 ## Status
-- [x] Planning: approved round 3 (2026-09-23)
-- [x] Implementation
-- [ ] Implementation Review
-- [ ] Complete
+- [x] Planning: approved round 3 (2026-09-23) at `30dfa1b`. r1: commit-bound workflow selection, PR rollup, desktop-only delivery; r2: OS-released locks instead of token files, at-most-once delivery.
+- [x] Implementation: branch `phase-72-jobs-and-ci-watch`
+- [x] Implementation Review: approved round 2 (2026-09-24) at `241b4df`; gate 2,554 passed, 5 skipped
+- [ ] Complete: PR open; criterion 8 (the real 3.14.9 release watched by jobs) is done at release time and recorded here.
+
+## Closeout
+```
+Phase report: jobs-background-tasks-and-ci-watch — plan approved r3 · impl approved r2
+  plan   3 rounds · 2 change requests · 0 bounces
+  impl   2 rounds · 1 change request · 0 bounces · gate 2 runs, 17m 16s
+  time   start→approve 1h 00m · implementation before first submit 21m 48s
+         lead 13m 47s (3 spans, 2 unknown) · reviewer 8m 05s (5 spans) · gate 17m 17s (2 spans)  (elapsed; includes relay wait)
+  usage  no usage rows stored under this phase
+  turns  matched 0 of 10 · no token data 0 · unmatched 8 · unknown 2
+```
+- **Plan r1:**
+  - a "start minus 2 minutes" window can't tell the previous run from the new one, so the watch is bound to a commit;
+  - `gh pr checks` errors before checks are registered, so the watch uses the `statusCheckRollup`;
+  - there is no phone transport, so delivery is desktop-only.
+- **Plan r2:** an `O_EXCL` token can exclude other writers but can't recover from a crash, so ownership uses two locks the OS releases. Delivery is at most once.
+- **Impl r1:** each of these is fixed with regression tests:
+  - a cancel accepted mid-poll lost to the poll's answer, and neither a slow `gh` call nor the wait honoured cancel or the deadline;
+  - the cockpit's cancel went past the read-only allowlist;
+  - the final poll's pin and attempt count were not saved.
+
+## Implementation notes
+**Driven in a real page:** a scratch project with a fake `gh` on PATH, detached runners started with `tagteam job start`, `tagteam serve`, and Playwright.
+- A polling job and a failed job showed as chips. The failed job's detail showed the failing check, its link, the `--log-failed` tail, and the delivery line.
+- **Cancel** went through the confirmation, which showed `tagteam job cancel <id>`. The chip turned `cancelled` over SSE.
+- A runner killed with SIGKILL read `runner lost`. **Clear** then recorded `cancelled (runner lost)`.
+- **Looking at the page also fixed the delivery line.** It had said "notify failed" when notifications were merely disabled (`TAGTEAM_NO_NOTIFY`); it now says they were skipped.
+- **Not seen in a real page:** the `unknown` state and the empty strip. The real-Chromium tests in `tests/test_jobs.py` cover them.
+- **Known limit:** a runner killed outright leaves no file trace, so its `lost` state appears on the page's next refresh, the 30 s safety net at the latest.
 
 ## Summary
 **The rule: deterministic first, a cheap model second, the top model last.**
