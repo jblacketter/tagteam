@@ -84,13 +84,13 @@ layers: a shell wrapper in `hooks.json` and the Python guard.
   call exits 0 with no output and no Python start. Its overhead is
   **measured and reported** (criterion 2), not promised.
 - **Guard.** For a payload the prefilter matched, it runs
-  `tagteam hook pre-tool-use`. The **guard's exit code is its verdict**, and
-  the wrapper checks the *content* of a rewrite, not just a key's presence
-  (plan review r2). The wrapper needs no JSON parser for this:
+  `tagteam hook pre-tool-use`. The **guard's exit code is its verdict**
+  (plan review r2). A rewrite is forwarded only after **structural
+  validation** by a small validator shipped in the plugin (plan review r3):
 
   | guard exit | meaning | wrapper does |
   |---|---|---|
-  | `0` | kit call, rewritten | passes stdout through, exit 0, **only if** stdout contains `"updatedInput"` **and** the literal prefix `export TAGTEAM_READ_ONLY=1; `. Otherwise it **exits 2** as unusable: `{}`, `{"hookSpecificOutput": {}}`, empty or garbage output all block. |
+  | `0` | kit call, rewritten | pipes stdout to the validator. On success it forwards **the validator's re-serialized object** and exits 0. Otherwise it **exits 2**, and no guard output is forwarded. |
   | `3` | **verified non-kit**: the top-level `agent_type` is not `tagteam:*` (a prefilter false positive) | exits 0 with **no output**: the command passes untouched |
   | `2` | guard deny (unparseable input) | exits 2, passing the guard's stderr reason |
   | anything else | `127` (no CLI), `1` (an **older CLI** answering `unknown hook`; a plain exit 1 is non-blocking in Claude Code), a crash | **exits 2** with "tagteam kit agents need the tagteam CLI ≥ <minVersion> to run Bash read-only" |
@@ -99,7 +99,28 @@ layers: a shell wrapper in `hooks.json` and the Python guard.
   exits 1 for an unknown hook, and a missing CLI gives 127. So "pass
   untouched" is reachable only through a guard that parsed the payload and
   found no kit identity. Everything the wrapper can't positively verify
-  blocks. A kit helper's Bash never runs unguarded because the CLI and the
+  blocks.
+
+- **The validator (`plugin/hooks/validate_guard.py`)** is not a subcommand
+  of the CLI it checks. It is plugin code, run with `python3` only for
+  payloads the prefilter matched, so non-kit calls keep the no-Python fast
+  path. It receives the guard's stdout on stdin and the original hook
+  payload in an environment variable. It **exits 0 and prints the
+  re-serialized object only if all of these hold**:
+  - the whole stdout parses as **one JSON object**;
+  - `hookSpecificOutput.hookEventName == "PreToolUse"`;
+  - `updatedInput` is an object;
+  - `updatedInput.command` is a string that **starts with** the exact
+    prefix `export TAGTEAM_READ_ONLY=1; `, and equals the prefix plus the
+    original command (or the original, when it was already prefixed);
+  - every other `updatedInput` field equals the original `tool_input`'s
+    (nothing dropped, nothing added);
+  - no `permissionDecision` of `allow` (no auto-allow).
+
+  Anything else exits non-zero, and the wrapper exits 2. That covers
+  truncated JSON, the prefix in the wrong field, a hollow
+  `{"hookSpecificOutput": {}}`, a missing or changed field, and `python3`
+  missing (fail closed). A kit helper's Bash never runs unguarded because the CLI and the
   plugin are at different versions.
 
 **The guard (`tagteam hook pre-tool-use`, Python) decides the identity:**
@@ -179,7 +200,9 @@ Measurement happens through use instead:
   `plugin/agents/explore.md` (new).
 - `plugin/hooks/hooks.json`: adds the `PreToolUse` Bash entry.
 - `tagteam/hook.py` (where `session-start` lives): the `pre-tool-use`
-  subcommand.
+  subcommand, using exit codes 0 / 3 / 2.
+- `plugin/hooks/validate_guard.py` (new): the structural validator of a
+  rewrite. It uses only the standard library.
 - `plugin/skills/handoff/SKILL.md` and the packaged copy: the helpers
   paragraph.
 - `tagteam/diagnostics.py` (doctor): the kit line.
@@ -222,9 +245,18 @@ Measurement happens through use instead:
      nested in `tool_input`) while its **top-level** identity is the main
      session or another agent. The wrapper exits 0 with **no output**, so
      the command passes untouched;
-   - **exit 0 with a `hookSpecificOutput` key but no usable result** (a
-     fake CLI printing `{"hookSpecificOutput": {}}`), and one printing
-     `updatedInput` **without** the read-only prefix: both **exit 2**;
+   - **exit 0 with no usable result**, each from a fake CLI and each
+     **exit 2** with nothing forwarded:
+     - `{"hookSpecificOutput": {}}`;
+     - `updatedInput` **without** the read-only prefix;
+     - **truncated JSON** that contains both markers (review r3,
+       counterexample 1);
+     - **valid JSON with the prefix in the wrong field**, e.g. in
+       `description` while `command` is `tagteam cycle add` (review r3,
+       counterexample 2);
+     - a rewrite that **drops or changes** another `tool_input` field;
+     - `permissionDecision: allow`;
+   - `python3` not on PATH while the prefilter matched: exit 2;
    - a guard deny (unparseable input, real CLI): exit 2, with the guard's
      reason;
    - the normal permission flow: the rewritten output carries no
