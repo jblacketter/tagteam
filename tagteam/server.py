@@ -898,6 +898,7 @@ class CockpitRouter:
             "/api/cancel-turn": "cancel-turn", "/api/brief/generate": "brief/generate",
             "/api/rule": "rule",
             "/api/orders": "orders",        # Phase 71
+            "/api/config/set": "config/set",   # Phase 71b (`preview: true` returns the diff + base)
         }
         action = actions.get(path)
         if action is None:

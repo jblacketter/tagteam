@@ -125,6 +125,10 @@ any other watcher running, saying so.
   implementation is approved. **Advisory:** `tagteam orders add "hold the PR
   for my approval"` notes are delivered but not enforced, because tagteam runs
   no git. Without orders, nothing changes.
+- `tagteam config keys` / `tagteam config set KEY VALUE --preview` — edit the
+  gate, panel, briefer and re-send settings in `tagteam.yaml` without losing
+  its comments. An edit is written only when the engine would then do what
+  you asked, and the preview shows the diff first.
 - `tagteam pause --reason "…"` / `tagteam resume` — hold dispatch without losing state.
 - `tagteam cancel-turn` — abandon an in-flight headless turn.
 - `tagteam serve` — the cockpit: talk to the lead, launch, watch, rule.

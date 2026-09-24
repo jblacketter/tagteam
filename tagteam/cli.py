@@ -446,6 +446,8 @@ Arbiter controls (any mode):
   tagteam usage
 Standing orders (every turn; `stop` is enforced, notes are advisory):
   tagteam orders stop roadmap [--run]           tagteam orders add "hold the PR for my approval"
+Safe tagteam.yaml edits (comments kept; refused unless the engine would honour them):
+  tagteam config keys                           tagteam config set gatekeeper.enabled true --preview
 Escalations (opt-in briefer: `briefer: {enabled: true}` in tagteam.yaml):
   tagteam brief                                 tagteam rule approve --content "..."
 Gatekeeper (opt-in: `gatekeeper: {enabled: true, tests: {command: "..."}}`; `on_submit: true` gates from `cycle add`):
@@ -492,6 +494,8 @@ READ_ONLY_COMMANDS: dict[str, "callable"] = {
     "report": lambda rest: True,
     "watch": _sub_in("status", "log"),   # Phase 67: the heartbeat / event-log reads only
     "orders": lambda rest: not rest or rest == ["--json"] or rest[0] in ("-h", "--help", "help"),  # Phase 70
+    # Phase 71b: `config keys` and `config set … --preview` read; `config set` without it writes
+    "config": lambda rest: bool(rest) and (rest[0] == "keys" or (rest[0] == "set" and "--preview" in rest)),
 }
 # Never a helper's business: parents, humans and installers only. Refused with
 # any arguments — `--help` included (see `read_only_refusal`).
@@ -521,7 +525,8 @@ def _read_only_summary() -> list[tuple[str, tuple[str, ...] | None]]:
             ("panel", ("status", "lenses", "list")), ("roadmap", ("queue", "phases", "check", "graph", "ready")),
             ("interject --list", None), ("brief", None), ("hub list", None),
             ("registry list", None), ("usage", None), ("contract", None), ("tail", None), ("hook", None),
-            ("doctor", None), ("report", None), ("watch", ("status", "log")), ("orders [--json]", None)]
+            ("doctor", None), ("report", None), ("watch", ("status", "log")), ("orders [--json]", None),
+            ("config keys", None), ("config set … --preview", None)]
 
 
 def main() -> int:
@@ -603,6 +608,10 @@ def _dispatch() -> int:
         from tagteam.orders import orders_command
 
         return orders_command(sys.argv[2:])
+    if command == "config":
+        from tagteam.config_edit import config_command
+
+        return config_command(sys.argv[2:])
     if command == "usage":
         from tagteam.usage import usage_command
 

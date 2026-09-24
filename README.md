@@ -210,6 +210,8 @@ tagteam interject --retire 3                  # close a note without delivering 
 tagteam orders stop phase|roadmap [--run]     # standing order (enforced): stop after each phase, or run the roadmap
 tagteam orders add "hold the PR for my approval" [--run]   # standing note (advisory: delivered every turn, not enforced)
 tagteam orders                                # effective orders and where each comes from
+tagteam config keys                           # the tagteam.yaml keys tagteam edits: saved vs what the engine uses
+tagteam config set gatekeeper.enabled true --preview   # the diff + what the engine will do; writes nothing
 tagteam usage [--by role|cycle|model|kind] [--json]   # per-turn tokens and roll-ups (no dollars in text)
 tagteam report --phase P [--json]             # what a phase took: rounds, bounces, gate/turn time, usage coverage
 tagteam bench select | run --round P:T:N --cell claude:sonnet:high [--yes] | table   # replay reviews at other models/efforts
@@ -329,6 +331,7 @@ tagteam cycle rounds --phase P --type plan --tail 3
 tagteam pause --reason "..." / tagteam resume / tagteam cancel-turn
 tagteam interject "note" [--to lead|reviewer] / --list / --retire ID
 tagteam orders [--json] / stop phase|roadmap|--unset / add "note" / remove ID / clear --run   # standing orders
+tagteam config keys / set KEY VALUE [--preview] [--expect SHA]   # safe tagteam.yaml edits (comments kept)
 tagteam usage [--by role|cycle|model|kind]... [--json]
 tagteam report --phase P [--json]      # read-only phase measurement; paste into the phase doc's closeout
 tagteam bench select|run|table         # review bench: dry run unless --yes; ~1 reviewer turn per pair
