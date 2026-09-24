@@ -343,6 +343,7 @@ tagteam bench select|run|table         # review bench: dry run unless --yes; ~1 
 tagteam serve [--theme cockpit|saloon] [--host H] [--port N] [--max-sse N]   # the cockpit (default); saloon = legacy dashboard
 tagteam lead "message" [--new] [--conversation ID] / --list           # talk to the lead from the terminal
 tagteam hub [--list [--json]] [--all] [--port 8090]                   # all registered projects; cockpits at /p/<id>/
+# another dashboard reading tagteam: the versioned read API (api_version in /api/hub/info, /api/cockpit/info) — docs/read-api.md
 tagteam registry list [--json] | unregister PATH
 tagteam brief [--list | --generate | --event KEY]
 tagteam gate check [--skip-tests] | run | status [--json] | list   # gatekeeper pre-checks (opt-in `gatekeeper:` block; `on_submit: true` gates from `cycle add`)

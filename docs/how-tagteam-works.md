@@ -334,6 +334,8 @@ One surface over every project `tagteam setup` registered (`~/.tagteam/projects.
 
 The hub is read-only: it never migrates a project database (`mode=ro`), never rewrites the registry (`tagteam registry list` / `tagteam registry unregister PATH` are the only registry commands, and only `unregister` writes). Missing dirs, scratch paths and dirs without `tagteam.yaml` are hidden by default (`--all` / "show hidden"). `tagteam hub --registry PATH` reads a different registry file the same way (used by the screenshot seed in `docs/media/`).
 
+**Reading tagteam from another dashboard (Phase 74).** A small part of the hub's and the cockpit's JSON is a promise: see [docs/read-api.md](read-api.md). `GET /api/hub/info` and `GET /api/cockpit/info` return `api_version` (1), the `tagteam` version and `stable` (the endpoints promised). Within one `api_version` changes are additive only; a removal, rename or retype is a new version. The declaration is data (`tagteam/read_api.py`, `STABLE`), checked against real payloads by the test suite, and a reader may use `read_api.check()` to validate what it receives. No CORS: a server-side reader, or one proxied through its own backend, can read it; a browser page on another origin can't.
+
 <a id="saloon"></a>
 ## The Saloon (theme)
 

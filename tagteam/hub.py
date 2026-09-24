@@ -182,10 +182,11 @@ def make_hub_handler(ctx: HubContext):
                         ctx.paths(), scratch_prefixes=ctx.scratch_prefixes) if not e["hidden"]])
                     self._send_json({"window": win, "usage": agg.get(win, agg), "all": agg})
                 elif path in ("/api/hub/info", "/api/info"):
+                    from tagteam import read_api  # Phase 74: the version of the promise + its endpoints
                     self._send_json({"app": "tagteam", "kind": "hub", "project": "hub",
                                      "mode": "hub", "max_sse": ctx.max_sse, "sse_active": ctx.sse_state["active"],
                                      "interval_s": ctx.interval_s, "registry": str(ctx.registry_file) if ctx.registry_file else None,
-                                     "mounted": sorted(ctx.routers)})
+                                     "mounted": sorted(ctx.routers), **read_api.info_fields("hub")})
                 elif path == "/api/hub/events":
                     self._hub_sse()
                 elif path.startswith("/api/"):
