@@ -1,0 +1,16 @@
+{
+  "state": "in-progress",
+  "ready_for": "lead",
+  "round": 1,
+  "phase": "jobs-background-tasks-and-ci-watch",
+  "type": "plan",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-24",
+  "baseline": {
+    "sha": "db4d7c91a5222caa640c81521d0592df17b6ca94",
+    "dirty_paths": [],
+    "captured_at": "2026-09-24T03:53:47.715630+00:00",
+    "source": "plan-init"
+  }
+}
