@@ -1,7 +1,7 @@
 # Phase 74: Versioned read API for other dashboards
 
 ## Status
-- [ ] Planning: DRAFT — plan cycle not opened yet
+- [ ] Planning: in review (plan cycle opened 2026-09-24)
 - [ ] Implementation
 - [ ] Implementation Review
 - [ ] Complete
@@ -77,7 +77,7 @@ served today.
 | `GET /api/now` | `ts`; `state.phase` / `type` / `round` / `status` / `turn` / `run_mode` (each **optional**: the state file omits a key it has no value for, e.g. `turn` while nothing is owed); `headline.state` / `tone` / `text` / `age_s` / `role` / `agent` (the one server-side sentence of Phase 68, and the thing to show); `watcher.running`, `watcher.mode`, `watcher.beat.state`; `paused` (object or null); `agents.lead` / `agents.reviewer`; `pending_notes` |
 | `GET /api/roadmap` | `current` (object or null: `phase`, `type`, `round`, `state`); `groups.done` / `in_progress` / `ready` / `blocked` (lists of `slug`, `number`, `name`, `status`, `depends_on`, `unmet`); `problems`, `warnings` (lists of strings); `launch.available`, `launch.reason` |
 | `GET /api/watcher/events?n=&chatter=0` | `events` (list of `ts`, `kind`, `msg`, with `phase` / `type` / `round` / `turn` present when known, and `repeat` / `last_ts` on folded runs). `kind` is from the closed `watchlog.KINDS` vocabulary. |
-| `GET /api/jobs` | `jobs` (list of `id`, `kind`, `label`, `status`, `shown`, `summary`, `created_at`, `finished_at`, `age_s`), `running` (int). This requires Phase 72 (PR #60) on `main` before implementation; the branch is rebased onto it. |
+| `GET /api/jobs` | `jobs` (list of `id`, `kind`, `label`, `status`, `shown`, `summary`, `created_at`, `finished_at`, `age_s`), `running` (int). (Phase 72, merged in PR #60.) |
 | `GET /api/events` | SSE. A `change` event means "re-read what you show". The payload is not promised. |
 
 **Deliberately not promised:**
@@ -172,10 +172,6 @@ A reader should treat anything not in `STABLE` as private.
 - **`cost_usd` in the hub payload.** It is excluded from the promise but
   still served. Removing it now would be a change to a surface nobody
   depends on yet; the arbiter may want it gone.
-- **The `/api/jobs` dependency on Phase 72.** The roadmap entry depends only
-  on Phase 69. Rather than add a DAG edge, the jobs rows go into v1 if PR #60
-  is merged when implementation starts (expected). Otherwise they are added
-  later as an additive change, with no version bump.
 - **The granularity of the promise.** `headline` is promised, not the facts
   it is derived from. That is deliberate: Phase 68 made the headline the one
   place "who has the ball" is decided, and a second dashboard re-deriving it

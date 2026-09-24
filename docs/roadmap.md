@@ -13,7 +13,7 @@ iTerm2 tabs (lead | watcher | reviewer) — lead lane left, reviewer lane right,
 the top. Each phase is engine + CLI first, cockpit surface second. tagteam stays a standalone package; superdash
 (a separate project) consumes it (Phase 74). -->
 ### Phase 74: Versioned read API for other dashboards
-- **Status:** Not started — plan DRAFT in `docs/phases/versioned-read-api-for-other-dashboards.md` (cycle not opened). Arbiter decision 2026-09-20: tagteam stays here and is a package superdash uses; the cockpit is the first step towards that larger UI, not a part of it.
+- **Status:** In progress — plan in review. See `docs/phases/versioned-read-api-for-other-dashboards.md`. Arbiter decision 2026-09-20: tagteam stays here and is a package superdash uses; the cockpit is the first step towards that larger UI, not a part of it.
 - **Description:** The hub and cockpit read endpoints (`/api/hub`, `/api/now`, `/api/roadmap`, `/api/watcher/events`, …) are consumed today only by tagteam's own pages, so nothing promises their shape. Declare the read surface another dashboard may rely on: an `api_version` in `/api/hub/info` and `/api/cockpit/info`, a documented list of stable endpoints and fields, and a test that pins them. No new data, no Aegis- or superdash-specific glue.
 - **Depends on:** Phase 69
 
