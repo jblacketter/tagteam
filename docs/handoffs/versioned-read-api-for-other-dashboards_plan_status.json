@@ -1,0 +1,16 @@
+{
+  "state": "in-progress",
+  "ready_for": "reviewer",
+  "round": 1,
+  "phase": "versioned-read-api-for-other-dashboards",
+  "type": "plan",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-24",
+  "baseline": {
+    "sha": "067bc53355ac124b3f6977f196e4ed9515e593ac",
+    "dirty_paths": [],
+    "captured_at": "2026-09-24T05:02:18.020975+00:00",
+    "source": "plan-init"
+  }
+}
