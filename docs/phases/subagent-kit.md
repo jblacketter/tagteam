@@ -24,9 +24,9 @@ hands them the bulky steps and gets back a digest:
 |---|---|---|---|
 | `tagteam:test-runner` | haiku | Bash, Read, Grep, Glob | Runs the command it is given. Returns counts, the failing test ids and the last lines of each failure. Never fixes, and never runs the full suite (the one-run rule stays with the lead and the gate). |
 | `tagteam:verifier` | sonnet | Bash, Read, Grep, Glob | Re-checks one claim ("12 new tests, all green", "X is only called from Y") and answers CONFIRMED / REFUTED / UNVERIFIABLE with evidence. It can't fix what it finds, which is the arbiter's rule for verifiers. |
-| `tagteam:explore` | haiku | Bash, Read, Grep, Glob | Read-only fan-out search. Returns file:line pointers and a conclusion, not file dumps. Tagteam-aware: it knows `docs/handoffs/`, `docs/phases/` and `tagteam cycle rounds`. |
+| `tagteam:explore` | haiku | Read, Grep, Glob (**no Bash**) | Read-only fan-out search. Returns file:line pointers and a conclusion, not file dumps. Tagteam-aware: it knows `docs/handoffs/*_rounds.jsonl`, `docs/phases/` and `docs/roadmap.md`, and reads them directly. With no Bash it is read-only on any Claude Code version, without the hook (plan r1). |
 
-All three have `disallowedTools: Write, Edit, NotebookEdit`.
+All three have `disallowedTools: Write, Edit, NotebookEdit`. Only `test-runner` and `verifier` have Bash, so only they need the hook below.
 
 This is Claude-side only. Codex has no plugin subagents, and the reviewer's
 savings come from the gate, the panel and effort.
@@ -74,26 +74,74 @@ plugin security restriction (plugins-reference).
 The contract requires every delegated helper to run with
 `TAGTEAM_READ_ONLY=1`. Tool restriction alone isn't enough: a helper with
 Bash could run `tagteam cycle add`. Frontmatter can't set the variable, so
-the plugin ships a **session-level `PreToolUse` hook on `Bash`**:
-- **A shell prefilter.** The hook command reads stdin once, and continues
-  only when the JSON contains `"agent_type"` starting with `tagteam:`.
-  Every other Bash call in every session with the plugin exits in
-  microseconds, with no Python start. This matters because the hook runs on
-  all Bash calls, not just the kit's.
-- **`tagteam hook pre-tool-use`** (Python, testable) parses the input. For a
-  `tagteam:*` agent it returns `hookSpecificOutput.updatedInput` with the
-  command rewritten to `export TAGTEAM_READ_ONLY=1; <command>`. The `export`
-  covers every part of a compound command (`a && tagteam cycle add …`); a
-  bare `VAR=1 a && b` would cover only `a`. A command that already starts
-  with that export is left alone, so the rewrite is idempotent.
-- **It fails closed.** If `tagteam` is missing, or the input can't be parsed
-  while the prefilter matched, the hook **denies** the Bash call with a
-  reason ("tagteam kit agents need the tagteam CLI to run Bash read-only").
-  A helper never runs unguarded.
-- **The limit, stated:** a helper could `unset` the variable deliberately.
-  The helpers aren't adversarial; this stops accidents, which is the
-  contract's purpose. The CLI's own read-only guards (Phase 50, and the
-  jobs boundary in Phase 72) do the actual refusing.
+the plugin ships a **session-level `PreToolUse` hook on `Bash`**. It has two
+layers: a shell wrapper in `hooks.json` and the Python guard.
+
+**The wrapper (the shipped `hooks.json` command) is the fail-closed layer**
+(plan review r1):
+- **Prefilter.** The wrapper reads stdin once, and continues only when the
+  payload mentions `"agent_type"` with a `tagteam:` value. Every other Bash
+  call exits 0 with no output and no Python start. Its overhead is
+  **measured and reported** (criterion 2), not promised.
+- **Guard.** For a kit payload it runs `tagteam hook pre-tool-use`. It
+  passes the guard's output through **only if** the CLI exited 0 **and**
+  the output is a JSON object carrying `hookSpecificOutput`. In **every**
+  other case it **exits 2** with a reason on stderr, which Claude Code
+  treats as blocking:
+  - `tagteam` not on PATH;
+  - an **older CLI** without the subcommand (today's `hook.py` returns 1
+    for an unknown hook, and a plain exit 1 is non-blocking);
+  - any non-zero exit;
+  - empty or invalid output.
+
+  The reason names the fix: "upgrade the tagteam CLI to ≥ <minVersion>".
+  A kit helper's Bash never runs unguarded because the CLI and the plugin
+  are at different versions.
+
+**The guard (`tagteam hook pre-tool-use`, Python) decides the identity:**
+- It parses the payload. The **top-level** `agent_type` must start with
+  `tagteam:`, so a `tagteam:` string elsewhere in the command doesn't count.
+- For a kit agent it returns
+  `hookSpecificOutput.updatedInput`: the **whole** `tool_input` with only
+  `command` rewritten to `export TAGTEAM_READ_ONLY=1; <command>`, and every
+  other field kept.
+  - The `export` covers every part of a compound command
+    (`a && tagteam cycle add …`); a bare `VAR=1 a && b` would cover only
+    `a`.
+  - An already-prefixed command is left alone (idempotent).
+  - It sets **no** `permissionDecision` that would auto-allow the command,
+    so normal Bash permission evaluation still applies.
+- A prefilter false positive (not a kit agent) returns an empty JSON object:
+  no change.
+- Unparseable input for a payload the wrapper matched is a deny.
+
+**When `agent_type` is missing (plan review r1).** The hook can't tell a
+kit helper from the main session without the identity, and no other field
+identifies it independently. So there is **no fallback that enforces
+anything**, and the plan does not pretend there is:
+- **Supported versions.** Automatic enforcement is supported only on Claude
+  Code versions that send `agent_type` for subagent tool events (documented
+  in the hooks reference, "common input fields").
+- **The live check** (criterion 6) records the Claude Code version it ran
+  on and the identity it observed (e.g. `tagteam:verifier`). That version
+  becomes the kit's documented minimum.
+- **Doctor** reads `claude --version`. Below that minimum it warns that the
+  kit's Bash helpers run **unguarded** and should not be delegated to. It
+  also says `explore` (no Bash) is unaffected.
+- **The agent bodies** tell `test-runner` and `verifier` to start every
+  command with the export. That is a courtesy, **not** enforcement, and the
+  contract text says so.
+
+**CLI/plugin compatibility.** `plugin.json`'s `tagteam.minVersion` becomes
+the release that adds `hook pre-tool-use` (the next release, 3.14.9). The
+existing SessionStart skew warning (`hook.skew_warning`) then flags an older
+CLI in every session. Doctor reports it too, beside the Claude Code version
+check.
+
+**The stated limit.** A helper could `unset` the variable deliberately. The
+helpers aren't adversarial; this stops accidents, which is the contract's
+purpose. The CLI's own read-only guards (Phase 50, and the jobs boundary in
+Phase 72) do the actual refusing.
 
 ### The contract text
 The "Read-only helpers" paragraph gains a short table of the three agents,
@@ -142,38 +190,65 @@ Measurement happens through use instead:
    `disallowedTools` include `Write`, `Edit` and `NotebookEdit`. Its body
    states it never fixes, never runs the full suite (test-runner) and never
    writes a cycle.
-2. **The hook logic** (unit tests on real-shaped hook input):
-   - a `tagteam:*` agent's Bash is rewritten to
-     `export TAGTEAM_READ_ONLY=1; …`, compound commands included;
+2. **The guard** (unit tests on real-shaped payloads):
+   - a top-level `agent_type: tagteam:*` gets its Bash rewritten to
+     `export TAGTEAM_READ_ONLY=1; …`, compound commands included, with every
+     other `tool_input` field kept and no auto-allow decision;
    - an already-prefixed command is unchanged;
-   - a non-kit agent and the main session pass through untouched;
-   - malformed input for a kit agent is **denied**;
-   - the shell prefilter exits without starting Python for a non-kit
-     payload (timed, and with `tagteam` absent from PATH).
-3. **Fail-closed with no CLI:** the prefilter matched and `tagteam` is not
-   on PATH, so the hook denies.
+   - a non-kit agent, the main session, and a `tagteam:` string inside the
+     command (not the identity) all pass through;
+   - unparseable input is denied;
+   - a **missing-identity** fixture (a kit-shaped call with no
+     `agent_type`) passes through unguarded. This documents the unsupported
+     case that doctor warns about.
+3. **The shipped wrapper, executed as shipped.** The test runs the exact
+   `hooks.json` command string under `sh -c`, with PATH set up for each
+   case:
+   - a non-kit payload, with `tagteam` absent from PATH: exits 0 with no
+     output, and the overhead of 200 runs is **measured and reported**;
+   - a kit payload with the real CLI: valid `updatedInput` JSON, exit 0;
+   - a kit payload with **no CLI**, an **old CLI** (a fake `tagteam` that
+     answers `unknown hook`, exit 1), a CLI that **exits 0 with empty
+     output**, and one that prints **invalid output**: each **exits 2**
+     with a reason naming the upgrade.
 4. **The contract:** `SKILL.md` names the three agents with when to use
-   each. The plugin copy equals the packaged copy. The shipped-docs audit
-   passes.
-5. **Doctor** says whether the kit is available.
+   each, and says the prefix instruction in the agent bodies is not the
+   enforcement. The plugin copy equals the packaged copy. The shipped-docs
+   audit passes.
+5. **Doctor** reports:
+   - whether the plugin (and so the kit) is installed;
+   - the CLI's version against the plugin's `minVersion`;
+   - the Claude Code version against the kit's recorded minimum, with the
+     "Bash helpers unguarded" warning below it.
+
+   Each branch is tested with fakes.
 6. **Live, in a real Claude Code session** (once, recorded in the
-   closeout): with the plugin loaded (`claude --plugin-dir plugin`) in a
-   scratch project, asking `tagteam:verifier` to run
-   `echo $TAGTEAM_READ_ONLY` prints `1`, and asking it to run
-   `tagteam cycle add …` is refused by the CLI's read-only guard.
+   closeout):
+   - with the plugin loaded (`claude --plugin-dir plugin`) in a scratch
+     project, `tagteam:verifier` running `echo $TAGTEAM_READ_ONLY` prints
+     `1`;
+   - its `tagteam cycle add …` is refused by the CLI's read-only guard;
+   - the hook saw `agent_type: tagteam:verifier`;
+   - the Claude Code version is recorded, and becomes the kit's documented
+     minimum;
+   - a normal main-session Bash call is unaffected, and still goes through
+     the usual permission prompt where one applies.
 
 ## Risks and open questions for the reviewer
 - **The hook runs on every Bash call** in every session with the plugin.
-  The shell prefilter keeps a non-kit call at a `cat` plus a `case`
-  (criterion 2 times it). If even that is judged too much, the alternative
-  is to give the helpers no Bash at all; but then test-runner can't run
-  tests, which is its whole job.
-- **`updatedInput` on PreToolUse and `agent_type` in the hook input** are
-  documented (hooks reference). Criterion 6 proves them live, because the
-  suite can't. If the live check shows either missing on the installed
-  Claude Code version, the fallback is **deny unless already prefixed**:
-  the agent bodies tell the helper to start every command with the export,
-  and the hook enforces it. That is a smaller change of the same shape.
+  The prefilter keeps a non-kit call to a `cat` and a `case`, with no Python
+  start. Criterion 3 measures and reports the overhead. If even that is
+  judged too much, the only alternative is no Bash for the helpers; but
+  then test-runner can't run tests, which is its whole job.
+- **`updatedInput` without a permission decision.** The hooks reference
+  documents `updatedInput` for PreToolUse. Criterion 6 confirms live that
+  the rewrite applies with no auto-allow. If the installed Claude Code only
+  honours `updatedInput` together with a decision, the guard switches to
+  **deny unless already prefixed**: the wrapper and the guard enforce the
+  prefix the agent bodies ask for. Enforcement stays in the hook either way.
+- **Unsupported Claude Code versions** (no `agent_type`) get no automatic
+  enforcement. Doctor names them and says not to delegate to the Bash
+  helpers there. `explore` is unaffected.
 - **`explore` overlaps Claude Code's built-in Explore.** It is kept because
-  it is pinned to haiku, is tagteam-aware, and is read-only for tagteam by
-  the hook. Built-in Explore is none of those.
+  it is pinned to haiku, is tagteam-aware, and has no Bash, so it is
+  read-only on every version. Built-in Explore is none of those.
