@@ -607,7 +607,9 @@
   // ---------- Phase 69: Roadmap board ----------
   // Presents GET /api/roadmap. Grouping, readiness, dependencies and whether ANY Start may be offered
   // (`launch.available`, one board-wide guard) are all server-side; this slice derives none of them.
-  var ROADMAP = { loaded: false, data: null };
+  // doneOpen / statusOpen: what the reader expanded survives every refresh (SSE, the live tick) —
+  // the board is rebuilt, the reader's view is not (impl r1 review)
+  var ROADMAP = { loaded: false, data: null, doneOpen: false, statusOpen: {} };
   var RM_TITLES = { in_progress: 'In progress', ready: 'Up next — ready', blocked: 'Up next — blocked', done: 'Done' };
 
   function loadRoadmap() {
@@ -645,9 +647,23 @@
     head.appendChild(el('span', 'rm-num', r.number ? r.number : ''));
     head.appendChild(el('span', 'rm-name', r.name));
     row.appendChild(head);
-    var status = el('div', 'rm-status', r.status || '');
-    status.title = r.status || '';
-    row.appendChild(status);
+    // a long status expands in place (its full text, not only a tooltip); a short one is one line
+    var full = r.status || '';
+    if (full.length > 90) {
+      var sd = el('details', 'rm-status-full');
+      sd.appendChild(el('summary', 'rm-status', full.slice(0, 88) + '…'));
+      sd.appendChild(el('div', 'rm-status-text', full));
+      sd.open = !!ROADMAP.statusOpen[r.slug];
+      sd.addEventListener('toggle', function () { ROADMAP.statusOpen[r.slug] = sd.open; });
+      row.appendChild(sd);
+    } else {
+      row.appendChild(el('div', 'rm-status', full));
+    }
+    // the phase in progress says where its cycle is (the payload's `current`, never derived)
+    var cur = ROADMAP.data && ROADMAP.data.current;
+    if (group === 'in_progress' && r.why === 'current' && cur) {
+      row.appendChild(el('div', 'rm-cycle', typeWord(cur.type) + ' · round ' + (cur.round == null ? '?' : cur.round) + ' · ' + (cur.state || '?')));
+    }
     var meta = [];
     if (r.depends_on && r.depends_on.length) meta.push('depends on: ' + r.depends_on.join(', '));
     if (group === 'blocked') meta.push('waits for: ' + r.unmet.join(', '));
@@ -706,6 +722,10 @@
       var rows = (p.groups && p.groups[g]) || [];
       var sec = g === 'done' ? el('details', 'rm-group') : el('section', 'rm-group');
       sec.dataset.group = g;
+      if (g === 'done') {
+        sec.open = ROADMAP.doneOpen;
+        sec.addEventListener('toggle', function () { ROADMAP.doneOpen = sec.open; });
+      }
       var title = RM_TITLES[g] + ' (' + rows.length + ')';
       sec.appendChild(g === 'done' ? el('summary', 'rm-title', title) : el('h4', 'rm-title', title));
       if (!rows.length) sec.appendChild(el('div', 'muted small', 'none'));

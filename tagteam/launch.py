@@ -75,6 +75,16 @@ def _actionable_phases(root: Path) -> list:
     return [p for p in allp if not roadmap.is_terminal_status(p.status)]
 
 
+def _graph_refusal(root: Path) -> str | None:
+    """The reason nothing may start while docs/roadmap.md is invalid, or None."""
+    from tagteam import roadmap
+    try:
+        _phases, problems = roadmap.graph_problems(root / "docs" / "roadmap.md")
+    except ValueError as e:
+        return f"docs/roadmap.md: {e}"
+    return "docs/roadmap.md has problems — run `tagteam roadmap check`" if problems else None
+
+
 def _ready_choice(root: Path, st: dict, cs: dict | None, phase: str | None) -> tuple[str | None, str]:
     """Phase 69: (slug to start, reason) from the roadmap's READY group —
     dependency-aware, via the one classifier the board uses. With `phase`,
@@ -158,6 +168,11 @@ def launch_intent(project_dir: str | Path, *, state: dict | None = None,
         return {"phase": phase, "type": ctype, "command": None, "observed": observed,
                 "reason": f"a cycle is in progress ({phase} · {ctype} · {cstate}; turn: {turn})"}
     if phase and cstate in TERMINAL_CYCLE_STATES and ctype == "plan":
+        # (impl r1 review) the no-Start-on-an-invalid-roadmap rule applies to
+        # implementation too — the board says "nothing can be started" then
+        bad = _graph_refusal(root)
+        if bad:
+            return {"phase": phase, "type": "impl", "command": None, "observed": observed, "reason": bad}
         if wanted is not None and _npk(wanted) != _npk(phase):
             return {"phase": wanted, "type": "plan", "command": None, "observed": observed,
                     "reason": f"the plan for {phase} is approved — implement it first"}

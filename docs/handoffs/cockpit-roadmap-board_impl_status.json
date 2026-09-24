@@ -1,0 +1,25 @@
+{
+  "state": "in-progress",
+  "ready_for": "lead",
+  "round": 1,
+  "phase": "cockpit-roadmap-board",
+  "type": "impl",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-24",
+  "baseline": {
+    "sha": "45317ad3305aa844e13d2843483a191255938bfe",
+    "dirty_paths": [],
+    "captured_at": "2026-09-24T03:01:14.177678+00:00",
+    "source": "copied-from-plan"
+  },
+  "impl_boundary": {
+    "sha": "243ae32dc2c5e732ec81ab0dc10e06c34a76c1e2",
+    "dirty": {
+      "docs/handoffs/cockpit-roadmap-board_plan_rounds.jsonl": "c85d66b8218dd1a2641c634f0624a9685b625e98cb9fcb2219b16268e8612fdc",
+      "docs/handoffs/cockpit-roadmap-board_plan_status.json": "8b7d26a0bcc86fe9ddf8e95c8321f06cb489057e80044436463b7e979bb20317"
+    },
+    "captured_at": "2026-09-24T03:05:37.076480+00:00",
+    "source": "copied-from-plan"
+  }
+}

@@ -741,7 +741,8 @@ def classify(phases: list[RoadmapPhase], *, state: dict | None = None,
         elif is_cur and ctype == "impl" and cstate in ENDED_CYCLE_STATES:
             entry["why"] = "approved"
             groups["in_progress"].append(entry)
-        elif is_declared_in_progress(p.status):
+        elif is_declared_in_progress(p.status) and not (is_cur and cstate == "aborted"):
+            # (impl r1 review) an ABORTED current cycle is restartable whatever its status says
             entry["why"] = "declared"
             groups["in_progress"].append(entry)
         else:

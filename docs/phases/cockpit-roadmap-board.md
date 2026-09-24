@@ -15,6 +15,13 @@
 - Once the turn ended, both ready phases offered Start again.
 - **Looking at the page also fixed the quiet line**, which had read "no cycle in progress 2 phases ready…" (the intent's internal reason). It now reads "Nothing in progress."
 
+**Impl r1 review, all reproduced as tests and fixed:**
+1. An aborted current cycle now beats a declared "In progress / In review / Approved" status, so it is restartable. With unmet dependencies it is blocked, with the note.
+2. An invalid roadmap now refuses **Start implementation** too, through a shared `_graph_refusal()` check. A stale implementation intent is refused before any launch row is claimed or turn sent.
+3. What the reader opened on the board (the Done section, an expanded status) survives the background refresh. Done still starts collapsed.
+
+Also from the review: the current row now shows its type, round and state, and a status longer than 90 characters expands in place instead of showing only a tooltip.
+
 **Tests pinned to the old behaviour, updated as the approved plan intends** (`tests/test_launchpad.py`, `tests/test_roadmap.py`, `tests/test_cockpit_activity.py`, `tests/test_server_cockpit.py`):
 - document order became the first **ready** phase;
 - a phase whose status says "In progress" is no longer offered Start;
