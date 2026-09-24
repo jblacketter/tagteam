@@ -74,7 +74,7 @@ served today.
 | Endpoint | Promised |
 |---|---|
 | `GET /api/cockpit/info` | `api_version`, `tagteam`, `stable`, `project_dir` |
-| `GET /api/now` | `ts`; `state.phase` / `type` / `round` / `status` / `turn` / `run_mode` (each may be null); `headline.state` / `tone` / `text` / `age_s` / `role` / `agent` (the one server-side sentence of Phase 68, and the thing to show); `watcher.running`, `watcher.mode`, `watcher.beat.state`; `paused` (object or null); `agents.lead` / `agents.reviewer`; `pending_notes` |
+| `GET /api/now` | `ts`; `state.phase` / `type` / `round` / `status` / `turn` / `run_mode` (each **optional**: the state file omits a key it has no value for, e.g. `turn` while nothing is owed); `headline.state` / `tone` / `text` / `age_s` / `role` / `agent` (the one server-side sentence of Phase 68, and the thing to show); `watcher.running`, `watcher.mode`, `watcher.beat.state`; `paused` (object or null); `agents.lead` / `agents.reviewer`; `pending_notes` |
 | `GET /api/roadmap` | `current` (object or null: `phase`, `type`, `round`, `state`); `groups.done` / `in_progress` / `ready` / `blocked` (lists of `slug`, `number`, `name`, `status`, `depends_on`, `unmet`); `problems`, `warnings` (lists of strings); `launch.available`, `launch.reason` |
 | `GET /api/watcher/events?n=&chatter=0` | `events` (list of `ts`, `kind`, `msg`, with `phase` / `type` / `round` / `turn` present when known, and `repeat` / `last_ts` on folded runs). `kind` is from the closed `watchlog.KINDS` vocabulary. |
 | `GET /api/jobs` | `jobs` (list of `id`, `kind`, `label`, `status`, `shown`, `summary`, `created_at`, `finished_at`, `age_s`), `running` (int). This requires Phase 72 (PR #60) on `main` before implementation; the branch is rebased onto it. |
@@ -93,7 +93,8 @@ A reader should treat anything not in `STABLE` as private.
 
 ### What "stable" means (in `docs/read-api.md` and enforced by tests)
 - **Within one `api_version`, changes are additive only.** Promised paths
-  are never removed, renamed or re-typed. A nullable path may be null.
+  are never removed, renamed or re-typed. A path marked nullable may be
+  null. A path marked optional may be absent, and absent means "unknown".
   Fields may be added anywhere, so readers must ignore unknown fields.
   Enum-like strings (`headline.state`, `tone`, `kind`, `group`) may gain
   values, and readers must handle unknown values.
@@ -106,7 +107,7 @@ A reader should treat anything not in `STABLE` as private.
 
 ### How the declaration is kept honest
 - **`STABLE` is data**, not prose:
-  `{"/api/now": [("headline.text", "string"), ("state.phase", "string|null"), …], …}`.
+  `{"/api/now": [("headline.text", "string"), ("state.turn", "string|null", "optional"), …], …}`.
   Paths use dots, and `[]` means "each element of this list". The info
   endpoints' `stable` list is derived from it. `docs/read-api.md` lists the
   same paths, and a test compares the doc's tables with `STABLE`, so the
