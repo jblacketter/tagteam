@@ -4,7 +4,7 @@
 - [x] Planning: approved round 3 (2026-09-23) at `30dfa1b`. r1: commit-bound workflow selection, PR rollup, desktop-only delivery; r2: OS-released locks instead of token files, at-most-once delivery.
 - [x] Implementation: branch `phase-72-jobs-and-ci-watch`
 - [x] Implementation Review: approved round 2 (2026-09-24) at `241b4df`; gate 2,554 passed, 5 skipped
-- [ ] Complete: PR #60 open; criterion 8 (the real 3.14.9 release watched by jobs) is done at release time and recorded here.
+- [x] Complete: PR #60 merged 2026-09-24 (rebase). Criterion 8 (the real 3.14.9 release watched by jobs) is done at release time and recorded here.
 
 ## Closeout
 ```
