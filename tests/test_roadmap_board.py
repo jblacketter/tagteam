@@ -392,3 +392,85 @@ class TestRoadmapTabInARealBrowser:
         assert r["starts"] == 0
         assert r["guard"] == "No Start right now: a start is in progress — wait for it to finish"
         assert len(r["reasons"]) == 3                       # a, c and the in-progress "Start implementation" slot
+
+
+# ---------------------------------------------------------------------------
+# impl r1 review
+# ---------------------------------------------------------------------------
+
+def _abort(p, phase, ctype):
+    f = p / "docs" / "handoffs" / f"{phase}_{ctype}_status.json"
+    st = json.loads(f.read_text()); st["state"] = "aborted"; st["ready_for"] = None
+    f.write_text(json.dumps(st))
+
+
+class TestReviewR1:
+    @pytest.mark.parametrize("status", ["In progress", "In review — plan cycle open", "✅ Approved — awaiting merge"])
+    def test_an_aborted_current_cycle_beats_a_declared_status(self, tmp_path, fake_path, monkeypatch, status):
+        p = _proj(tmp_path, roadmap=GRAPH.replace("### Phase 1: A\n- **Status:** Not started",
+                                                  f"### Phase 1: A\n- **Status:** {status}"))
+        _cycle(p, "a", "plan", "in-progress"); _abort(p, "a", "plan")
+        b = rm.board(p)
+        a = [r for r in b["groups"]["ready"] if r["slug"] == "a"]
+        assert a and "aborted" in a[0]["note"] and a[0]["start"]["command"].endswith("start a")
+        monkeypatch.setattr(L, "start_watcher", lambda root, mode="headless", wait_s=5.0:
+                            {"ok": True, "pid": os.getpid(), "mode": mode, "message": "fake"})
+        code, res = L.launch(p, intent=a[0]["start"], config=read_config(p / "tagteam.yaml"), by="t",
+                             send=lambda: {"n": 1, "status": "ok"})
+        assert code == 200 and res["launched"]
+
+    def test_an_aborted_current_cycle_with_unmet_dependencies_is_blocked(self, tmp_path):
+        p = _proj(tmp_path, roadmap=GRAPH.replace("### Phase 2: B\n- **Status:** Not started",
+                                                  "### Phase 2: B\n- **Status:** In progress"))
+        _cycle(p, "b", "plan", "in-progress"); _abort(p, "b", "plan")
+        b = rm.board(p)
+        blocked = [r for r in b["groups"]["blocked"] if r["slug"] == "b"]
+        assert blocked and blocked[0]["unmet"] == ["c"] and "aborted" in blocked[0]["note"]
+        assert "waits for c" in L.launch_intent(p, phase="b")["reason"]
+
+    def test_an_invalid_roadmap_refuses_start_implementation_too(self, tmp_path, fake_path, monkeypatch):
+        p = _proj(tmp_path, roadmap=GRAPH)
+        _cycle(p, "a", "plan", "approved")
+        stale = L.launch_intent(p)
+        assert stale["command"].endswith("start a impl")
+        (p / "docs" / "roadmap.md").write_text(GRAPH + "\n### Phase 6: F\n- **Status:** Not started\n- **Depends on:** Nowhere\n")
+        b = rm.board(p)
+        assert b["problems"] and sum(len(v) for v in b["groups"].values()) == 6        # groups still shown
+        assert all(not (r.get("start") or {}).get("command") for v in b["groups"].values() for r in v)
+        sends = []
+        monkeypatch.setattr(L, "start_watcher", lambda *a, **k: pytest.fail("must not start a watcher"))
+        code, res = L.launch(p, intent=stale, config=read_config(p / "tagteam.yaml"), by="t",
+                             send=lambda: sends.append(1) or {"n": 1})
+        assert code == 409 and sends == []
+        from tagteam import db
+        conn = db.connect(project_dir=str(p))
+        try:
+            assert conn.execute("SELECT COUNT(*) FROM launches").fetchone()[0] == 0
+        finally:
+            conn.close()
+
+    def test_what_the_reader_opened_survives_a_refresh(self):
+        r = _run_board_in_chromium(r"""
+          PAYLOAD.current = { phase: 'a', type: 'plan', round: 2, state: 'in-progress' };
+          PAYLOAD.groups.in_progress.push({ slug: 'a', number: '1', name: 'A', why: 'current', depends_on: [], unmet: [],
+            status: 'In review — ' + new Array(30).join('a long status line '), start: { command: null, reason: 'a cycle is in progress' } });
+          renderRoadmap(PAYLOAD);
+          document.querySelector('.rm-group[data-group="done"]').open = true;
+          document.querySelector('.rm-group[data-group="done"]').dispatchEvent(new Event('toggle'));
+          var sd = document.querySelector('.rm-row[data-slug="a"] .rm-status-full');
+          sd.open = true; sd.dispatchEvent(new Event('toggle'));
+          renderRoadmap(PAYLOAD);                                            // SSE / the live tick
+          var RESULT = {
+            doneOpen: document.querySelector('.rm-group[data-group="done"]').open,
+            statusOpen: document.querySelector('.rm-row[data-slug="a"] .rm-status-full').open,
+            fullText: document.querySelector('.rm-row[data-slug="a"] .rm-status-text').textContent.length > 100,
+            cycle: document.querySelector('.rm-row[data-slug="a"] .rm-cycle').textContent };
+        """)
+        assert r == {"doneOpen": True, "statusOpen": True, "fullText": True, "cycle": "plan · round 2 · in-progress"}
+
+    def test_done_starts_collapsed(self):
+        r = _run_board_in_chromium(r"""
+          renderRoadmap(PAYLOAD);
+          var RESULT = { open: document.querySelector('.rm-group[data-group="done"]').open };
+        """)
+        assert r == {"open": False}
