@@ -4,7 +4,7 @@
 - [x] Planning: approved round 4 (2026-09-24) at `8f83364`. r1: explicit Claude Code support floor, and a fail-closed wrapper for old/failing CLIs; r2: exit-code verdicts; r3: structural validation plugin-side.
 - [x] Implementation: branch `phase-73-subagent-kit`
 - [x] Implementation Review: approved round 1 (2026-09-24) at `30c8a8b`; gate 2,611 passed, 5 skipped
-- [ ] Complete: PR #62 open, merge pending. The kit reaches users with the 3.14.9 release, whose version bump sets `tagteam.minVersion`.
+- [x] Complete: PR #62 merged 2026-09-24 (rebase). The kit reaches users with the 3.14.9 release, whose version bump sets `tagteam.minVersion`.
 
 ## Closeout
 ```
