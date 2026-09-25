@@ -27,6 +27,20 @@ report quotes PDT (13:21 PDT = 20:21 UTC).
 
 Same watcher, same message, same session. It works on some sends and fails on others.
 
+The layout, observed on 2026-09-25 at 13:40 PDT. A detached tmux session (`cx74c`, 80×30,
+codex-cli 0.157.0) was running Codex in this worktree, and the same message sat unsubmitted
+in its composer. It is not known what sent the text there, so this is evidence of the layout
+only, not of the iTerm2 path:
+
+```
+› Read the handoff contract (`tagteam contract`; in Claude Code: /
+  tagteam:handoff) and handoff-state.json, then act on your turn
+
+
+  GPT-6-Astra medium · ~/projects/tagteam-74c
+                                                       ⚠ 1 warning · f2 to view
+```
+
 ## Cause (hypothesis, to be confirmed by the live check below)
 `iterm.write_text_to_session` types the text with `write text … newline NO`, waits
 `delay 0.05`, then sends a lone CR (`ASCII character 13`). `terminal.write_text_to_session`
