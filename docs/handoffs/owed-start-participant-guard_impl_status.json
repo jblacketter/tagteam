@@ -1,0 +1,16 @@
+{
+  "state": "approved",
+  "ready_for": null,
+  "round": 1,
+  "phase": "owed-start-participant-guard",
+  "type": "impl",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-25",
+  "baseline": {
+    "sha": "fb0b0db978aa0892ca953fe27618fb1d93dd167a",
+    "dirty_paths": [],
+    "captured_at": "2026-09-25T16:12:53.984147+00:00",
+    "source": "impl-init-fallback"
+  }
+}
