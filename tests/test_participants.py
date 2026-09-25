@@ -144,3 +144,77 @@ def test_direct_lead_conversation_refuses_before_claim(tmp_path):
     configure(tmp_path, 'claude', 'codex')
     with pytest.raises(LeadChatError, match='Participant mismatch'):
         start_turn(root, 'conversation', 'continue', config={})
+
+
+# ── Owed start after a full-roadmap auto-advance ─────────────────────
+# An approved impl in a full-roadmap run advances the state to the next
+# phase's plan with turn=lead and no cycle yet (watcher._try_roadmap_advance);
+# the lead's `cycle init` creates it. Nothing is recorded, so nothing can be
+# reinterpreted: that state is not a role switch.
+
+TWO_PHASES = """\
+# Roadmap
+
+## Phases
+
+### Phase 1: Alpha
+- **Status:** Not Started
+
+### Phase 2: Beta
+- **Status:** Not Started
+"""
+
+
+def _advance_to_beta(tmp_path, lead='claude', reviewer='codex'):
+    from tagteam.state import read_state, write_state
+    from tagteam.watcher import _try_roadmap_advance
+    configure(tmp_path, lead, reviewer)
+    (tmp_path / 'docs').mkdir(exist_ok=True)
+    (tmp_path / 'docs' / 'roadmap.md').write_text(TWO_PHASES)
+    root = str(tmp_path)
+    init_cycle('alpha', 'impl', lead, reviewer, 'built', root)
+    add_round('alpha', 'impl', 'reviewer', 'APPROVE', 1, 'ok', root)
+    state = read_state(root)
+    state.update(run_mode='full-roadmap', roadmap={
+        'queue': ['alpha', 'beta'], 'current_index': 0, 'completed': [], 'pause_reason': None})
+    write_state(state, root)
+    new = _try_roadmap_advance(read_state(root), root)
+    assert new and new['phase'] == 'beta' and new['type'] == 'plan' and new['turn'] == 'lead'
+    return root
+
+
+def test_owed_start_after_roadmap_advance_is_dispatchable(tmp_path):
+    root = _advance_to_beta(tmp_path)
+    assert check_participants(root) is not None
+
+
+def test_owed_start_lets_the_lead_init_the_next_cycle(tmp_path):
+    root = _advance_to_beta(tmp_path)
+    init_cycle('beta', 'plan', 'claude', 'codex', 'plan for beta', root)
+    assert read_status('beta', 'plan', root)['lead'] == 'claude'
+    assert check_participants(root) is not None
+
+
+def test_owed_start_still_refuses_a_mismatched_init(tmp_path):
+    root = _advance_to_beta(tmp_path)
+    with pytest.raises(ParticipantMismatch):
+        check_participants(root, proposed=('codex', 'claude'))
+
+
+@pytest.mark.parametrize('change', [
+    {'turn': 'reviewer'},                       # a reviewer turn on a missing cycle is lost
+    {'status': 'working'},
+    {'type': 'impl'},                           # auto-advance only ever owes a plan cycle
+    {'run_mode': 'single-phase'},
+    {'roadmap': {'queue': ['alpha', 'gamma'], 'current_index': 1, 'completed': ['alpha']}},
+    {'roadmap': {'queue': ['alpha', 'beta'], 'current_index': 5, 'completed': []}},
+    {'roadmap': None},
+])
+def test_cycle_less_state_that_is_not_an_owed_start_is_still_refused(tmp_path, change):
+    from tagteam.state import read_state, write_state
+    root = _advance_to_beta(tmp_path)
+    state = read_state(root)
+    state.update(change)
+    write_state(state, root)
+    with pytest.raises(ParticipantMismatch):
+        check_participants(root)

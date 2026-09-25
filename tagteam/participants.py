@@ -9,6 +9,23 @@ class ParticipantMismatch(ValueError):
     pass
 
 
+def _owed_start(state, phase, kind):
+    """True when the state is a full-roadmap run handing the lead the next
+    phase's plan cycle, which does not exist yet (watcher._try_roadmap_advance
+    after an impl approval). Nothing is recorded for that cycle, so there is
+    nothing to reinterpret: the lead's `cycle init` creates it and records the
+    configured names (still checked there through ``proposed``)."""
+    if (state.get("turn"), state.get("status"), state.get("run_mode")) != ("lead", "ready", "full-roadmap"):
+        return False
+    if kind != "plan" or (phase, kind) != (state.get("phase"), state.get("type")):
+        return False
+    roadmap = state.get("roadmap")
+    if not isinstance(roadmap, dict):
+        return False
+    queue, index = roadmap.get("queue") or [], roadmap.get("current_index")
+    return isinstance(index, int) and 0 <= index < len(queue) and queue[index] == phase
+
+
 def check_participants(project_dir, *, proposed=None, cycle=None):
     """Return fresh config; refuse to reinterpret an unfinished cycle.
 
@@ -61,6 +78,8 @@ def check_participants(project_dir, *, proposed=None, cycle=None):
             legacy = _legacy_status_path(phase, kind, str(project_dir))
             status = _read_status_from_file(legacy) if legacy is not None else None
         if status is None:
+            if _owed_start(state, phase, kind):
+                continue
             if state.get("status") in ("ready", "working", "escalated"):
                 compare((None, None))
         elif status.get("state") not in ("approved", "aborted"):
