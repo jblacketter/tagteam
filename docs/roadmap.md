@@ -12,6 +12,10 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 iTerm2 tabs (lead | watcher | reviewer) — lead lane left, reviewer lane right, the watcher behind a turn bar at
 the top. Each phase is engine + CLI first, cockpit surface second. tagteam stays a standalone package; superdash
 (a separate project) consumes it (Phase 74). -->
+### Phase 74c: Codex submit after a tab send
+- **Status:** 🔄 Plan — round 1. See `docs/phases/codex-submit-after-a-tab-send.md`.
+- **Description:** In iTerm2 mode, the watcher's message to Codex sometimes stays in Codex's composer with an empty line under it, so the handoff stalls until the arbiter presses Enter. Found on Liminal on 2026-09-25 (3.14.10): the same watcher and message submitted at 18:18 and 18:21 UTC and stuck at 20:21 UTC. The tab drivers send the text, wait 50 ms, then send a CR, and Codex most likely takes an Enter that close behind a burst of text as a newline in a paste. The fix lengthens the gap in both tab drivers (iTerm2, Terminal.app). After a send, the watcher sends one more CR only when the text is still sitting in the composer and the agent is idle.
+
 ### Phase 74b: Owed start after a roadmap advance
 - **Status:** ✅ Complete — impl approved round 1 (2026-09-25); gate: 2,621 passed, 5 skipped at `fb0b0db`. Merged (PR #64). See `docs/phases/owed-start-participant-guard.md`.
 - **Description:** In full-roadmap mode, once an impl is approved, `watcher._try_roadmap_advance` hands the lead the next phase's plan before that cycle exists. `participants.check_participants` saw no cycle record while the status was `ready` and refused with `Participant mismatch: cycle lead/reviewer=(None, None)`. That blocked the watcher's dispatch and the lead's `cycle init`, so every phase boundary stalled. Found on Liminal's full-roadmap run on 2026-09-24 (3.14.9). The fix recognizes that one state and skips the comparison for it (`_owed_start`). Every other state with no cycle is still refused, and `cycle init` still checks the names it records.
