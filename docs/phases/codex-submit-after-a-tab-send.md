@@ -66,9 +66,10 @@ observed failing.
      both sides. Removing whitespace makes the match independent of where Codex wrapped (it
      wraps inside `/tagteam:handoff` with no space, see the capture below); anything added,
      removed or edited fails the equality.
-   - **Stuck, not just typed:** at least one blank line sits between the block and the footer
-     (the newline the paste window swallowed). A composer holding the text with no blank line
-     is text still arriving / not yet at its CR, and is left alone.
+   - **Stuck, not just typed:** at least TWO blank lines sit between the block and the footer.
+     Codex always puts one blank line there (idle placeholder, and text typed but not yet
+     entered); the second is the newline the paste window swallowed. A composer holding the
+     text over a single blank line is text not yet at its CR, and is left alone.
    Claude Code (`❯` prompt, boxed input) never matches, so its behaviour is unchanged. If the
    live check cannot confirm the recognition on real screens, step 2 is dropped and only step 1
    ships.
@@ -83,7 +84,7 @@ observed failing.
      GPT-6-Astra medium · ~/projects/tagteam-74c
                                                           ⚠ 1 warning · f2 to view
    ```
-   The same text typed without the newline has one blank line fewer; the idle composer is
+   The same text typed without the newline has one blank line there, not two; the idle composer is
    `› Ask Codex to do anything` (placeholder) over the same footer. The folder-trust dialog also
    uses `›` (`› 1. Trust and continue`) but is followed by `enter continue · esc back`, not the
    footer, and its text is not the command.
