@@ -1,7 +1,7 @@
 # Phase 74c: Codex submit after a tab send
 
 ## Status
-- [ ] Planning: plan cycle round 1
+- [ ] Planning: plan cycle round 2
 - [ ] Implementation
 - [ ] Implementation Review
 - [ ] Complete
@@ -42,37 +42,82 @@ tmux (`send-keys -l` + `C-m`) is out of scope. It is not the arbiter's workflow,
 observed failing.
 
 ## Plan
-1. **Longer gap.** Raise the text→CR gap in both tab drivers (iTerm2's AppleScript `delay`
-   and `terminal._SUBMIT_DELAY_S`) to 0.5 s: comfortably past the paste window, and still short
-   next to a turn. Both drivers use one named constant instead of a literal.
-2. **Check, then submit once more.** After a successful write, `send_tab_command` waits
-   briefly (about 1.5 s) and reads the tab's tail with the driver's `get_session_contents`. If
-   the agent does not look busy (the watcher's existing busy patterns) **and** the sent text is
-   still on the tail's last lines (the composer), it sends one lone CR through a new driver
-   function, `submit(session_id)`, and logs it. It does this at most once per send.
-   - The extra CR is harmless in the cases it can wrongly fire: an empty Enter in Claude Code
-     is a no-op (measured 2026-08-17, `terminal.py` docstring), and so is one in Codex's empty
-     composer.
-   - An inconclusive capture (empty or failed read) never triggers it, which matches the
-     watchdog's rule that an inconclusive capture is never a reason to re-send.
-   - The log line uses an existing `watchlog.KINDS` value. No vocabulary change.
+1. **Longer gap (both drivers, both agents).** Raise the text→CR gap in both tab drivers
+   (iTerm2's AppleScript `delay` and `terminal._SUBMIT_DELAY_S`) to 0.5 s: comfortably past
+   the paste window, and still short next to a turn. Both drivers use one named constant
+   instead of a literal. This is the fix; step 2 is a guarded fallback for Codex only.
+2. **Recovery CR, only for a positively recognized stuck Codex composer.** After a successful
+   write, `send_tab_command` waits about 1.5 s, reads the tab's last 20 lines with the
+   driver's `get_session_contents`, and passes them to a pure function
+   `codex_composer_holds(capture, command) -> bool` in `watcher.py`. Only if it returns True
+   does it send ONE lone CR through a new driver function `submit(session_id)`, at most once
+   per send, and log it (existing `watchlog.KINDS` value, no vocabulary change).
+   `codex_composer_holds` returns True only when ALL of these hold; anything else is False:
+   - **Not busy:** no `BUSY_PATTERNS` match in the capture (necessary, not sufficient).
+   - **Composer found:** the LAST line starting with `›` (U+203A, Codex's prompt glyph) opens a
+     block of: that line, then only continuation lines indented by exactly two spaces, then
+     only blank lines, then Codex's composer footer — the `<model> · <directory>` status line
+     (a line containing ` · ` and a path starting `~/` or `/`). No footer after the block →
+     unknown layout → False. Because it is the LAST `›` block and it must be followed by the
+     footer, a submitted prompt still visible in history (always above the live composer) is
+     never the block examined.
+   - **Contents are exactly the command:** the block's text (the `› ` prefix and the two-space
+     indents stripped, lines joined) equals the sent command with ALL whitespace removed on
+     both sides. Removing whitespace makes the match independent of where Codex wrapped (it
+     wraps inside `/tagteam:handoff` with no space, see the capture below); anything added,
+     removed or edited fails the equality.
+   - **Stuck, not just typed:** at least one blank line sits between the block and the footer
+     (the newline the paste window swallowed). A composer holding the text with no blank line
+     is text still arriving / not yet at its CR, and is left alone.
+   Claude Code (`❯` prompt, boxed input) never matches, so its behaviour is unchanged. If the
+   live check cannot confirm the recognition on real screens, step 2 is dropped and only step 1
+   ships.
+
+   Layouts captured 2026-09-25 from codex-cli 0.157.0 in an 80×30 tmux pane (text typed with
+   `send-keys -l`, never submitted). Stuck (text, then the swallowed newline):
+   ```
+   › Read the handoff contract (`tagteam contract`; in Claude Code: /
+     tagteam:handoff) and handoff-state.json, then act on your turn
+
+
+     GPT-6-Astra medium · ~/projects/tagteam-74c
+                                                          ⚠ 1 warning · f2 to view
+   ```
+   The same text typed without the newline has one blank line fewer; the idle composer is
+   `› Ask Codex to do anything` (placeholder) over the same footer. The folder-trust dialog also
+   uses `›` (`› 1. Trust and continue`) but is followed by `enter continue · esc back`, not the
+   footer, and its text is not the command.
 3. **Tests.**
-   - `tests/test_iterm.py` and `tests/test_terminal.py`: the script uses the named gap, and
-     the CR comes after the delay.
-   - `tests/test_watcher*.py`: the check sends one CR when the text is still in the composer
-     and the agent is idle. It sends nothing when the agent is busy, when the text is gone, or
-     when the capture is empty. It never sends twice.
+   - `tests/test_iterm.py`, `tests/test_terminal.py`: the script uses the named gap and the CR
+     comes after it; `submit()` sends a lone CR only.
+   - `tests/fixtures/codex_screens/*.txt` (verbatim captures, plus hand-made variants marked as
+     such in a README line): stuck wrapped command (True); stuck one-line command (True);
+     typed without the blank line (False); idle placeholder (False); submitted prompt in
+     history above an empty/placeholder composer (False); composer holding the command plus an
+     edit (False); composer holding unrelated text (False); trust dialog (False); busy screen
+     with `Working (` (False); Claude Code idle and Claude Code holding the command (False);
+     no footer / truncated capture (False); empty capture (False).
+   - `tests/test_watcher*.py`: `send_tab_command` calls `submit` exactly once when the fake
+     driver's capture is the stuck fixture, and never for the others; a failed or empty read
+     never triggers it; the recovery is logged.
 
 ## Verification
 - The gate's full-suite run on submit (the run on the record).
-- **Live check (iTerm2 + codex-cli 0.157.0).** A scratch tab running `codex`, driven through
-  `iterm.write_text_to_session`, with a trivial prompt.
-  - On `main` (50 ms): count how often the message is left unsubmitted, which reproduces the
-    defect.
-  - On this branch: 20 sends, 20 submitted without help, with how many of those needed the
-    extra CR.
-  - Both results are reported verbatim, including any failures. If `main` never reproduces it,
-    the submission says so and the cause stays a hypothesis.
+- **Live checks (iTerm2 + codex-cli 0.157.0), reported verbatim and kept separate:**
+  - *Direct-driver timing experiment* (evidence for the cause, not for the recovery):
+    `iterm.write_text_to_session` into a scratch Codex tab with a harmless prompt ("Reply with
+    only: ok"), 20 sends on `main` (50 ms) and 20 with the new gap; count sends left in the
+    composer. If `main` never reproduces the defect, the submission says so and the cause stays
+    a hypothesis.
+  - *End-to-end recovery check* (evidence for the shipped path): 20 sends through
+    `watcher.send_iterm_command` on this branch into the same kind of tab. Per send, record:
+    submitted or not; whether the recovery CR fired (watcher log line); and how many user
+    messages Codex recorded for it (the session transcript under `~/.codex/sessions/`) —
+    exactly-once means one user message and one reply per send, never two. A capture of the
+    screen before any recovery CR is kept for each firing, so a firing can be checked against
+    the recognition rule.
+  - If the recovery never fires in 20 sends (likely, with the longer gap), that is reported as
+    "not exercised live"; its evidence is then the fixtures, which are real captures.
 - Terminal.app is covered by unit tests only, unless the arbiter wants a live run there too.
 
 ## Out of scope
