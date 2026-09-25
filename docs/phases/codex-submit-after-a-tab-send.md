@@ -3,7 +3,7 @@
 ## Status
 - [x] Planning: plan approved round 3
 - [x] Implementation
-- [ ] Implementation Review
+- [x] Implementation Review: approved round 1 (2026-09-25); gate: 2,699 passed, 6 skipped at `91026a9`
 - [ ] Complete
 
 ## Summary
