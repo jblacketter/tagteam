@@ -2,8 +2,8 @@
 
 ## Status
 - [x] Planning: none needed. This is a small fix that was already implemented, so it goes straight to an impl cycle, as the arbiter's rule for small fixes says.
-- [ ] Implementation: branch `fix/owed-start-participant-guard`
-- [ ] Implementation Review
+- [x] Implementation: branch `fix/owed-start-participant-guard` (f22b2f7)
+- [x] Implementation Review: approved round 1 (2026-09-25); gate: 2,621 passed, 5 skipped at `fb0b0db`. PR #64 open, merge pending.
 - [ ] Complete
 
 ## Summary
