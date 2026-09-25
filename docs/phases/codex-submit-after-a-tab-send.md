@@ -1,8 +1,8 @@
 # Phase 74c: Codex submit after a tab send
 
 ## Status
-- [ ] Planning: plan cycle round 3
-- [ ] Implementation
+- [x] Planning: plan approved round 3
+- [x] Implementation
 - [ ] Implementation Review
 - [ ] Complete
 
@@ -162,6 +162,62 @@ observed failing.
 - Results are reported verbatim, including failures.
 - Codex usage: the live checks cost about 30–40 tiny prompts of the arbiter's Codex quota.
 - Terminal.app is covered by unit tests only, unless the arbiter wants a live run there too.
+
+## Implementation (impl round 1)
+- `tagteam/tabs.py`: `SUBMIT_DELAY_S = 0.5`, the one named gap. `iterm.write_text_to_session`
+  (`delay {SUBMIT_DELAY_S}`) and `terminal.write_text_to_session` both use it; the old
+  `terminal._SUBMIT_DELAY_S` and the iTerm2 literal `0.05` are gone.
+- `iterm.submit(session_id)` / `terminal.submit(session_id)`: one lone CR / one empty `do script`.
+- `tagteam/watcher.py`: `RECOVERY_CAPTURE_LINES = 16`, `RECOVERY_WAIT_S = 1.5`,
+  `codex_stuck_composer(tail, command)`, `_matches_displayed_lines(pieces, command)` and
+  `_recover_stuck_codex()`, called once by `send_tab_command` after a successful write. The
+  recovery CR is logged as `sent`; a failed one as `send-failed` (both existing `watchlog.KINDS`).
+  Any exception in the recovery is swallowed: the send's result is unchanged.
+- Two layout facts from the live captures, both handled fail-closed:
+  - iTerm2's contents sometimes show `›` + TWO spaces before typed text (a composer holding
+    text typed with no CR), one space otherwise. The first-line prefix accepts one or two spaces
+    before a non-space. A command that starts or ends with whitespace, or contains a newline,
+    is never matched.
+  - While Codex works, its footer's hint line becomes `tab to queue message`, which is not a
+    recognized hint, so a busy pane is rejected by the footer rule as well as by the busy veto.
+    The test for the veto drops that line from the live capture (in the test, not the file) and
+    shows the veto alone rejects it, and that without the working line it would match.
+
+## Live results (2026-09-25, scratch iTerm2 window, 80×30, codex-cli 0.157.0, `/tmp/cx74c-live`)
+Direct-driver timing experiment (cause). Counted as stuck when the message was still in the
+composer 1.5 s after the send:
+
+| text→CR gap | sends | submitted | stuck |
+|---|---|---|---|
+| 0 ms | 6 | 0 | 6 |
+| 20 ms | 5 | 0 | 5 |
+| 30 ms | 5 | 5 | 0 |
+| 40 ms | 5 | 4 | 1 |
+| 50 ms (`main`), short message, `iterm.write_text_to_session` | 10 | 10 | 0 |
+| 50 ms (`main`), long wrapped message, `iterm.write_text_to_session` | 10 | 10 † | 0 † |
+| 50 ms, long message, all 8 CPUs busy (`yes`) | 10 | 10 | 0 |
+| 500 ms (branch), long message, `iterm.write_text_to_session` | 10 | 10 | 0 |
+
+† This run's stuck check only looked at single lines, so it could not see a wrapped stuck
+message. The pane showed an answer for each send, but this row rests on that reading, not on
+the script's count.
+
+So the mechanism is confirmed: an Enter within about 20 ms after the text is taken as a newline,
+and 40 ms failed once in 5. The failure seen on Liminal with a 50 ms gap was NOT reproduced here
+(0 stuck in the 20 sends at 50 ms that the script could count, plus the 10 † above). The cause stays a hypothesis for that case: scheduling
+jitter of about 10–30 ms is enough to push a 50 ms gap into the window, but it wasn't observed.
+
+End-to-end check through `watcher.send_iterm_command` (the fix), short prompts `reply with only:
+ok-<n>`, branch code: **20 sends, 20 submitted by the first CR, 0 by the recovery CR, 0 not
+submitted, 20 of 20 handled exactly once** (one `›` history entry, one `• ok-<n>` answer, empty
+composer afterwards). The recovery did not fire, because the 0.5 s gap submitted every send.
+
+Forced recovery exercise (separate from the 20; `iterm.SUBMIT_DELAY_S` set to 0 in the test
+process only, the long wrapped message): **5 sends, 0 by the first CR, 5 by the recovery CR,
+5 of 5 handled exactly once**.
+
+Codex usage: about 80 tiny prompts. That is more than the ~30–40 estimated, because of the
+threshold search.
 
 ## Out of scope
 - tmux sending.

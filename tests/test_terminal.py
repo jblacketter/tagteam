@@ -12,6 +12,7 @@ from unittest.mock import patch
 import pytest
 
 from tagteam import terminal
+from tagteam.tabs import SUBMIT_DELAY_S
 
 
 class FakeTerminal:
@@ -243,6 +244,20 @@ def test_write_text_targets_tab_by_tty_and_escapes():
     assert fake.tab_do_scripts == [(tty, '"say \\"hi\\" \\\\ there"'), (tty, '""')]
     text_script = fake.calls[0]
     assert text_script.index('do script "say') < text_script.index("delay ") < text_script.index('do script ""')
+    # Phase 74c: the pause is the shared named gap, not a literal
+    assert f"delay {SUBMIT_DELAY_S}\n" in text_script
+    assert SUBMIT_DELAY_S == 0.5
+
+
+def test_submit_sends_one_lone_newline_to_the_tab():
+    fake = FakeTerminal(windows=[5])
+    tty = FakeTerminal.tty_for(5)
+    with patch("tagteam.terminal._osascript", fake):
+        assert terminal.submit(tty) is True
+        assert terminal.submit("/dev/ttys777") is False
+    assert fake.tab_do_scripts == [(tty, '""')]
+    with patch("tagteam.terminal._osascript", side_effect=RuntimeError("x")):
+        assert terminal.submit(tty) is False
 
 
 def test_get_session_contents_tail_and_validity():

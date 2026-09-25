@@ -1,0 +1,16 @@
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+                                                            ◐ medium · /effort 
+────────────────────────────────────────────────────────────────────────────────
+❯ Read the handoff contract (`tagteam contract`; in Claude Code: 
+  /tagteam:handoff) and handoff-state.json, then act on your turn 
+────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle)

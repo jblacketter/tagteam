@@ -33,6 +33,7 @@ from pathlib import Path
 
 from tagteam.tabs import (  # noqa: F401  (re-exported: patch points + callers)
     SESSION_FILE,
+    SUBMIT_DELAY_S,
     _find_session_file,
     _osascript,
     _read_session_file,
@@ -48,10 +49,6 @@ _TERMINAL_APP_PATHS = (
     "/System/Applications/Utilities/Terminal.app",
     "/Applications/Utilities/Terminal.app",
 )
-
-# Pause between the text `do script` and the submitting empty one (seconds,
-# AppleScript `delay`); mirrors iTerm2's 0.05 s between text and CR.
-_SUBMIT_DELAY_S = 0.05
 
 _ROLES = ("lead", "watcher", "reviewer")
 _ROLE_TITLES = {"lead": "Lead", "watcher": "Watcher", "reviewer": "Reviewer"}
@@ -415,14 +412,28 @@ def write_text_to_session(session_id: str, text: str) -> bool:
     Two `do script`s in one AppleScript: the text (Terminal appends a
     newline, which Claude Code already takes as submit) and, after a short
     delay, an empty one — the lone newline Codex needs to submit what is
-    sitting in its composer. See the module docstring for the measurement.
+    sitting in its composer. See the module docstring for the measurement;
+    the pause is SUBMIT_DELAY_S (tagteam.tabs).
     """
     literal = f'"{_applescript_string(text)}"'
     body = (
         f'                    do script {literal} in tab i of w\n'
-        f'                    delay {_SUBMIT_DELAY_S}\n'
+        f'                    delay {SUBMIT_DELAY_S}\n'
         f'                    do script "" in tab i of w\n'
         f'                    return "ok"'
+    )
+    try:
+        return _osascript(_tab_script(session_id, body)) == "ok"
+    except Exception:
+        return False
+
+
+def submit(session_id: str) -> bool:
+    """Send one lone newline to the tab whose tty is *session_id* (the
+    watcher's recovery for a message Codex left in its composer)."""
+    body = (
+        '                    do script "" in tab i of w\n'
+        '                    return "ok"'
     )
     try:
         return _osascript(_tab_script(session_id, body)) == "ok"
