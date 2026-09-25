@@ -13,7 +13,7 @@ iTerm2 tabs (lead | watcher | reviewer) — lead lane left, reviewer lane right,
 the top. Each phase is engine + CLI first, cockpit surface second. tagteam stays a standalone package; superdash
 (a separate project) consumes it (Phase 74). -->
 ### Phase 74b: Owed start after a roadmap advance
-- **Status:** ✅ Approved — impl approved round 1 (2026-09-25); gate: 2,621 passed, 5 skipped at `fb0b0db`. PR #64 open, merge pending. See `docs/phases/owed-start-participant-guard.md`.
+- **Status:** ✅ Complete — impl approved round 1 (2026-09-25); gate: 2,621 passed, 5 skipped at `fb0b0db`. Merged (PR #64). See `docs/phases/owed-start-participant-guard.md`.
 - **Description:** In full-roadmap mode, once an impl is approved, `watcher._try_roadmap_advance` hands the lead the next phase's plan before that cycle exists. `participants.check_participants` saw no cycle record while the status was `ready` and refused with `Participant mismatch: cycle lead/reviewer=(None, None)`. That blocked the watcher's dispatch and the lead's `cycle init`, so every phase boundary stalled. Found on Liminal's full-roadmap run on 2026-09-24 (3.14.9). The fix recognizes that one state and skips the comparison for it (`_owed_start`). Every other state with no cycle is still refused, and `cycle init` still checks the names it records.
 
 ### Phase 74a: Launchpad test holds the fake turn
