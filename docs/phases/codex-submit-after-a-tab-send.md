@@ -42,83 +42,75 @@ tmux (`send-keys -l` + `C-m`) is out of scope. It is not the arbiter's workflow,
 observed failing.
 
 ## Plan
-1. **Longer gap (both drivers, both agents).** Raise the text→CR gap in both tab drivers
-   (iTerm2's AppleScript `delay` and `terminal._SUBMIT_DELAY_S`) to 0.5 s: comfortably past
-   the paste window, and still short next to a turn. Both drivers use one named constant
-   instead of a literal. This is the fix; step 2 is a guarded fallback for Codex only.
-2. **Recovery CR, only for a positively recognized stuck Codex composer.** After a successful
-   write, `send_tab_command` waits about 1.5 s, reads the tab's last 20 lines with the
-   driver's `get_session_contents`, and passes them to a pure function
-   `codex_composer_holds(capture, command) -> bool` in `watcher.py`. Only if it returns True
-   does it send ONE lone CR through a new driver function `submit(session_id)`, at most once
-   per send, and log it (existing `watchlog.KINDS` value, no vocabulary change).
-   `codex_composer_holds` returns True only when ALL of these hold; anything else is False:
-   - **Not busy:** no `BUSY_PATTERNS` match in the capture (necessary, not sufficient).
-   - **Composer found:** the LAST line starting with `›` (U+203A, Codex's prompt glyph) opens a
-     block of: that line, then only continuation lines indented by exactly two spaces, then
-     only blank lines, then Codex's composer footer — the `<model> · <directory>` status line
-     (a line containing ` · ` and a path starting `~/` or `/`). No footer after the block →
-     unknown layout → False. Because it is the LAST `›` block and it must be followed by the
-     footer, a submitted prompt still visible in history (always above the live composer) is
-     never the block examined.
-   - **Contents are exactly the command:** the block's text (the `› ` prefix and the two-space
-     indents stripped, lines joined) equals the sent command with ALL whitespace removed on
-     both sides. Removing whitespace makes the match independent of where Codex wrapped (it
-     wraps inside `/tagteam:handoff` with no space, see the capture below); anything added,
-     removed or edited fails the equality.
-   - **Stuck, not just typed:** at least TWO blank lines sit between the block and the footer.
-     Codex always puts one blank line there (idle placeholder, and text typed but not yet
-     entered); the second is the newline the paste window swallowed. A composer holding the
-     text over a single blank line is text not yet at its CR, and is left alone.
-   Claude Code (`❯` prompt, boxed input) never matches, so its behaviour is unchanged. If the
-   live check cannot confirm the recognition on real screens, step 2 is dropped and only step 1
-   ships.
+1. **Longer gap (both drivers, every agent).** Raise the text→CR gap in both tab drivers
+   (iTerm2's AppleScript `delay` and `terminal._SUBMIT_DELAY_S`) to 0.5 s. That is comfortably
+   past the paste window, and still short next to a turn. Both drivers use one named constant
+   instead of a literal.
+2. **Recovery CR, Codex composer only, fail-closed.** After a successful write,
+   `send_tab_command` waits briefly (about 1.5 s) and reads the tab's tail with the driver's
+   `get_session_contents`. It sends one lone CR, through a new driver function
+   `submit(session_id)`, only when a new pure function, `codex_stuck_composer(tail, command)`,
+   positively recognizes Codex's composer holding exactly the sent command. The CR is logged
+   with an existing `watchlog.KINDS` value (no vocabulary change) and sent at most once per
+   send. There is no Claude Code recovery in this phase. The function returns False for every
+   layout it does not positively recognize.
 
-   Layouts captured 2026-09-25 from codex-cli 0.157.0 in an 80×30 tmux pane (text typed with
-   `send-keys -l`, never submitted). Stuck (text, then the swallowed newline):
-   ```
-   › Read the handoff contract (`tagteam contract`; in Claude Code: /
-     tagteam:handoff) and handoff-state.json, then act on your turn
-
-
-     GPT-6-Astra medium · ~/projects/tagteam-74c
-                                                          ⚠ 1 warning · f2 to view
-   ```
-   The same text typed without the newline has one blank line there, not two; the idle composer is
-   `› Ask Codex to do anything` (placeholder) over the same footer. The folder-trust dialog also
-   uses `›` (`› 1. Trust and continue`) but is followed by `enter continue · esc back`, not the
-   footer, and its text is not the command.
+   Recognition, from the bottom of the tail upward:
+   - **Footer.** The last non-empty lines are Codex's status footer: an indented
+     `<model> <effort> · <cwd>` line, optionally followed by a right-aligned `⚠ … · f2 to view`
+     line. There is no footer → False.
+   - **Composer block.** Directly above the footer, skipping only blank lines, is a block whose
+     first line starts with `› ` and whose continuation lines are indented two spaces (Codex's
+     wrap). No `›` block there → False.
+   - **Exact match.** The block's text, with the `› ` prefix and the wrap indentation removed
+     and all whitespace dropped, equals the sent command with all whitespace dropped. Dropping
+     whitespace makes the comparison independent of where the terminal wrapped. Codex wraps
+     `Code: /` + `tagteam:handoff` with no space, so joining lines with a space would not
+     match. Any difference (edited input, other text, an empty composer showing a placeholder)
+     → False.
+   - **Nothing in between.** No line between the block and the footer is anything other than
+     blank. A working line (`• Working … esc to interrupt`), an approval or other dialog, or
+     any unrecognized line → False.
+   - **Submitted history.** A submitted `› …` prompt is followed by output, a working line, or
+     a fresh composer, never directly by the footer. So the rule above already rejects it; a
+     fixture pins that.
+   - **Inconclusive capture.** An empty or failed read → False. This matches the watchdog's
+     rule that an inconclusive capture is never a reason to re-send.
 3. **Tests.**
-   - `tests/test_iterm.py`, `tests/test_terminal.py`: the script uses the named gap and the CR
-     comes after it; `submit()` sends a lone CR only.
-   - `tests/fixtures/codex_screens/*.txt` (verbatim captures, plus hand-made variants marked as
-     such in a README line): stuck wrapped command (True); stuck one-line command (True);
-     typed without the blank line (False); idle placeholder (False); submitted prompt in
-     history above an empty/placeholder composer (False); composer holding the command plus an
-     edit (False); composer holding unrelated text (False); trust dialog (False); busy screen
-     with `Working (` (False); Claude Code idle and Claude Code holding the command (False);
-     no footer / truncated capture (False); empty capture (False).
-   - `tests/test_watcher*.py`: `send_tab_command` calls `submit` exactly once when the fake
-     driver's capture is the stuck fixture, and never for the others; a failed or empty read
-     never triggers it; the recovery is logged.
+   - `tests/test_iterm.py` and `tests/test_terminal.py`: the script uses the named gap, and the
+     CR comes after the delay.
+   - `tests/test_watcher*.py`: capture fixtures under `tests/fixtures/codex_tails/`, taken from
+     a live codex-cli 0.157.0 pane (not hand-written), for each of these cases:
+     - **positive:** a wrapped stuck command, the real prompt at 80 columns;
+     - **negatives:** submitted history plus working; submitted history plus an answer and an
+       empty composer with a placeholder; an approval dialog; the composer holding edited or
+       unrelated text; a Claude Code pane; an empty capture.
+
+     `codex_stuck_composer` is True only for the positive. `send_tab_command` calls `submit`
+     exactly once for the positive, and never for any negative or when `submit` fails.
+
+   If a live capture shows the layout cannot be recognized reliably (for example, the footer
+   or `›` rendering varies between runs), the recovery CR is dropped from this phase. The
+   delay fix ships alone, and the submission says so, as the review allows.
 
 ## Verification
 - The gate's full-suite run on submit (the run on the record).
-- **Live checks (iTerm2 + codex-cli 0.157.0), reported verbatim and kept separate:**
-  - *Direct-driver timing experiment* (evidence for the cause, not for the recovery):
-    `iterm.write_text_to_session` into a scratch Codex tab with a harmless prompt ("Reply with
-    only: ok"), 20 sends on `main` (50 ms) and 20 with the new gap; count sends left in the
-    composer. If `main` never reproduces the defect, the submission says so and the cause stays
-    a hypothesis.
-  - *End-to-end recovery check* (evidence for the shipped path): 20 sends through
-    `watcher.send_iterm_command` on this branch into the same kind of tab. Per send, record:
-    submitted or not; whether the recovery CR fired (watcher log line); and how many user
-    messages Codex recorded for it (the session transcript under `~/.codex/sessions/`) —
-    exactly-once means one user message and one reply per send, never two. A capture of the
-    screen before any recovery CR is kept for each firing, so a firing can be checked against
-    the recognition rule.
-  - If the recovery never fires in 20 sends (likely, with the longer gap), that is reported as
-    "not exercised live"; its evidence is then the fixtures, which are real captures.
+- **Two kinds of live check, reported separately.** Both use a scratch iTerm2 tab running
+  codex-cli 0.157.0, with prompts that make each request identifiable: `reply with only:
+  ok-<n>`.
+  - **Direct-driver timing experiment (cause).** `iterm.write_text_to_session` on `main`'s
+    50 ms gap and on the branch's 0.5 s gap. Each send is counted as submitted or left in the
+    composer. This confirms or refutes the hypothesis. If `main` never reproduces it, that is
+    reported as is, and the cause stays a hypothesis.
+  - **End-to-end recovery check (the fix).** 20 sends through `watcher.send_iterm_command`,
+    the watcher's own send path, including the recovery. For each send the record is:
+    - submitted by the first CR, submitted by the recovery CR, or not submitted;
+    - whether the prompt was handled **exactly once**: one `ok-<n>` answer, and no duplicate
+      `›` entry in the history.
+
+    Pass = 20 of 20 submitted, and every one handled exactly once.
+- Results are reported verbatim, including failures.
+- Codex usage: the live checks cost about 30–40 tiny prompts of the arbiter's Codex quota.
 - Terminal.app is covered by unit tests only, unless the arbiter wants a live run there too.
 
 ## Out of scope
