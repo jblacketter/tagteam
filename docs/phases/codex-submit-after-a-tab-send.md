@@ -1,7 +1,7 @@
 # Phase 74c: Codex submit after a tab send
 
 ## Status
-- [ ] Planning: plan cycle round 2
+- [ ] Planning: plan cycle round 3
 - [ ] Implementation
 - [ ] Implementation Review
 - [ ] Complete
@@ -64,10 +64,30 @@ observed failing.
    `send_tab_command` waits briefly (about 1.5 s) and reads the tab's tail with the driver's
    `get_session_contents`. It sends one lone CR, through a new driver function
    `submit(session_id)`, only when a new pure function, `codex_stuck_composer(tail, command)`,
-   positively recognizes Codex's composer holding exactly the sent command. The CR is logged
+   finds no busy marker anywhere in the capture AND positively recognizes Codex's composer
+   holding exactly the sent command. Recognition supplements the busy check; it never
+   replaces it. The CR is logged
    with an existing `watchlog.KINDS` value (no vocabulary change) and sent at most once per
    send. There is no Claude Code recovery in this phase. The function returns False for every
    layout it does not positively recognize.
+
+   **Capture.** The recovery read asks for `RECOVERY_CAPTURE_LINES = 16` lines, not the
+   watchdog's `CAPTURE_LINES = 8`. The footer (up to 2 lines), the blank lines above it, and a
+   command wrapped over 2–3 lines at 80 columns already fill most of 8 lines. 16 lines leave room
+   for the activity area above the composer, where Codex's `• Working (…)` line and any dialog
+   appear (`watcher.py` notes the same for the spinner: it sits above the input box).
+
+   **Busy veto (first, over the whole capture).** If any `BUSY_PATTERNS` entry matches anywhere
+   in the 16 lines → False. This includes a working line directly above a matching composer
+   and footer. The veto can also fire on older history text (for example an earlier answer that
+   says "thinking") or on a command that contains a busy word. That is a false negative: no
+   recovery CR, which leaves things as they are today. It is accepted, because a missed recovery
+   costs a manual Enter, and a wrong CR could submit something the arbiter did not intend.
+
+   **Incomplete capture → False.** The composer's `›` line must not be the first line of the
+   capture: at least two lines above it must be present, so the activity area was actually read.
+   An empty or failed read, or a capture that starts inside the composer, is inconclusive →
+   False.
 
    Recognition, from the bottom of the tail upward:
    - **Footer.** The last non-empty lines are Codex's status footer: an indented
@@ -76,19 +96,25 @@ observed failing.
    - **Composer block.** Directly above the footer, skipping only blank lines, is a block whose
      first line starts with `› ` and whose continuation lines are indented two spaces (Codex's
      wrap). No `›` block there → False.
-   - **Exact match.** The block's text, with the `› ` prefix and the wrap indentation removed
-     and all whitespace dropped, equals the sent command with all whitespace dropped. Dropping
-     whitespace makes the comparison independent of where the terminal wrapped. Codex wraps
-     `Code: /` + `tagteam:handoff` with no space, so joining lines with a space would not
-     match. Any difference (edited input, other text, an empty composer showing a placeholder)
-     → False.
+   - **Line-preserving match.** Whitespace is NOT dropped globally. Each displayed line (the
+     first after its `› ` prefix, each continuation after exactly two spaces of indent, each
+     right-stripped of the terminal's trailing padding) must equal the next piece of the sent
+     command character for character, internal whitespace included. The only freedom is at a
+     boundary between two displayed lines, i.e. a real wrap point: there the command may have
+     either nothing (Codex wrapped mid-token, as in `Code: /` + `tagteam:handoff`) or exactly
+     one space (Codex wrapped at a space and dropped it). Both options are tried at each
+     boundary; the match must consume the whole command, with nothing left over on either
+     side. So `then act` edited to `thenact` inside a line fails, as does any added, removed or
+     changed character, other text, or an empty composer showing a placeholder → False.
+     The residual ambiguity is exactly one space at a wrap boundary, which the terminal itself
+     does not display; nothing else is tolerated.
    - **Nothing in between.** No line between the block and the footer is anything other than
      blank. A working line (`• Working … esc to interrupt`), an approval or other dialog, or
      any unrecognized line → False.
    - **Submitted history.** A submitted `› …` prompt is followed by output, a working line, or
      a fresh composer, never directly by the footer. So the rule above already rejects it; a
      fixture pins that.
-   - **Inconclusive capture.** An empty or failed read → False. This matches the watchdog's
+   - **Inconclusive capture.** See *Incomplete capture* above. This matches the watchdog's
      rule that an inconclusive capture is never a reason to re-send.
 3. **Tests.**
    - `tests/test_iterm.py` and `tests/test_terminal.py`: the script uses the named gap, and the
@@ -96,15 +122,25 @@ observed failing.
    - `tests/test_watcher*.py`: capture fixtures under `tests/fixtures/codex_tails/`, taken from
      a live codex-cli 0.157.0 pane (not hand-written), for each of these cases:
      - **positive:** a wrapped stuck command, the real prompt at 80 columns;
-     - **negatives:** submitted history plus working; submitted history plus an answer and an
-       empty composer with a placeholder; an approval dialog; the composer holding edited or
-       unrelated text; a Claude Code pane; an empty capture.
+     - **negatives:** submitted history plus working; **a working line ABOVE a composer and
+       footer that otherwise match exactly** (the busy veto); submitted history plus an answer
+       and an empty composer with a placeholder; an approval dialog; the composer holding
+       edited or unrelated text; **a whitespace edit inside one displayed line** (`then act` →
+       `thenact`), next to the wrapped positive it is derived from; a capture that starts
+       inside the composer (incomplete); a Claude Code pane; an empty capture.
+
+     The live captures come from a real pane. Where a negative needs a specific edit (the
+     whitespace edit), it is typed into a live composer and captured, not edited in the file.
+     Pure unit tests of the matcher also cover the boundary rule directly: a wrap with the
+     space dropped, a wrap mid-token, and an extra or missing space inside a line.
 
      `codex_stuck_composer` is True only for the positive. `send_tab_command` calls `submit`
      exactly once for the positive, and never for any negative or when `submit` fails.
 
    If a live capture shows the layout cannot be recognized reliably (for example, the footer
-   or `›` rendering varies between runs), the recovery CR is dropped from this phase. The
+   or `›` rendering varies between runs, or the wrap indentation is not a fixed two spaces so
+   the line-preserving match cannot tell a wrap from an edit), the recovery CR is dropped from
+   this phase. The
    delay fix ships alone, and the submission says so, as the review allows.
 
 ## Verification
