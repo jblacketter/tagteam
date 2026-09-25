@@ -2,7 +2,7 @@
 Tab-driver dispatch for the terminal-window backends (iTerm2, Terminal.app).
 
 Both drivers (`tagteam.iterm`, `tagteam.terminal`) expose the same surface —
-``create_session``, ``write_text_to_session``, ``get_session_contents``,
+``create_session``, ``write_text_to_session``, ``submit``, ``get_session_contents``,
 ``session_id_is_valid``, ``get_session_id``, ``kill_session``,
 ``_any_session_alive``, ``list_sessions`` — and share one on-disk record,
 ``.handoff-session.json``. This module owns that record and picks the driver
@@ -25,6 +25,14 @@ TAB_BACKENDS = ("iterm2", "terminal")
 
 # Pre-3.6 session files carry no "backend" key; they were always iTerm2.
 _DEFAULT_TAB_BACKEND = "iterm2"
+
+# Pause between typing a message and the submitting CR/newline, in both tab
+# drivers (seconds, AppleScript `delay`). Codex takes an Enter that arrives
+# right after a burst of typed text as a newline in its composer, not as
+# submit (Phase 74c, measured on codex-cli 0.157.0 in iTerm2: a 0 or 20 ms gap
+# left the message unsubmitted 10/10, 40 ms 1/5; 50 ms, the old value, is too
+# close to that edge). 0.5 s is well past it and still short next to a turn.
+SUBMIT_DELAY_S = 0.5
 
 
 def _osascript(script: str, timeout: float = 10) -> str:

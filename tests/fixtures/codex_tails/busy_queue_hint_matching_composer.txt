@@ -1,0 +1,16 @@
+• one 
+  two 
+  three 
+  four 
+  five 
+  six 
+  seven 
+  eight 
+  nine 
+                                             ⚠ weekly limit: 19% left · /status 
+  
+› Read the handoff contract (`tagteam contract`; in Claude Code: / 
+  tagteam:handoff) and handoff-state.json, then act on your turn 
+  
+  GPT-6-Astra medium · /private/tmp/cx74c-live · Acknowledge handoff override 
+  tab to queue message

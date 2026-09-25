@@ -1,0 +1,16 @@
+  
+  1:57 PM                                                                       
+  
+  
+› Think hard about whether 1000003 is prime, then reply with only: ok-61 
+  
+  
+Working (1s • esc to interrupt) 
+  
+                                             ⚠ weekly limit: 19% left · /status 
+  
+› Read the handoff contract (`tagteam contract`; in Claude Code: / 
+  tagteam:handoff) and handoff-state.json, then act on your turn 
+  
+  GPT-6-Astra medium · /private/tmp/cx74c-live · Acknowledge handoff override 
+  tab to queue message

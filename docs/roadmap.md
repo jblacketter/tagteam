@@ -13,7 +13,7 @@ iTerm2 tabs (lead | watcher | reviewer) — lead lane left, reviewer lane right,
 the top. Each phase is engine + CLI first, cockpit surface second. tagteam stays a standalone package; superdash
 (a separate project) consumes it (Phase 74). -->
 ### Phase 74c: Codex submit after a tab send
-- **Status:** 🔄 Plan — round 1. See `docs/phases/codex-submit-after-a-tab-send.md`.
+- **Status:** 🔄 Implementation — plan approved round 3; impl review round 1. See `docs/phases/codex-submit-after-a-tab-send.md`.
 - **Description:** In iTerm2 mode, the watcher's message to Codex sometimes stays in Codex's composer with an empty line under it, so the handoff stalls until the arbiter presses Enter. Found on Liminal on 2026-09-25 (3.14.10): the same watcher and message submitted at 18:18 and 18:21 UTC and stuck at 20:21 UTC. The tab drivers send the text, wait 50 ms, then send a CR, and Codex most likely takes an Enter that close behind a burst of text as a newline in a paste. The fix lengthens the gap in both tab drivers (iTerm2, Terminal.app). After a send, the watcher sends one more CR only when the text is still sitting in the composer and the agent is idle.
 
 ### Phase 74b: Owed start after a roadmap advance

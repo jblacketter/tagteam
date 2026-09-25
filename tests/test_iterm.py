@@ -16,7 +16,9 @@ from tagteam.iterm import (
     session_id_is_valid,
     iterm_is_running,
     create_session,
+    submit,
 )
+from tagteam.tabs import SUBMIT_DELAY_S
 from tagteam.watcher import _check_idle_patterns
 
 
@@ -75,6 +77,25 @@ class TestOsascriptCalls:
         assert "/handoff" in call_script
         assert 'write text "/handoff" newline NO' in call_script
         assert "ASCII character 13" in call_script
+        # Phase 74c: the CR comes after the shared named gap, not a literal
+        assert SUBMIT_DELAY_S == 0.5
+        text_at = call_script.index('write text "/handoff" newline NO')
+        delay_at = call_script.index(f"delay {SUBMIT_DELAY_S}\n")
+        assert text_at < delay_at < call_script.index("ASCII character 13")
+
+    @patch("tagteam.iterm._osascript")
+    def test_submit_sends_one_lone_cr(self, mock_osascript):
+        mock_osascript.return_value = "ok"
+        assert submit("session-123") is True
+        script = mock_osascript.call_args[0][0]
+        assert '"session-123"' in script
+        assert script.count("write text") == 1
+        assert "write text (ASCII character 13) newline NO" in script
+        assert "delay" not in script
+        mock_osascript.return_value = "not_found"
+        assert submit("bad-id") is False
+        mock_osascript.side_effect = RuntimeError("fail")
+        assert submit("session-123") is False
 
     @patch("tagteam.iterm._osascript")
     def test_write_text_not_found(self, mock_osascript):

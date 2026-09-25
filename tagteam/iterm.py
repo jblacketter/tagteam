@@ -13,6 +13,7 @@ from pathlib import Path
 
 from tagteam.tabs import (  # noqa: F401  (re-exported: patch points + callers)
     SESSION_FILE,
+    SUBMIT_DELAY_S,
     _find_session_file,
     _read_session_file,
     _session_file_path,
@@ -255,6 +256,7 @@ def write_text_to_session(session_id: str, text: str) -> bool:
     We send text with `newline NO` and then explicitly send ASCII 13
     (carriage return). This is more reliable for TUIs like Codex, which
     may not always treat iTerm2's implicit newline as a submit keypress.
+    The CR waits SUBMIT_DELAY_S: sooner, Codex takes it as a newline.
     """
     # Escape backslashes and double quotes for AppleScript string
     escaped = text.replace("\\", "\\\\").replace('"', '\\"')
@@ -265,7 +267,32 @@ def write_text_to_session(session_id: str, text: str) -> bool:
                 repeat with s in sessions of t
                     if unique ID of s is "{session_id}" then
                         tell s to write text "{escaped}" newline NO
-                        delay 0.05
+                        delay {SUBMIT_DELAY_S}
+                        tell s to write text (ASCII character 13) newline NO
+                        return "ok"
+                    end if
+                end repeat
+            end repeat
+        end repeat
+        return "not_found"
+    end tell
+    '''
+    try:
+        result = _osascript(script)
+        return result == "ok"
+    except Exception:
+        return False
+
+
+def submit(session_id: str) -> bool:
+    """Send one lone CR to an iTerm2 session (the watcher's recovery for a
+    message Codex left in its composer; see watcher.codex_stuck_composer)."""
+    script = f'''
+    tell application "iTerm2"
+        repeat with w in windows
+            repeat with t in tabs of w
+                repeat with s in sessions of t
+                    if unique ID of s is "{session_id}" then
                         tell s to write text (ASCII character 13) newline NO
                         return "ok"
                     end if

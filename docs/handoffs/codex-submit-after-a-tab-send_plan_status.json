@@ -1,0 +1,25 @@
+{
+  "state": "approved",
+  "ready_for": null,
+  "round": 3,
+  "phase": "codex-submit-after-a-tab-send",
+  "type": "plan",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-09-25",
+  "baseline": {
+    "sha": "144c4b0b873a4087e7581a340e4f16ee83fef7fd",
+    "dirty_paths": [],
+    "captured_at": "2026-09-25T20:29:22.423039+00:00",
+    "source": "plan-init"
+  },
+  "impl_boundary": {
+    "sha": "b9295aadb94ce0720e0284f6bf939ab103a05465",
+    "dirty": {
+      "docs/handoffs/codex-submit-after-a-tab-send_plan_rounds.jsonl": "33d933eba82de8d851206c0081ab17be5cefab2d723fdc7e0b95261cbad75256",
+      "docs/handoffs/codex-submit-after-a-tab-send_plan_status.json": "510a0788dd8125f4008299d8865ce18e5b246c28eef8868653786f0c8f137728"
+    },
+    "captured_at": "2026-09-25T20:45:05.947118+00:00",
+    "source": "plan-approve"
+  }
+}

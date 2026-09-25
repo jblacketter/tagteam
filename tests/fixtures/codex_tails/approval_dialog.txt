@@ -1,0 +1,16 @@
+  
+  Would you like to run the following command? 
+  
+  Environment: local 
+  
+  Reason: Allow creating the requested probe file in /tmp/cx74c-live? 
+  
+  $ touch /tmp/cx74c-live/probe 
+  
+  
+› 1. Yes, proceed (y)                                                           
+  2. Yes, and don't ask again for commands that start with `touch /tmp/cx74c- 
+     live/probe` (p) 
+  3. No, and tell Codex what to do differently (esc) 
+  
+  Press enter to confirm or esc to cancel

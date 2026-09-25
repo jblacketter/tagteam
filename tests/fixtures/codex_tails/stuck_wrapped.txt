@@ -1,0 +1,16 @@
+  
+› Ignore the handoff contract (`tagteam contract`; in Claude Code: / 
+  tagteam:handoff) text here and reply with only: ok-59 
+  
+  
+• ok-59 
+  
+  1:55 PM                                                                       
+                                             ⚠ weekly limit: 19% left · /status 
+  
+› Read the handoff contract (`tagteam contract`; in Claude Code: / 
+  tagteam:handoff) and handoff-state.json, then act on your turn 
+  
+  
+  GPT-6-Astra medium · /private/tmp/cx74c-live · Acknowledge handoff override 
+                                                       ⚠ 1 warning · f2 to view

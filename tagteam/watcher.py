@@ -259,6 +259,107 @@ def wait_for_idle_iterm(
     return wait_for_idle_tab(iterm, session_id, timeout=timeout, poll_interval=poll_interval)
 
 
+# Phase 74c: after a tab send, the watcher reads the tab once more, and sends
+# one extra CR only when Codex's composer still holds exactly the message.
+# The read is longer than CAPTURE_LINES: the footer, the blank lines above it
+# and a message wrapped over 2–3 lines already fill 8, and the activity area
+# (`• Working (…)`, dialogs) sits above the composer.
+RECOVERY_CAPTURE_LINES = 16
+RECOVERY_WAIT_S = 1.5
+
+# Codex's status footer: `  <model> <effort> · <cwd>[ · <thread title>]`,
+# optionally followed by one hint line (`⚠ 1 warning · f2 to view`, `← for
+# agents · ? for shortcuts`, or both on one line).
+_CODEX_FOOTER = re.compile(r"^  [^\s·]+ [^\s·]+ · [~/]")
+_CODEX_FOOTER_HINT = re.compile(
+    r"^\s+(?:← for agents · \? for shortcuts)?\s*(?:⚠ .+ · f2 to view)?$")
+# The composer's first line. Codex draws `› ` + text; iTerm2's contents show
+# a second space after `›` when the composer holds typed text (live capture,
+# codex-cli 0.157.0), so one or two spaces are accepted before the text.
+_CODEX_COMPOSER_FIRST = re.compile(r"^› {1,2}(?=\S)")
+
+
+def _matches_displayed_lines(pieces: list[str], command: str, pos: int = 0) -> bool:
+    """True if *pieces* (displayed lines, each without its prefix) spell
+    *command* from *pos* to its end. Inside a piece every character must
+    match; between two pieces (a wrap point) the command may have nothing or
+    exactly one space — the space Codex drops when it wraps at one."""
+    piece = pieces[0]
+    if not command.startswith(piece, pos):
+        return False
+    pos += len(piece)
+    if len(pieces) == 1:
+        return pos == len(command)
+    rest = pieces[1:]
+    if _matches_displayed_lines(rest, command, pos):
+        return True
+    return command.startswith(" ", pos) and _matches_displayed_lines(rest, command, pos + 1)
+
+
+def codex_stuck_composer(tail: str, command: str) -> bool:
+    """True only if *tail* positively shows Codex's composer holding exactly
+    *command*, unsubmitted, with nothing running. Everything it does not
+    recognize is False (fail closed: no recovery CR).
+
+    Busy veto first, over the whole capture. Then, from the bottom: Codex's
+    footer, only blank lines, a `› ` block with two-space continuation lines
+    whose text is *command* (`_matches_displayed_lines`), and at least two
+    captured lines above the block (else the activity area was not read).
+    A submitted prompt is never directly above the footer (output, a working
+    line or a fresh composer follows it), so history does not match.
+    """
+    if not isinstance(tail, str) or not tail.strip() or not command:
+        return False
+    if command != command.strip() or "\n" in command:
+        return False
+    if any(p.lower() in tail.lower() for p in BUSY_PATTERNS):
+        return False
+
+    lines = [line.rstrip() for line in tail.splitlines()]
+    while lines and not lines[-1]:
+        lines.pop()
+    i = len(lines) - 1
+    if i >= 0 and not _CODEX_FOOTER.match(lines[i]) and _CODEX_FOOTER_HINT.match(lines[i]):
+        i -= 1
+    if i < 0 or not _CODEX_FOOTER.match(lines[i]):
+        return False
+    i -= 1
+    while i >= 0 and not lines[i]:
+        i -= 1
+
+    continuations: list[str] = []
+    while i >= 0 and not lines[i].startswith("›"):
+        line = lines[i]
+        if not line.startswith("  ") or len(line) == 2:
+            return False
+        continuations.append(line[2:])
+        i -= 1
+    if i < 2:
+        return False
+    first = _CODEX_COMPOSER_FIRST.match(lines[i])
+    if not first:
+        return False
+    pieces = [lines[i][first.end():]] + continuations[::-1]
+    return _matches_displayed_lines(pieces, command)
+
+
+def _recover_stuck_codex(driver, session_id: str, command: str) -> None:
+    """One recovery CR if Codex left *command* in its composer. Best effort:
+    any failure leaves the tab as it is (the pre-74c behaviour)."""
+    try:
+        time.sleep(RECOVERY_WAIT_S)
+        tail = driver.get_session_contents(session_id, last_n_lines=RECOVERY_CAPTURE_LINES)
+        if not codex_stuck_composer(tail, command):
+            return
+        if driver.submit(session_id):
+            _log("   Message left in Codex's composer; sent one more Enter", kind="sent")
+        else:
+            _log("   Message left in Codex's composer; the extra Enter failed",
+                 kind="send-failed")
+    except Exception:
+        return
+
+
 def send_tab_command(
     driver,
     session_id: str,
@@ -270,7 +371,8 @@ def send_tab_command(
     retry logic. *driver* is the backend module (tagteam.tabs.driver_for).
 
     Simpler than tmux: no pre-send input clearing is needed. Submission
-    is handled inside the driver's write_text_to_session().
+    is handled inside the driver's write_text_to_session(); after a
+    successful write, `_recover_stuck_codex` sends at most one more CR.
     """
     if not driver.session_id_is_valid(session_id):
         _log(f"   ERROR: Session '{session_id}' does not exist", kind="error")
@@ -282,6 +384,7 @@ def send_tab_command(
             _log("   Idle detection inconclusive, proceeding after 10s")
 
         if driver.write_text_to_session(session_id, command):
+            _recover_stuck_codex(driver, session_id, command)
             return True
 
         _log(f"   Attempt {attempt}/{max_retries} failed")
