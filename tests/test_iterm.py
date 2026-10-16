@@ -346,6 +346,36 @@ class TestTabDirectories:
         assert ok and writes == []
         assert "could not read the lead tab's directory" in capsys.readouterr().out
 
+    def test_read_failure_at_the_first_deadline_still_retries_then_fails(
+            self, monkeypatch, tmp_path, capsys):
+        """Review r1: wrong before t=5, unreadable from t=5 on. The wrong path
+        seen earlier must survive the bad reads: one re-sent cd, then False."""
+        here = str(tmp_path)
+        ok, writes, _ = self._run(monkeypatch, {
+            "L": lambda t, w: "/Users/jack" if t < 5 else "",
+            "W": lambda t, w: here, "R": lambda t, w: here}, tmp_path)
+        out = capsys.readouterr().out
+        assert ok is False
+        assert writes == [("L", f"cd {tmp_path}")]
+        assert f"the lead tab is in /Users/jack, not {tmp_path}" in out
+        assert "could not read" not in out
+
+    def test_read_failure_after_the_retry_still_fails(self, monkeypatch, tmp_path, capsys):
+        here = str(tmp_path)
+        ok, writes, _ = self._run(monkeypatch, {
+            "L": lambda t, w: "" if w else "/Users/jack",       # unreadable once the cd is re-sent
+            "W": lambda t, w: here, "R": lambda t, w: here}, tmp_path)
+        assert ok is False
+        assert writes == [("L", f"cd {tmp_path}")]
+        assert "the lead tab is in /Users/jack" in capsys.readouterr().out
+
+    def test_wrong_then_unreadable_then_right_heals(self, monkeypatch, tmp_path):
+        here = str(tmp_path)
+        ok, writes, _ = self._run(monkeypatch, {
+            "L": lambda t, w: "/Users/jack" if t < 5 else ("" if t < 7 else here),
+            "W": lambda t, w: here, "R": lambda t, w: here}, tmp_path)
+        assert ok and writes == [("L", f"cd {tmp_path}")]
+
     def test_symlinked_spelling_counts_as_the_same_dir(self, monkeypatch, tmp_path):
         link = tmp_path / "link"
         real = tmp_path / "real"
