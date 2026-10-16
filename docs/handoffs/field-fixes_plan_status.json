@@ -1,0 +1,25 @@
+{
+  "state": "approved",
+  "ready_for": null,
+  "round": 1,
+  "phase": "field-fixes",
+  "type": "plan",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-10-16",
+  "baseline": {
+    "sha": "c9d9d3793d137d2f9a46c6c7b55986c7a636721c",
+    "dirty_paths": [],
+    "captured_at": "2026-10-16T00:53:34.853433+00:00",
+    "source": "plan-init"
+  },
+  "impl_boundary": {
+    "sha": "c9d9d3793d137d2f9a46c6c7b55986c7a636721c",
+    "dirty": {
+      "docs/handoffs/field-fixes_plan_rounds.jsonl": "2c7a5dd171dc4ef1ddeb4b361eaf0fd50adce3d512fd7df7bebeb592ff8c72af",
+      "docs/handoffs/field-fixes_plan_status.json": "0565ece19386d991958b408584c84cbf7b9623ef3c9ac3cf6337bc1b9f5285a0"
+    },
+    "captured_at": "2026-10-16T00:54:04.111122+00:00",
+    "source": "plan-approve"
+  }
+}
