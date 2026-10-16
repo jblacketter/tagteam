@@ -476,3 +476,25 @@ class TestSendLifecycle:
             lc.start_turn(p, cid, "second", config=cfg)
         t = lc.run_turn(handle)
         assert t["status"] == "ok" and h.read_inflight(p) is None
+
+
+# Phase 76: the first-turn state line reads as prose, never `turn None`.
+class TestStateLine:
+    def _line(self, tmp_path, monkeypatch, **state):
+        monkeypatch.setattr("tagteam.state.read_state", lambda root: state)
+        return lc._state_line(tmp_path)
+
+    def test_done_cycle_names_the_result_and_no_none(self, tmp_path, monkeypatch):
+        line = self._line(tmp_path, monkeypatch, phase="loom-experiments", type="impl",
+                          round=1, status="done", turn=None, result="approved")
+        assert line == ("phase loom-experiments · impl · round 1 · "
+                        "status done (approved) · turn —")
+        assert "None" not in line
+
+    def test_live_cycle_is_unchanged(self, tmp_path, monkeypatch):
+        assert self._line(tmp_path, monkeypatch, phase="a", type="plan", round=2,
+                          status="ready", turn="reviewer") == (
+            "phase a · plan · round 2 · status ready · turn reviewer")
+
+    def test_no_phase(self, tmp_path, monkeypatch):
+        assert self._line(tmp_path, monkeypatch) == "no active cycle"

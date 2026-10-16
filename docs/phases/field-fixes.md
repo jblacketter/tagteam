@@ -1,8 +1,8 @@
 # Phase 76: Field fixes — roadmap `(slug)`, lead state line, iTerm2 `cd`
 
 ## Status
-- [ ] Planning
-- [ ] Implementation
+- [x] Planning: plan approved round 1 (2026-10-16)
+- [x] Implementation
 - [ ] Implementation Review
 - [ ] Complete
 
@@ -26,12 +26,18 @@ them changes a cycle state, a CLI flag or the contract.
 `ask-your-words-answer-me-later-answer-later`, so `roadmap queue answer-later` fails with
 "not found", and a full-roadmap run would name its cycles and phase docs after the long slug.
 
-**Rule.** When a phase heading's title ends in `(<s>)` or `` (`<s>`) `` and `<s>` matches
-`^[a-z0-9]+(?:-[a-z0-9]+)*$` (already a slug: lowercase, kebab-case, nothing for `_slugify` to
-change), then `<s>` is the phase slug and the display name is the title with that suffix (and
+**Rule.** When a phase heading's title ends in `` (`<s>`) `` with `<s>` matching
+`^[a-z0-9]+(?:-[a-z0-9]+)*$`, or in a bare `(<s>)` with at least one hyphen
+(`^[a-z0-9]+(?:-[a-z0-9]+)+$`) — already a slug, nothing for `_slugify` to change — then `<s>` is the phase slug and the display name is the title with that suffix (and
 the whitespace before it) removed. Every other title keeps today's slug. The match is strict on
 purpose: `(OAuth)`, `(B0)`, `(Performance)`, `(3.0 arc)` and `(optional, defer if …)` are not
 slugs and stay part of the name.
+
+*Implementation note:* the hyphen requirement for a bare suffix was added during implementation.
+An existing test (`TestDependencyProblemLines`, from bugalizer's real roadmap) has the heading
+`Private repo access (proposed)`: a one-word lowercase annotation, not a slug. Every bare suffix in
+the registry is hyphenated (Liminal's 21), and perfalyzer's one single-word slug, `reports`, is
+backticked, so the measured blast radius is unchanged.
 
 **One helper, two callers.** A new `_heading_identity(title) -> (name, slug)` is used by both
 `parse_roadmap()` and `validate_identities()`, so `roadmap check`'s duplicate-slug check sees
@@ -70,7 +76,11 @@ a. **Verify each tab's directory before launching, and re-send the `cd` once.** 
    and returns False. A wrong-directory tab is a session-start error, not a silent
    "No active cycle" a minute later. If `session.path` cannot be read at all (empty or an
    AppleScript error), there is nothing to verify against: print one `note:` and continue, so
-   the change never blocks a setup where the check is unavailable.
+   the change never blocks a setup where the check is unavailable. *Implementation note:* a
+   brand-new tab reports `missing value` until its shell has started (observed live), so an
+   empty path means "not known yet" and is polled until the deadline; only a path that never
+   becomes readable gets the note. iTerm2 reports the path as the shell spells it (`/tmp`,
+   not `/private/tmp`), so it is compared by `realpath` on both sides.
 
 b. **Launch lines carry their own `cd`.** The lead, reviewer and watcher launch commands are
    sent as `cd <quoted abs_dir> && <command>`. If a swallowed character breaks the line, it
