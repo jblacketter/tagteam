@@ -124,6 +124,26 @@ def _slugify(name: str) -> str:
     return slug.strip("-")
 
 
+# Phase 76: a title ending in `(slug)` or `(`slug`)`, where the slug is already
+# lowercase kebab-case, names its phase's slug (Liminal: `… (answer-later)`).
+# Strict on purpose: `(OAuth)`, `(B0)`, `(3.0 arc)` stay part of the name, and a
+# bare suffix needs a hyphen — `(proposed)` is an annotation; `(`reports`)` is a slug.
+_SLUG_SUFFIX_RE = re.compile(
+    r"\s*\(\s*(?:`([a-z0-9]+(?:-[a-z0-9]+)*)`|([a-z0-9]+(?:-[a-z0-9]+)+))\s*\)\s*$")
+
+
+def _heading_identity(title: str) -> tuple[str, str]:
+    """`(name, slug)` for a phase heading's title — the one place a heading
+    becomes an identity, shared by `parse_roadmap` and `validate_identities`."""
+    title = title.strip()
+    m = _SLUG_SUFFIX_RE.search(title)
+    if m and m.start() > 0:
+        name = title[:m.start()].strip()
+        if name:
+            return name, m.group(1) or m.group(2)
+    return title, _slugify(title)
+
+
 def parse_roadmap(roadmap_path: Path) -> list[RoadmapPhase]:
     """Parse docs/roadmap.md and return all phases in order.
 
@@ -157,7 +177,7 @@ def parse_roadmap(roadmap_path: Path) -> list[RoadmapPhase]:
         name = match.group(3).strip()
         if _is_placeholder(name):
             continue        # bounds its neighbours' sections (`headings[i + 1]`), is no phase itself
-        slug = _slugify(name)
+        name, slug = _heading_identity(name)
 
         # Extract the section text between this heading and the next
         start = match.end()
@@ -314,7 +334,7 @@ def validate_identities(roadmap_text: str) -> list[str]:
             problems.append(f"{label}: empty name")
         numbers.setdefault((number, suffix), []).append(name or "(empty)")
         if name:
-            slug = _slugify(name)
+            slug = _heading_identity(name)[1]
             if not slug:
                 problems.append(f"{label}: empty normalized slug ({name!r})")
             else:

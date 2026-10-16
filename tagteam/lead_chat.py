@@ -194,8 +194,11 @@ def _state_line(project_root) -> str:
         st = {}
     if not st.get("phase"):
         return "no active cycle"
+    status = st.get("status")
+    if st.get("result"):
+        status = f"{status} ({st['result']})"
     return (f"phase {st.get('phase')} · {st.get('type')} · round {st.get('round')} · "
-            f"status {st.get('status')} · turn {st.get('turn')}")
+            f"status {status} · turn {st.get('turn') or '—'}")
 
 
 def _replay_tail(project_root, cid: str, turns: list[dict]) -> str:

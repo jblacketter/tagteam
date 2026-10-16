@@ -127,6 +127,67 @@ class TestParseRoadmap:
         assert names == ["Auth System", "API Gateway", "Dashboard", "CI Integration"]
 
 
+# Phase 76: a heading's trailing `(slug)` is the phase slug (Liminal's convention).
+SLUG_SUFFIX_ROADMAP = """\
+# Roadmap
+
+### Phase 31: Ask your words — Personal Grimoire (personal-grimoire)
+- **Status:** ✅ Complete
+
+### Phase 32: Ask your words — Answer me later (answer-later)
+- **Status:** Not started
+- **Depends on:** personal-grimoire
+
+### Phase 33: Engine core (`core-engine`)
+- **Status:** Not started
+- **Depends on:** answer-later
+
+### Phase 34: Reports (`reports`)
+- **Status:** Not started
+"""
+
+
+class TestHeadingSlugSuffix:
+    def test_trailing_slug_is_the_phase_slug(self, tmp_path):
+        phases = parse_roadmap(_write_roadmap(tmp_path, SLUG_SUFFIX_ROADMAP))
+        assert [(p.slug, p.name) for p in phases] == [
+            ("personal-grimoire", "Ask your words — Personal Grimoire"),
+            ("answer-later", "Ask your words — Answer me later"),
+            ("core-engine", "Engine core"),
+            ("reports", "Reports"),
+        ]
+        assert phases[1].depends_on == ["personal-grimoire"]
+        assert phases[2].depends_on == ["answer-later"]
+        assert validate_graph(phases) == []
+
+    @pytest.mark.parametrize("title, slug", [
+        ("Auth (OAuth)", "auth-oauth"),
+        ("Bugs (B0)", "bugs-b0"),
+        ("Private repo access (proposed)", "private-repo-access-proposed"),
+        ("Visual Story (3.0 arc)", "visual-story-30-arc"),
+        ("Polish (optional, defer if 20–22 suffice)", "polish-optional-defer-if-2022-suffice"),
+        ("Mismatched (`core-engine)", "mismatched-core-engine"),
+        ("Plain Name", "plain-name"),
+        ("(only-a-slug)", "only-a-slug"),
+    ])
+    def test_non_slug_suffix_keeps_todays_slug(self, tmp_path, title, slug):
+        phases = parse_roadmap(_write_roadmap(
+            tmp_path, f"# R\n\n### Phase 1: {title}\n- **Status:** Not started\n"))
+        assert (phases[0].slug, phases[0].name) == (slug, title)
+        assert slug == _slugify(title)
+
+    def test_queue_starts_from_the_short_slug(self, tmp_path):
+        roadmap = _write_roadmap(tmp_path, SLUG_SUFFIX_ROADMAP)
+        assert build_queue(roadmap, start_phase="answer-later") == [
+            "answer-later", "core-engine", "reports"]
+
+    def test_check_reports_a_collision_under_the_new_rule(self):
+        text = ("### Phase 1: Answer Later\n- **Status:** Not started\n\n"
+                "### Phase 2: Ask your words (answer-later)\n- **Status:** Not started\n")
+        assert validate_identities(text) == [
+            "duplicate slug 'answer-later': Phase 1, Phase 2"]
+
+
 # ── get_incomplete_phases ────────────────────────────────────────
 
 

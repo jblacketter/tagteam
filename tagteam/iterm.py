@@ -6,6 +6,8 @@ AppleScript's `write text`. Each tab is an independent terminal session --
 no pane sharing, no nesting, no corruption.
 """
 
+import os
+import shlex
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -23,6 +25,9 @@ _ITERM_LAUNCH_TIMEOUT_S = 10.0
 _ITERM_POLL_INTERVAL_S = 0.2
 _ITERM_READY_PROBE = 'tell application "iTerm2" to count windows'
 _ITERM_BUNDLE_ID = "com.googlecode.iterm2"
+# Phase 76: how long a new tab gets to reach the project directory (per try).
+_TAB_DIR_TIMEOUT_S = 5.0
+_TAB_DIR_POLL_S = 0.25
 
 
 def _osascript(script: str) -> str:
@@ -218,11 +223,19 @@ def create_session(project_dir: str, launch: bool = False) -> bool:
             wait_for_agent_ready,
         )
 
-        write_text_to_session(ids[0], lead_cmd)
-        write_text_to_session(ids[2], reviewer_cmd)
+        # Phase 76: shell startup can eat the typed `cd` (oh-my-zsh's [Y/n]
+        # update read took its `c`), leaving a tab in ~. Nothing launches
+        # until every tab we can check is in the project, and each launch
+        # line carries its own `cd` so a mangled line fails visibly instead.
+        roles = {"lead": ids[0], "watcher": ids[1], "reviewer": ids[2]}
+        if not _wait_for_tab_dirs(roles, abs_dir):
+            return False
+        cd_prefix = f"cd {shlex.quote(abs_dir)} && "
+        write_text_to_session(ids[0], cd_prefix + lead_cmd)
+        write_text_to_session(ids[2], cd_prefix + reviewer_cmd)
         # Start watcher last — agents need a moment to initialize
         watcher_cmd = _watcher_command(project_dir, "iterm2")
-        write_text_to_session(ids[1], watcher_cmd)
+        write_text_to_session(ids[1], cd_prefix + watcher_cmd)
         # Auto-prime each agent once ITS prompt is visible. A fixed sleep
         # raced Claude Code's startup (MCP init etc.) and the prime was
         # silently discarded while the reviewer, which boots faster, got it.
@@ -248,6 +261,90 @@ def create_session(project_dir: str, launch: bool = False) -> bool:
     print()
     print(f"  Session file: {_session_file_path(project_dir)}")
     return True
+
+
+def _session_path(session_id: str) -> str:
+    """A session's working directory as iTerm2 reports it (`session.path`;
+    no shell integration needed). "" while unknown — a new tab says
+    `missing value` until its shell has started — or on any failure."""
+    script = f'''
+    tell application "iTerm2"
+        repeat with w in windows
+            repeat with t in tabs of w
+                repeat with s in sessions of t
+                    if unique ID of s is "{session_id}" then
+                        return (variable named "session.path") of s
+                    end if
+                end repeat
+            end repeat
+        end repeat
+        return ""
+    end tell
+    '''
+    try:
+        path = _osascript(script).strip()
+    except Exception:
+        return ""
+    return "" if path == "missing value" else path
+
+
+def _same_dir(path: str, abs_dir: str) -> bool:
+    # iTerm2 reports the path as the shell sees it (`/tmp`, not `/private/tmp`).
+    return os.path.realpath(path) == os.path.realpath(abs_dir)
+
+
+def _wait_for_tab_dirs(
+    roles: dict[str, str],
+    abs_dir: str,
+    timeout: float = _TAB_DIR_TIMEOUT_S,
+    poll: float = _TAB_DIR_POLL_S,
+) -> bool:
+    """Wait until every tab in ``roles`` ({role: session id}) is in ``abs_dir``.
+
+    A tab still elsewhere at the deadline gets its `cd` re-sent once (the
+    startup read that ate it has finished by then) and a second deadline.
+    False — after printing the role, its path and its last lines — when a
+    tab is still elsewhere after that. A tab whose path never becomes
+    readable cannot be checked: one note, and it does not block the launch.
+    """
+    pending = dict(roles)
+    resent: set[str] = set()
+    deadline = time.monotonic() + timeout
+    while True:
+        wrong: dict[str, str] = {}
+        for role, sid in list(pending.items()):
+            path = _session_path(sid)
+            if path and _same_dir(path, abs_dir):
+                del pending[role]
+            elif path:
+                wrong[role] = path
+        if not pending:
+            return True
+        if time.monotonic() >= deadline:
+            for role in [r for r in pending if r not in wrong]:
+                print(f"  note: could not read the {role} tab's directory from iTerm2;"
+                      " not verified (its launch line still starts with `cd`).")
+                del pending[role]
+            retry = [r for r in wrong if r not in resent]
+            if retry:
+                for role in retry:
+                    write_text_to_session(pending[role], f"cd {shlex.quote(abs_dir)}")
+                    resent.add(role)
+                deadline = time.monotonic() + timeout
+            elif wrong:
+                for role, path in wrong.items():
+                    print(f"Error: the {role} tab is in {path}, not {abs_dir}"
+                          " (its `cd` was re-sent once). Nothing was launched.")
+                    tail = get_session_contents(pending[role], last_n_lines=6)
+                    for line in tail.splitlines():
+                        print(f"    | {line}")
+                print("  Fix whatever reads the terminal during shell startup"
+                      " (e.g. oh-my-zsh: zstyle ':omz:update' mode reminder),"
+                      " close these tabs and run session start again.")
+                return False
+            if not pending:
+                return True
+        time.sleep(poll)
 
 
 def write_text_to_session(session_id: str, text: str) -> bool:

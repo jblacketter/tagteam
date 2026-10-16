@@ -21,6 +21,8 @@ from tagteam.iterm import (
 from tagteam.tabs import SUBMIT_DELAY_S
 from tagteam.watcher import _check_idle_patterns
 
+_HERE = [""]    # the directory a patched `_session_path` reports
+
 
 class TestSessionFile:
     def test_write_and_read(self, tmp_path):
@@ -150,6 +152,7 @@ class TestOsascriptCalls:
 class TestCreateSessionLaunch:
     """Tests for create_session with --launch flag."""
 
+    @patch("tagteam.iterm._session_path", side_effect=lambda sid: _HERE[0])
     @patch("tagteam.session.time.sleep")
     @patch("tagteam.iterm.get_session_contents", return_value="\u276f \n  ? for shortcuts")
     @patch("tagteam.iterm.iterm_is_running", return_value=True)
@@ -158,10 +161,12 @@ class TestCreateSessionLaunch:
     @patch("tagteam.iterm._osascript")
     def test_launch_sends_raw_commands_after_session_file(
         self, mock_osascript, mock_write_text, mock_ensure, mock_running,
-        mock_contents, mock_sleep, tmp_path
+        mock_contents, mock_sleep, mock_path, tmp_path
     ):
         """Launch commands must be sent after session file exists,
         and must NOT be double-escaped (regression test)."""
+        _HERE[0] = str(tmp_path)
+        cd = f"cd {tmp_path.resolve()} && "
         mock_osascript.return_value = "lead-id,watcher-id,reviewer-id"
         mock_write_text.return_value = True
 
@@ -190,12 +195,12 @@ class TestCreateSessionLaunch:
         assert len(calls) == 5
 
         # Lead gets raw command with quotes intact
-        assert calls[0] == call("lead-id", 'claude --model "opus"')
+        assert calls[0] == call("lead-id", cd + 'claude --model "opus"')
         # Reviewer gets raw command with quotes intact
-        assert calls[1] == call("reviewer-id", 'codex --approval-mode "full-auto"')
+        assert calls[1] == call("reviewer-id", cd + 'codex --approval-mode "full-auto"')
         # Watcher
         from tagteam.session import _watcher_command
-        assert calls[2] == call("watcher-id", _watcher_command(str(tmp_path), "iterm2"))
+        assert calls[2] == call("watcher-id", cd + _watcher_command(str(tmp_path), "iterm2"))
         # Auto-prime messages sent to lead and reviewer
         from tagteam.session import PRIME_MESSAGE
         assert calls[3] == call("lead-id", PRIME_MESSAGE)
@@ -229,6 +234,7 @@ class TestCreateSessionLaunch:
         assert mock_osascript.call_count == 1
 
 
+    @patch("tagteam.iterm._session_path", side_effect=lambda sid: _HERE[0])
     @patch("tagteam.session.time.sleep")
     @patch("tagteam.iterm.get_session_contents")
     @patch("tagteam.iterm.iterm_is_running", return_value=True)
@@ -237,11 +243,12 @@ class TestCreateSessionLaunch:
     @patch("tagteam.iterm._osascript")
     def test_launch_primes_each_tab_only_after_its_prompt_is_visible(
         self, mock_osascript, mock_write_text, mock_ensure, mock_running,
-        mock_contents, mock_sleep, tmp_path
+        mock_contents, mock_sleep, mock_path, tmp_path
     ):
         """Regression: a fixed 3s sleep raced Claude Code's startup and the
         prime was discarded. Priming must wait per tab for the agent prompt;
         a shell prompt (agent not started) must not count as ready."""
+        _HERE[0] = str(tmp_path)
         mock_osascript.return_value = "lead-id,watcher-id,reviewer-id"
         mock_write_text.return_value = True
         (tmp_path / "tagteam.yaml").write_text(
@@ -271,6 +278,121 @@ class TestCreateSessionLaunch:
         # order is asserted through the poll iterator being exhausted.)
         with pytest.raises(StopIteration):
             next(lead_polls)
+
+
+class _Clock:
+    """Virtual time for `tagteam.iterm.time`: sleep advances monotonic."""
+    def __init__(self):
+        self.now = 0.0
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, s):
+        self.now += s
+
+
+class TestTabDirectories:
+    """Phase 76: no agent launches outside the project directory."""
+
+    ROLES = {"lead": "L", "watcher": "W", "reviewer": "R"}
+
+    def _run(self, monkeypatch, paths, tmp_path):
+        """paths: {sid: callable(clock, resent) -> reported path}."""
+        clock = _Clock()
+        writes = []
+        monkeypatch.setattr("tagteam.iterm.time", clock)
+        monkeypatch.setattr("tagteam.iterm._session_path",
+                            lambda sid: paths[sid](clock.now, [w for w in writes if w[0] == sid]))
+        monkeypatch.setattr("tagteam.iterm.write_text_to_session",
+                            lambda sid, text: writes.append((sid, text)) or True)
+        monkeypatch.setattr("tagteam.iterm.get_session_contents",
+                            lambda sid, last_n_lines=5: "[oh-my-zsh] Would you like to update? [Y/n]\nd /x")
+        from tagteam.iterm import _wait_for_tab_dirs
+        ok = _wait_for_tab_dirs(dict(self.ROLES), str(tmp_path))
+        return ok, writes, clock
+
+    def test_all_tabs_arrive(self, monkeypatch, tmp_path):
+        here = str(tmp_path)
+        ok, writes, _ = self._run(monkeypatch, {
+            "L": lambda t, w: "" if t < 1 else here,          # missing value while the shell starts
+            "W": lambda t, w: here, "R": lambda t, w: here}, tmp_path)
+        assert ok and writes == []
+
+    def test_eaten_cd_is_resent_once_and_heals(self, monkeypatch, tmp_path):
+        here = str(tmp_path)
+        ok, writes, _ = self._run(monkeypatch, {
+            "L": lambda t, w: here if w else "/Users/jack",    # stays in ~ until the re-sent cd
+            "W": lambda t, w: here, "R": lambda t, w: here}, tmp_path)
+        assert ok
+        assert writes == [("L", f"cd {tmp_path}")]
+
+    def test_tab_that_stays_wrong_fails_loudly(self, monkeypatch, tmp_path, capsys):
+        here = str(tmp_path)
+        ok, writes, clock = self._run(monkeypatch, {
+            "L": lambda t, w: "/Users/jack",
+            "W": lambda t, w: here, "R": lambda t, w: here}, tmp_path)
+        out = capsys.readouterr().out
+        assert ok is False
+        assert writes == [("L", f"cd {tmp_path}")]           # exactly one re-send
+        assert f"the lead tab is in /Users/jack, not {tmp_path}" in out
+        assert "[oh-my-zsh] Would you like to update?" in out
+        assert clock.now <= 2 * 5.0 + 1                       # two deadlines, no more
+
+    def test_unreadable_path_is_a_note_not_a_block(self, monkeypatch, tmp_path, capsys):
+        here = str(tmp_path)
+        ok, writes, _ = self._run(monkeypatch, {
+            "L": lambda t, w: "", "W": lambda t, w: here, "R": lambda t, w: here}, tmp_path)
+        assert ok and writes == []
+        assert "could not read the lead tab's directory" in capsys.readouterr().out
+
+    def test_symlinked_spelling_counts_as_the_same_dir(self, monkeypatch, tmp_path):
+        link = tmp_path / "link"
+        real = tmp_path / "real"
+        real.mkdir()
+        link.symlink_to(real)
+        clock = _Clock()
+        monkeypatch.setattr("tagteam.iterm.time", clock)
+        monkeypatch.setattr("tagteam.iterm._session_path", lambda sid: str(link))
+        from tagteam.iterm import _wait_for_tab_dirs
+        assert _wait_for_tab_dirs({"lead": "L"}, str(real.resolve())) is True
+
+    @patch("tagteam.iterm.iterm_is_running", return_value=True)
+    @patch("tagteam.iterm._ensure_iterm_ready")
+    @patch("tagteam.iterm._osascript", return_value="lead-id,watcher-id,reviewer-id")
+    def test_create_session_launches_nothing_when_a_tab_is_wrong(
+        self, mock_osascript, mock_ensure, mock_running, monkeypatch, tmp_path
+    ):
+        (tmp_path / "tagteam.yaml").write_text(
+            "agents:\n  lead:\n    name: Claude\n  reviewer:\n    name: Codex\n")
+        here = str(tmp_path)
+        clock = _Clock()
+        writes = []
+        monkeypatch.setattr("tagteam.iterm.time", clock)
+        monkeypatch.setattr("tagteam.iterm._session_path",
+                            lambda sid: "/Users/jack" if sid == "lead-id" else here)
+        monkeypatch.setattr("tagteam.iterm.write_text_to_session",
+                            lambda sid, text: writes.append((sid, text)) or True)
+        monkeypatch.setattr("tagteam.iterm.get_session_contents", lambda sid, last_n_lines=5: "")
+        assert create_session(here, launch=True) is False
+        assert writes == [("lead-id", f"cd {tmp_path.resolve()}")]   # the re-sent cd only
+
+
+class TestSessionPath:
+    @patch("tagteam.iterm._osascript", return_value="/Users/jack/projects/x\n")
+    def test_reads_the_path(self, _):
+        from tagteam.iterm import _session_path
+        assert _session_path("s") == "/Users/jack/projects/x"
+
+    @patch("tagteam.iterm._osascript", return_value="missing value")
+    def test_missing_value_is_unknown(self, _):
+        from tagteam.iterm import _session_path
+        assert _session_path("s") == ""
+
+    @patch("tagteam.iterm._osascript", side_effect=RuntimeError("boom"))
+    def test_failure_is_unknown(self, _):
+        from tagteam.iterm import _session_path
+        assert _session_path("s") == ""
 
 
 class TestEnsureItermReady:
