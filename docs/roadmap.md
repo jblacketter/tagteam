@@ -9,7 +9,7 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 
 ## Phases
 ### Phase 76: Field fixes
-- **Status:** Approved — plan approved round 1, impl approved round 2 (2026-10-16); gate: 2,693 passed, 5 skipped at `33c7e94`. PR open. See `docs/phases/field-fixes.md`.
+- **Status:** ✅ Complete — plan approved round 1, impl approved round 2 (2026-10-16); gate: 2,693 passed, 5 skipped at `33c7e94`. Merged (PR #66). See `docs/phases/field-fixes.md`.
 - **Description:** Three defects found on real projects and still present in 3.14.10. (1) A roadmap heading's trailing `(slug)` is ignored: Liminal's `… (answer-later)` gets the slug `ask-your-words-answer-me-later-answer-later`, so `roadmap queue answer-later` fails. Now a kebab-case `(slug)` with a hyphen, or any `` (`slug`) ``, is the phase slug; measured over the 43 registered projects, only Liminal and perfalyzer change. (2) The cockpit lead's state line prints `turn None` and leaves out `result`. (3) In the iTerm2 backend, shell startup (oh-my-zsh's update prompt) can eat the injected `cd`, so the lead launches in `~`. Each tab's `session.path` is now checked before launch, with one re-sent `cd`, and launch lines carry their own `cd … &&`.
 
 <!-- Phases 67–74: the cockpit arc agreed with the arbiter on 2026-09-20. Goal: the cockpit replaces the three
