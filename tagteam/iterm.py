@@ -306,36 +306,38 @@ def _wait_for_tab_dirs(
     False — after printing the role, its path and its last lines — when a
     tab is still elsewhere after that. A tab whose path never becomes
     readable cannot be checked: one note, and it does not block the launch.
+    A tab once seen elsewhere keeps that path through unreadable polls and
+    clears only on a positive match.
     """
     pending = dict(roles)
+    last: dict[str, str] = {}       # each tab's last READABLE path: one bad read never clears it
     resent: set[str] = set()
     deadline = time.monotonic() + timeout
     while True:
-        wrong: dict[str, str] = {}
         for role, sid in list(pending.items()):
             path = _session_path(sid)
             if path and _same_dir(path, abs_dir):
-                del pending[role]
+                del pending[role]    # only a positive match clears a tab
             elif path:
-                wrong[role] = path
+                last[role] = path
         if not pending:
             return True
         if time.monotonic() >= deadline:
-            for role in [r for r in pending if r not in wrong]:
+            for role in [r for r in pending if r not in last]:
                 print(f"  note: could not read the {role} tab's directory from iTerm2;"
                       " not verified (its launch line still starts with `cd`).")
                 del pending[role]
-            retry = [r for r in wrong if r not in resent]
+            retry = [r for r in pending if r not in resent]
             if retry:
                 for role in retry:
                     write_text_to_session(pending[role], f"cd {shlex.quote(abs_dir)}")
                     resent.add(role)
                 deadline = time.monotonic() + timeout
-            elif wrong:
-                for role, path in wrong.items():
-                    print(f"Error: the {role} tab is in {path}, not {abs_dir}"
+            elif pending:
+                for role, sid in pending.items():
+                    print(f"Error: the {role} tab is in {last[role]}, not {abs_dir}"
                           " (its `cd` was re-sent once). Nothing was launched.")
-                    tail = get_session_contents(pending[role], last_n_lines=6)
+                    tail = get_session_contents(sid, last_n_lines=6)
                     for line in tail.splitlines():
                         print(f"    | {line}")
                 print("  Fix whatever reads the terminal during shell startup"
