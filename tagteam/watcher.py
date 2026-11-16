@@ -1670,6 +1670,22 @@ def remove_pidfile(project_root: str | Path, pid: int | None = None) -> bool:
         return False
 
 
+def _discard_own_pidfile(project_root: str | Path) -> None:
+    """Startup/exit cleanup for the watcher that holds the project's exclusive
+    lock (Phase 79). Removes our pidfile; and, because `write_pidfile` is not
+    atomic, also a pidfile that exists but does not parse: an interrupted
+    write of ours, which `remove_pidfile` cannot recognise. A readable record
+    naming another pid is left alone. Best-effort; call it nowhere else."""
+    if remove_pidfile(project_root):
+        return
+    p = pidfile_path(project_root)
+    try:
+        if p.is_file() and not p.is_symlink() and read_pidfile(project_root) is None:
+            p.unlink()
+    except OSError:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Phase 58: one watcher per project
 
@@ -1905,6 +1921,26 @@ def _watch_locked(*, interval, mode, lead_pane, reviewer_pane, confirm, timeout_
 def _watch_sinked(*, interval, mode, lead_pane, reviewer_pane, confirm, timeout_minutes, project_dir,
                   max_retries, retry_delay, pre_send_delay, force_poll, turn_timeout_minutes,
                   tail_rounds, turn_retries, pidfile) -> bool:
+    """Phase 79: SIGTERM is turned into KeyboardInterrupt before `watch()` is
+    called, but only the loops caught it. A stop during startup (widest right
+    after the pidfile is written, which is what every stopper waits for) died
+    with an uncaught interrupt: exit -2, a traceback, no `stop` event. One
+    catch around the whole run; the loops still consume their own, so the log
+    carries exactly one `stop` either way."""
+    try:
+        return _watch_started(interval=interval, mode=mode, lead_pane=lead_pane, reviewer_pane=reviewer_pane,
+                              confirm=confirm, timeout_minutes=timeout_minutes, project_dir=project_dir,
+                              max_retries=max_retries, retry_delay=retry_delay, pre_send_delay=pre_send_delay,
+                              force_poll=force_poll, turn_timeout_minutes=turn_timeout_minutes,
+                              tail_rounds=tail_rounds, turn_retries=turn_retries, pidfile=pidfile)
+    except KeyboardInterrupt:
+        _log("Watcher stopped.", kind="stop")
+        return True
+
+
+def _watch_started(*, interval, mode, lead_pane, reviewer_pane, confirm, timeout_minutes, project_dir,
+                  max_retries, retry_delay, pre_send_delay, force_poll, turn_timeout_minutes,
+                  tail_rounds, turn_retries, pidfile) -> bool:
     processor = _build_processor(
         mode=mode,
         lead_pane=lead_pane,
@@ -1932,9 +1968,11 @@ def _watch_sinked(*, interval, mode, lead_pane, reviewer_pane, confirm, timeout_
 
     pidfile_root = _pidfile_root(project_dir)
     keep_pidfile = pidfile_enabled(pidfile_root, pidfile)
-    if keep_pidfile:
-        write_pidfile(pidfile_root, mode)
     try:
+        # Phase 79: the write is inside its own cleanup, so a stop that lands
+        # during it (or right after) cannot leave the pidfile behind.
+        if keep_pidfile:
+            write_pidfile(pidfile_root, mode)
         if not force_poll:
             from tagteam import watcher_events
             if watcher_events.is_available():
@@ -1958,7 +1996,7 @@ def _watch_sinked(*, interval, mode, lead_pane, reviewer_pane, confirm, timeout_
         return True
     finally:
         if keep_pidfile:
-            remove_pidfile(pidfile_root)
+            _discard_own_pidfile(pidfile_root)
 
 
 def _run_poll_loop(processor: "_StateProcessor",
@@ -2168,21 +2206,26 @@ def watch_command(args: list[str]) -> int:
         mode, reason = _auto_detect_mode(".")
         _log(f"[mode] auto-detected: {mode} ({reason})")
 
-    _install_sigterm_as_interrupt()
-    started = watch(
-        interval=interval,
-        mode=mode,
-        lead_pane=lead_pane,
-        reviewer_pane=reviewer_pane,
-        confirm=confirm,
-        timeout_minutes=timeout_minutes,
-        max_retries=max_retries,
-        retry_delay=retry_delay,
-        pre_send_delay=pre_send_delay,
-        force_poll=force_poll,
-        turn_timeout_minutes=turn_timeout_minutes,
-        tail_rounds=tail_rounds,
-        turn_retries=turn_retries,
-        pidfile=pidfile,
-    )
+    try:
+        # Phase 79: a stop before the watcher's log exists (handler install,
+        # other-watcher check, lock) has nothing to record: exit 0, no traceback.
+        _install_sigterm_as_interrupt()
+        started = watch(
+            interval=interval,
+            mode=mode,
+            lead_pane=lead_pane,
+            reviewer_pane=reviewer_pane,
+            confirm=confirm,
+            timeout_minutes=timeout_minutes,
+            max_retries=max_retries,
+            retry_delay=retry_delay,
+            pre_send_delay=pre_send_delay,
+            force_poll=force_poll,
+            turn_timeout_minutes=turn_timeout_minutes,
+            tail_rounds=tail_rounds,
+            turn_retries=turn_retries,
+            pidfile=pidfile,
+        )
+    except KeyboardInterrupt:
+        return 0
     return 0 if started else 1
