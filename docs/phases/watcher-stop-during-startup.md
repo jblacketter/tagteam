@@ -3,7 +3,7 @@
 ## Status
 - [x] Planning (approved round 2, 2026-11-16)
 - [x] Implementation
-- [ ] Implementation Review
+- [x] Implementation Review: approved round 1 (2026-11-16); gate: 2,720 passed, 7 skipped at `cc7eea5`
 - [ ] Complete
 
 ## Summary
@@ -151,3 +151,13 @@ failures (expected `-2`) are quoted in the impl submission.
 8. Every wait in the new tests is bounded and every child is reaped in `finally`.
 9. Full suite green through the gate; CI green on the PR in the `.[event]` environment, where the
    failure was seen.
+
+## Closeout
+`tagteam report --phase watcher-stop-during-startup`:
+
+    Phase report: watcher-stop-during-startup — plan approved r2 · impl approved r1
+      plan   2 rounds · 1 change request · 0 bounces
+      impl   1 round · 0 change requests · 0 bounces · gate 1 run, 6m 39s
+      time   start→approve 17m 45s · implementation before first submit 2m 50s
+
+The gate's 7 skips include the two event-trigger tests (no watchdog in the project venv). The reviewer made the PR's CI run in the `.[event]` environment a condition of merge.
