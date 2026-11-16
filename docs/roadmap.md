@@ -9,7 +9,7 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 
 ## Phases
 ### Phase 77: Panel turn notice
-- **Status:** Implementation review. Plan approved round 1 (2026-11-15). See `docs/phases/panel-turn-notice.md`.
+- **Status:** Approved, awaiting merge. Plan approved round 1, impl approved round 1 (2026-11-15); gate: 2,713 passed, 5 skipped at `9946059`. See `docs/phases/panel-turn-notice.md`.
 - **Description:** When the reviewer panel takes a reviewer turn, nothing tells the arbiter: the lenses run headless and log only in the watcher tab, and the interactive reviewer pane is never sent the turn, so it looks asleep. Field report from QA (3.14.11, Phase 48 impl r1 to r8, and before on 2026-09-12): the arbiter nudged the Codex pane every impl round, producing reviews outside the panel. Add a desktop notification when a panel run claims an attempt and when its merged verdict lands, a watcher start line saying the pane stays quiet on paneled turns, and one contract sentence. No change to how the panel runs or merges.
 
 ### Phase 76: Field fixes
