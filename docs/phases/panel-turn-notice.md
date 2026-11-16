@@ -4,7 +4,7 @@
 - [x] Planning (approved round 1, 2026-11-15)
 - [x] Implementation
 - [x] Implementation Review: approved round 1 (2026-11-15); gate: 2,713 passed, 5 skipped at `9946059`
-- [ ] Complete
+- [x] Complete (merged 2026-11-16, PR #67)
 
 ## Summary
 When the reviewer panel takes a reviewer turn, nothing tells the arbiter. The watcher runs the

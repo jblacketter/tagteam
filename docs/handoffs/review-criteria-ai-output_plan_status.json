@@ -1,0 +1,34 @@
+{
+  "state": "approved",
+  "ready_for": null,
+  "round": 1,
+  "phase": "review-criteria-ai-output",
+  "type": "plan",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-11-16",
+  "baseline": {
+    "sha": "2f6415768772f6f86a28c4978291042b6c94c317",
+    "dirty_paths": [
+      "A  docs/phases/review-criteria-ai-output.md",
+      "A  docs/tagteam-issue-review-criteria-ai-output-2026-11-15.md",
+      "M  docs/phases/panel-turn-notice.md",
+      "M  docs/roadmap.md"
+    ],
+    "captured_at": "2026-11-16T08:09:32.140280+00:00",
+    "source": "plan-init"
+  },
+  "impl_boundary": {
+    "sha": "2f6415768772f6f86a28c4978291042b6c94c317",
+    "dirty": {
+      "docs/phases/panel-turn-notice.md": "fc926a42d322d919715014fcbc3ce4e783f5dc379b17568cdf1a594233268698",
+      "docs/phases/review-criteria-ai-output.md": "59bdc9c191217d2d51daae002eec8e718e8d740c38bb8c009dd024b19efa2390",
+      "docs/roadmap.md": "798ce3a49b933008e9e669aacc15319aa49e1c5b19a7160a5f342f19b58aec98",
+      "docs/tagteam-issue-review-criteria-ai-output-2026-11-15.md": "2819ab75076c858c3a5c84b9ae84605009a7510844ac25059194078a89c22d2d",
+      "docs/handoffs/review-criteria-ai-output_plan_rounds.jsonl": "be502c09fb255da4e399c1bd56581ce607863cafa7f9295640ccfe3eecc00e2d",
+      "docs/handoffs/review-criteria-ai-output_plan_status.json": "8b0d31b4c445f94010d9e059b1dba535f613dedf218949174956c4ef42dd1212"
+    },
+    "captured_at": "2026-11-16T08:10:19.605407+00:00",
+    "source": "plan-approve"
+  }
+}
