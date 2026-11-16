@@ -533,3 +533,137 @@ def test_wait_child_is_wait_on_success():
         assert _wait_child(child, lambda: "value", timeout=1) == "value"
     finally:
         _reap(child)
+
+
+# ---------------------------------------------------------------------------
+# Phase 79: a stop signal during startup (before a loop can catch it) exits cleanly
+
+# A test-only `sitecustomize` (never shipped): wraps ONE named startup function so the child
+# calls the real one, creates a ready marker, then parks. The test waits for the marker, so the
+# signal provably lands inside the window; nothing here depends on a sleep being long enough.
+_HOLD_SHIM = '''
+import os, time
+_at, _marker = os.environ.get("TT_HOLD_AT"), os.environ.get("TT_HOLD_MARKER")
+if _at and _marker:
+    def _hold(real):
+        def wrapper(*a, **k):
+            out = real(*a, **k)
+            open(_marker, "w").close()
+            time.sleep(30)                      # bounded: an unsignalled child still ends
+            return out
+        return wrapper
+    try:
+        if _at == "write_pidfile":
+            from tagteam import watcher as _w
+            _w.write_pidfile = _hold(_w.write_pidfile)
+        elif _at == "is_available":
+            from tagteam import watcher_events as _e
+            _e.is_available = _hold(_e.is_available)
+    except Exception as e:                      # say why, so a broken shim is not a silent pass
+        open(_marker + ".err", "w").write(repr(e))
+'''
+
+
+def _watchdog_installed() -> bool:
+    from tagteam import watcher_events
+    return watcher_events.is_available()
+
+
+def _start_held(project: Path, tmp_path: Path, hold_at: str, *args):
+    shim = tmp_path / "shim"
+    shim.mkdir()
+    (shim / "sitecustomize.py").write_text(_HOLD_SHIM, encoding="utf-8")
+    marker = tmp_path / "parked"
+    w = _start_watch(project, "--mode", "notify", "--pidfile", *args,
+                     PYTHONPATH=os.pathsep.join([str(shim), str(REPO), os.environ.get("PYTHONPATH", "")]),
+                     TT_HOLD_AT=hold_at, TT_HOLD_MARKER=str(marker))
+    return w, marker
+
+
+def _assert_clean_stop(w: subprocess.Popen, project: Path) -> None:
+    try:
+        code = w.wait(15)
+    except subprocess.TimeoutExpired:
+        raise AssertionError(f"watcher did not exit after SIGTERM: {_child_output(w)}")
+    out = (w.stdout.read() or b"").decode("utf-8", errors="replace")
+    assert code == 0, f"exit {code}; output:\n{out[-3000:]}"
+    assert "Traceback" not in out, out[-3000:]
+    assert W.pidfile_path(project).exists() is False and _lock_free(project)
+    from tagteam import watchlog
+    events = watchlog.read(project, 500)
+    assert [e["kind"] for e in events].count("stop") == 1 and events[-1]["kind"] == "stop", events[-3:]
+    assert watchlog.read_beat(project) is None
+
+
+class TestStopDuringStartup:
+    @pytest.mark.parametrize("hold_at,args,needs_watchdog", [
+        ("write_pidfile", ("--poll",), False),     # shared startup point, poll trigger
+        ("write_pidfile", (), True),               # same point, event trigger (CI installs `.[event]`)
+        ("is_available", (), True),                # the window CI hit: pidfile written, probe in progress
+    ], ids=["after-pidfile-write/poll", "after-pidfile-write/event", "after-watchdog-probe/event"])
+    def test_sigterm_while_parked_in_the_window(self, project, tmp_path, hold_at, args, needs_watchdog):
+        if needs_watchdog and not _watchdog_installed():
+            pytest.skip("watchdog not installed: the event trigger is exercised in CI (`.[event]`)")
+        w, marker = _start_held(project, tmp_path, hold_at, *args)
+        try:
+            _wait_child(w, lambda: marker.exists() or Path(str(marker) + ".err").exists())
+            assert marker.exists(), Path(str(marker) + ".err").read_text()
+            assert W.read_pidfile(project), "the pidfile is on disk while the child is parked"
+            assert w.poll() is None
+            os.kill(w.pid, signal.SIGTERM)
+            _assert_clean_stop(w, project)
+        finally:
+            _reap(w)
+
+    def _watch_with_write(self, project, monkeypatch, write) -> bool:
+        monkeypatch.setattr(W, "write_pidfile", write)
+        return W.watch(mode="notify", project_dir=str(project), interval=1, pidfile=True, force_poll=True)
+
+    def test_stop_inside_the_pidfile_write_leaves_no_truncated_file(self, project, monkeypatch):
+        def interrupted(root, mode):
+            p = W.pidfile_path(root)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text('{"pid": ', encoding="utf-8")            # half a document, then the signal
+            raise KeyboardInterrupt
+        assert self._watch_with_write(project, monkeypatch, interrupted) is True
+        assert not W.pidfile_path(project).exists() and _lock_free(project)
+        from tagteam import watchlog
+        assert [e["kind"] for e in watchlog.read(project, 500)].count("stop") == 1
+
+    def test_stop_after_a_whole_pidfile_removes_it(self, project, monkeypatch):
+        real = W.write_pidfile
+
+        def then_interrupt(root, mode):
+            real(root, mode)
+            raise KeyboardInterrupt
+        assert self._watch_with_write(project, monkeypatch, then_interrupt) is True
+        assert not W.pidfile_path(project).exists() and _lock_free(project)
+
+    def test_a_readable_pidfile_naming_another_pid_is_left_alone(self, project, monkeypatch):
+        def someone_elses(root, mode):
+            p = W.pidfile_path(root)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps({"pid": os.getpid() + 1, "mode": "notify"}), encoding="utf-8")
+            raise KeyboardInterrupt
+        assert self._watch_with_write(project, monkeypatch, someone_elses) is True
+        assert (W.read_pidfile(project) or {}).get("pid") == os.getpid() + 1
+
+    def test_no_pidfile_requested_means_none_is_touched(self, project, monkeypatch):
+        p = W.pidfile_path(project)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("not json", encoding="utf-8")                # unparseable, but not ours to judge
+
+        def boom(*a, **k):
+            raise KeyboardInterrupt
+        monkeypatch.setattr(W, "_build_processor", boom)
+        assert W.watch(mode="notify", project_dir=str(project), interval=1, pidfile=False) is True
+        assert p.read_text(encoding="utf-8") == "not json"
+
+    @pytest.mark.parametrize("where", ["watch", "_install_sigterm_as_interrupt"])
+    def test_stop_before_the_sink_exists_exits_zero(self, project, monkeypatch, capsys, where):
+        def interrupted(*a, **k):
+            raise KeyboardInterrupt
+        monkeypatch.setattr(W, where, interrupted)
+        monkeypatch.chdir(project)
+        assert W.watch_command(["--mode", "notify"]) == 0
+        assert "Traceback" not in capsys.readouterr().err

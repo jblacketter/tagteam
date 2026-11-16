@@ -9,7 +9,7 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 
 ## Phases
 ### Phase 79: A stop signal during watcher startup exits cleanly (watcher-stop-during-startup)
-- **Status:** Planning (2026-11-16). See `docs/phases/watcher-stop-during-startup.md`.
+- **Status:** Implementation review. Plan approved round 2 (2026-11-16). See `docs/phases/watcher-stop-during-startup.md`.
 - **Description:** `tagteam watch` turns SIGTERM into `KeyboardInterrupt`, but only the two loops catch it. A stop that lands between installing the handler and entering a loop (widest right after the pidfile is written, which is exactly what the cockpit, `serve` shutdown and the tests wait for) kills the watcher with an uncaught interrupt: exit `-2`, a traceback, no `stop` event. Seen twice in a row in CI on PR #68 and reproduced on demand with a delay in the window. Catch the interrupt once around the whole run and around the pre-sink start, and add a test that forces the window.
 
 ### Phase 77: Panel turn notice

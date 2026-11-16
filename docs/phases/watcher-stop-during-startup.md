@@ -1,8 +1,8 @@
 # Phase 79: A stop signal during watcher startup exits cleanly
 
 ## Status
-- [ ] Planning
-- [ ] Implementation
+- [x] Planning (approved round 2, 2026-11-16)
+- [x] Implementation
 - [ ] Implementation Review
 - [ ] Complete
 
