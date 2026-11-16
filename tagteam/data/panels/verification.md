@@ -15,7 +15,10 @@ Check:
   entry in the round tail if the gatekeeper ran); if the gate ran, start
   from its report rather than re-running the suite;
 - new test helpers/fixtures are isolated (no reliance on the developer's
-  machine, no writes outside the temp project).
+  machine, no writes outside the temp project);
+- a promised behaviour left untested, or a test skipped or marked xfail,
+  carries a stated reason in the submission or the code (an unexplained
+  gap is a finding).
 
 Run the focused tests yourself if the environment allows; cite test names.
 `blocker` = a core promised behaviour has no test or the tests do not run;

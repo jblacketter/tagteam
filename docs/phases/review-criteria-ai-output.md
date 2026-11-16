@@ -1,8 +1,8 @@
 # Phase 78: Review criteria for AI-output hazards
 
 ## Status
-- [ ] Planning
-- [ ] Implementation
+- [x] Planning (approved round 1, 2026-11-16)
+- [x] Implementation
 - [ ] Implementation Review
 - [ ] Complete
 
