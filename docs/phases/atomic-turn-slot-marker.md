@@ -3,7 +3,7 @@
 ## Status
 - [x] Planning (approved round 1, 2026-11-16)
 - [x] Implementation
-- [ ] Implementation Review
+- [x] Implementation Review: approved round 1 (2026-11-16); gate: 2,737 passed, 7 skipped at `1214cb7`
 - [ ] Complete
 
 ## Summary
@@ -144,3 +144,14 @@ Verification before submission:
 - The five test files that use the slot (`test_headless`, `test_lead_chat`, `test_launchpad`,
   `test_briefer`, `test_gatekeeper`): 359 passed.
 - Not verified: Windows.
+
+### Cycle report
+```
+Phase report: atomic-turn-slot-marker - plan approved r1 · impl approved r1
+  plan   1 round · 0 change requests · 0 bounces
+  impl   1 round · 0 change requests · 0 bounces · gate 1 run, 6m 22s
+  time   start→approve 11m 27s · implementation before first submit 3m 39s
+         lead unknown (0 spans, 2 unknown) · reviewer 1m 26s (2 spans) · gate 6m 22s (1 span)  (elapsed; includes relay wait)
+  usage  no usage rows stored under this phase
+  turns  matched 0 of 4 · no token data 0 · unmatched 2 · unknown 2
+```

@@ -9,7 +9,7 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 
 ## Phases
 ### Phase 80: The turn slot marker is replaced atomically (atomic-turn-slot-marker)
-- **Status:** In review. Plan approved round 1 (2026-11-16); implementation submitted. See `docs/phases/atomic-turn-slot-marker.md`.
+- **Status:** Approved, awaiting merge. Plan approved round 1, impl approved round 1 (2026-11-16); gate: 2,737 passed, 7 skipped at `1214cb7`. Windows not exercised. See `docs/phases/atomic-turn-slot-marker.md`.
 - **Description:** `claim_turn_slot()` and `update_turn_slot()` write `.tagteam/turns/inflight.json` with `Path.write_text` (truncate, then write) while readers are lock-free. A reader that lands in between gets an empty file, and the slot reads as free while a turn holds it: the cockpit and hub show nothing in flight, `tagteam tail --follow` can stop early, and the gate and panel cannot name the holder. This is the launchpad endpoint test flake seen in CI on `main` (2026-09-25, 2026-11-16); reproduced on demand by widening the window. Fix: one helper writes a temporary file and `os.replace`s it over the marker. No double claim was ever possible (the claim reads under the writers' lock). Engine-only; no contract or CLI change.
 
 ### Phase 79: A stop signal during watcher startup exits cleanly (watcher-stop-during-startup)
