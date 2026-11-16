@@ -3,7 +3,7 @@
 ## Status
 - [x] Planning (approved round 1, 2026-11-15)
 - [x] Implementation
-- [ ] Implementation Review
+- [x] Implementation Review: approved round 1 (2026-11-15); gate: 2,713 passed, 5 skipped at `9946059`
 - [ ] Complete
 
 ## Summary
@@ -105,3 +105,15 @@ that turn, because a review made outside the panel is not part of the verdict.
 5. Full suite green through the gate.
 6. Arbiter acceptance (post-merge, on QA): the next paneled impl round raises a "Panel reviewing"
    notification and a verdict notification, with no text sent to the Codex pane.
+
+## Closeout
+`tagteam report --phase panel-turn-notice`:
+
+    Phase report: panel-turn-notice — plan approved r1 · impl approved r1
+      plan   1 round · 0 change requests · 0 bounces
+      impl   1 round · 0 change requests · 0 bounces · gate 1 run, 6m 04s
+      time   start→approve 427h 30m · implementation before first submit 4m 46s
+      usage  no usage rows stored under this phase
+
+The 427 hours are the plan waiting for its review from 2026-10-29 to 2026-11-15, not work.
+Success criterion 6 (a real notification on QA) is still open: it is the arbiter's check after merge.
