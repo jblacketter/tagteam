@@ -8,6 +8,10 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 **Workflow:** Lead / Reviewer with Human Arbiter
 
 ## Phases
+### Phase 80: The turn slot marker is replaced atomically (atomic-turn-slot-marker)
+- **Status:** Planning (2026-11-16). See `docs/phases/atomic-turn-slot-marker.md`.
+- **Description:** `claim_turn_slot()` and `update_turn_slot()` write `.tagteam/turns/inflight.json` with `Path.write_text` (truncate, then write) while readers are lock-free. A reader that lands in between gets an empty file, and the slot reads as free while a turn holds it: the cockpit and hub show nothing in flight, `tagteam tail --follow` can stop early, and the gate and panel cannot name the holder. This is the launchpad endpoint test flake seen in CI on `main` (2026-09-25, 2026-11-16); reproduced on demand by widening the window. Fix: one helper writes a temporary file and `os.replace`s it over the marker. No double claim was ever possible (the claim reads under the writers' lock). Engine-only; no contract or CLI change.
+
 ### Phase 79: A stop signal during watcher startup exits cleanly (watcher-stop-during-startup)
 - **Status:** ✅ Complete. Plan approved round 2, impl approved round 1 (2026-11-16); gate: 2,720 passed, 7 skipped at `cc7eea5`; CI in the `.[event]` environment: 2,734 passed, 4 skipped. Merged (PR #69, `38ce3f0` on main). See `docs/phases/watcher-stop-during-startup.md`.
 - **Description:** `tagteam watch` turns SIGTERM into `KeyboardInterrupt`, but only the two loops catch it. A stop that lands between installing the handler and entering a loop (widest right after the pidfile is written, which is exactly what the cockpit, `serve` shutdown and the tests wait for) kills the watcher with an uncaught interrupt: exit `-2`, a traceback, no `stop` event. Seen twice in a row in CI on PR #68 and reproduced on demand with a delay in the window. Catch the interrupt once around the whole run and around the pre-sink start, and add a test that forces the window.
@@ -619,8 +623,11 @@ the top. Each phase is engine + CLI first, cockpit surface second. tagteam stays
 - ~~Roadmap as DAG (`depends_on`, parallel phases in worktrees)~~ → promoted to Phase 40 (2026-08-16)
 - Thin MCP server (revisit if the headless path proves insufficient for non-Claude agents)
 
-### Launchpad endpoint test flake (unscheduled)
-- **Status:** Seen on `main` in CI on 2026-09-25 and 2026-11-16, green on re-run both times. `tests/test_launchpad.py::TestServerEndpoints::test_watch_session_and_launch_endpoints` fails at `assert conv["slot"]["held"]` right after `POST /api/start/launch` returns 202. Phase 74a held the fake turn to remove one race here; this one is earlier (the slot is read before it is claimed, or after an early release). Not investigated. Unrelated to Phase 79's SIGTERM window.
+### Launchpad endpoint test flake (scheduled as Phase 80)
+- **Status:** Root cause found 2026-11-16: the turn slot marker is rewritten non-atomically, so a lock-free reader can see it empty. See Phase 80 (`docs/phases/atomic-turn-slot-marker.md`).
+
+### Watcher pidfile is written non-atomically (unscheduled)
+- **Status:** Noted 2026-11-16 during Phase 80. `write_pidfile()` uses `Path.write_text` like the turn slot marker did, so a reader of `.tagteam/watcher.json` can see it empty for an instant and conclude no watcher is running. Not observed failing. Phase 79 covers the interrupted-write cleanup only.
 
 ### Reviewer wake delivery (possible one-off, unscheduled)
 - **Status:** Observed once on 2026-08-30 (Codex not woken when the turn flipped to reviewer; the human had to nudge it). Arbiter ruling 2026-09-03: not reproduced, treat as a possible one-off, no fix scheduled. Evidence and suggested diagnostics in `docs/tagteam-issue-reviewer-wake-delivery-2026-08-30.md` — if it recurs, promote to a phase from that note.
