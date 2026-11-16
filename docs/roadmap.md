@@ -8,6 +8,10 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 **Workflow:** Lead / Reviewer with Human Arbiter
 
 ## Phases
+### Phase 79: A stop signal during watcher startup exits cleanly (watcher-stop-during-startup)
+- **Status:** Planning (2026-11-16). See `docs/phases/watcher-stop-during-startup.md`.
+- **Description:** `tagteam watch` turns SIGTERM into `KeyboardInterrupt`, but only the two loops catch it. A stop that lands between installing the handler and entering a loop (widest right after the pidfile is written, which is exactly what the cockpit, `serve` shutdown and the tests wait for) kills the watcher with an uncaught interrupt: exit `-2`, a traceback, no `stop` event. Seen twice in a row in CI on PR #68 and reproduced on demand with a delay in the window. Catch the interrupt once around the whole run and around the pre-sink start, and add a test that forces the window.
+
 ### Phase 77: Panel turn notice
 - **Status:** Approved, awaiting merge. Plan approved round 1, impl approved round 1 (2026-11-15); gate: 2,713 passed, 5 skipped at `9946059`. See `docs/phases/panel-turn-notice.md`.
 - **Description:** When the reviewer panel takes a reviewer turn, nothing tells the arbiter: the lenses run headless and log only in the watcher tab, and the interactive reviewer pane is never sent the turn, so it looks asleep. Field report from QA (3.14.11, Phase 48 impl r1 to r8, and before on 2026-09-12): the arbiter nudged the Codex pane every impl round, producing reviews outside the panel. Add a desktop notification when a panel run claims an attempt and when its merged verdict lands, a watcher start line saying the pane stays quiet on paneled turns, and one contract sentence. No change to how the panel runs or merges.
@@ -610,6 +614,9 @@ the top. Each phase is engine + CLI first, cockpit surface second. tagteam stays
 - ~~Reviewer panels~~ → promoted to Phase 39 (2026-08-16)
 - ~~Roadmap as DAG (`depends_on`, parallel phases in worktrees)~~ → promoted to Phase 40 (2026-08-16)
 - Thin MCP server (revisit if the headless path proves insufficient for non-Claude agents)
+
+### Launchpad endpoint test flake (unscheduled)
+- **Status:** Seen on `main` in CI on 2026-09-25 and 2026-11-16, green on re-run both times. `tests/test_launchpad.py::TestServerEndpoints::test_watch_session_and_launch_endpoints` fails at `assert conv["slot"]["held"]` right after `POST /api/start/launch` returns 202. Phase 74a held the fake turn to remove one race here; this one is earlier (the slot is read before it is claimed, or after an early release). Not investigated. Unrelated to Phase 79's SIGTERM window.
 
 ### Reviewer wake delivery (possible one-off, unscheduled)
 - **Status:** Observed once on 2026-08-30 (Codex not woken when the turn flipped to reviewer; the human had to nudge it). Arbiter ruling 2026-09-03: not reproduced, treat as a possible one-off, no fix scheduled. Evidence and suggested diagnostics in `docs/tagteam-issue-reviewer-wake-delivery-2026-08-30.md` — if it recurs, promote to a phase from that note.
