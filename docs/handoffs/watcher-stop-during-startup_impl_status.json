@@ -1,0 +1,30 @@
+{
+  "state": "approved",
+  "ready_for": null,
+  "round": 1,
+  "phase": "watcher-stop-during-startup",
+  "type": "impl",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-11-16",
+  "baseline": {
+    "sha": "2f6415768772f6f86a28c4978291042b6c94c317",
+    "dirty_paths": [
+      "A  docs/phases/watcher-stop-during-startup.md",
+      "M  docs/roadmap.md"
+    ],
+    "captured_at": "2026-11-16T08:39:56.925416+00:00",
+    "source": "copied-from-plan"
+  },
+  "impl_boundary": {
+    "sha": "2f6415768772f6f86a28c4978291042b6c94c317",
+    "dirty": {
+      "docs/phases/watcher-stop-during-startup.md": "092de22f9f6f200950ced9e7ae8dff02b74f3f48cf350a91db5b5395924e60be",
+      "docs/roadmap.md": "48cca3d4f8113c235890ed5b00040ad81824f01d99a214482b03d583d91c7223",
+      "docs/handoffs/watcher-stop-during-startup_plan_rounds.jsonl": "f77ade52065d15191fbd6f32ba2f4e8f6407e8e7d53b89a01e578685b92f506a",
+      "docs/handoffs/watcher-stop-during-startup_plan_status.json": "be9849b60f308cebec95d1850dbbfa570e2a4bfabc6a2d508acd9a57159dd8be"
+    },
+    "captured_at": "2026-11-16T08:47:26.755475+00:00",
+    "source": "copied-from-plan"
+  }
+}
