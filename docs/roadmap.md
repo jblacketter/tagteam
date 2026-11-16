@@ -13,7 +13,7 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 - **Description:** `tagteam watch` turns SIGTERM into `KeyboardInterrupt`, but only the two loops catch it. A stop that lands between installing the handler and entering a loop (widest right after the pidfile is written, which is exactly what the cockpit, `serve` shutdown and the tests wait for) kills the watcher with an uncaught interrupt: exit `-2`, a traceback, no `stop` event. Seen twice in a row in CI on PR #68 and reproduced on demand with a delay in the window. Catch the interrupt once around the whole run and around the pre-sink start, and add a test that forces the window.
 
 ### Phase 78: Review criteria for AI-output hazards (review-criteria-ai-output)
-- **Status:** Planning (2026-11-16). See `docs/phases/review-criteria-ai-output.md`.
+- **Status:** Implementation review. Plan approved round 1 (2026-11-16). See `docs/phases/review-criteria-ai-output.md`.
 - **Description:** The reviewer panel's lenses are not told to look for two failures specific to AI-written work. The correctness lens gains "references that do not exist" (function, module, config key, CLI flag, path or package API not in the tree or the installed dependency); the verification lens gains "untested promised behaviour, or a skipped/xfail test, carries a stated reason". Lens prompt text only: no contract change, no engine change. From `docs/tagteam-issue-review-criteria-ai-output-2026-11-15.md`; the arbiter split that proposal, and its project-policy items (dependency justification, rollback paths, security/performance risks, secrets) stay in the project that wants them.
 
 ### Phase 77: Panel turn notice

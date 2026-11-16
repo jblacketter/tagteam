@@ -1175,3 +1175,53 @@ class TestPanelTurnNotice:
             text = Path(f).read_text(encoding="utf-8")
             assert "a review made outside the panel is not part of the verdict" in text
             assert "The exception is that fallback, where the reviewer is dispatched as usual." in text
+
+
+# ---------------------------------------------------------------------------
+# Phase 78: the lenses name two AI-output hazards (prompt delivery only)
+# ---------------------------------------------------------------------------
+
+_P78 = {"correctness": ["references that do not exist: a called function, imported module, config",
+                        "installed dependency (check, do not assume)."],
+        "verification": ["a promised behaviour left untested, or a test skipped or marked xfail,",
+                         "carries a stated reason in the submission or the code (an unexplained"]}
+# the proposal's project-policy items the arbiter kept out of tagteam (2026-11-16)
+_P78_POLICY = ["dependency changes", "added package", "secrets", "hardcoded", "credentials", "rollback"]
+
+
+class TestAiOutputLensCriteria:
+    @pytest.mark.parametrize("lens", sorted(_P78))
+    def test_packaged_brief_names_the_hazard_and_keeps_severity_guidance(self, lens):
+        text = (pnl.BUILTIN_BRIEFS_DIR / f"{lens}.md").read_text(encoding="utf-8")
+        for needle in _P78[lens]:
+            assert needle in text
+        assert "`blocker`" in text and "`major`" in text and "`minor`" in text
+
+    def test_project_policy_items_are_not_in_any_packaged_brief(self):
+        for f in sorted(pnl.BUILTIN_BRIEFS_DIR.glob("*.md")):
+            low = f.read_text(encoding="utf-8").lower()
+            assert [w for w in _P78_POLICY if w in low] == [], f.name
+
+    def test_scope_brief_is_untouched(self):
+        low = (pnl.BUILTIN_BRIEFS_DIR / "scope.md").read_text(encoding="utf-8").lower()
+        assert "references that do not exist" not in low and "xfail" not in low
+
+    @pytest.mark.parametrize("lens", sorted(_P78))
+    def test_preview_delivers_the_new_item(self, paneled, capsys, lens):
+        assert pnl.panel_command(["preview", "--lens", lens], project_root=paneled) == 0
+        out = capsys.readouterr().out
+        for needle in _P78[lens]:
+            assert needle in out
+
+    def test_a_project_override_still_replaces_the_builtin(self, paneled, capsys):
+        ov = paneled / ".tagteam" / "panels" / "lenses"
+        ov.mkdir(parents=True, exist_ok=True)
+        (ov / "correctness.md").write_text("# Lens: correctness\nproject policy only\n", encoding="utf-8")
+        assert pnl.panel_command(["preview", "--lens", "correctness"], project_root=paneled) == 0
+        out = capsys.readouterr().out
+        assert "project policy only" in out and "references that do not exist" not in out
+
+    def test_contract_is_unchanged_by_this_phase(self):
+        for f in (REPO / "plugin" / "skills" / "handoff" / "SKILL.md", SKILL_SRC):
+            low = Path(f).read_text(encoding="utf-8").lower()
+            assert "rollback" not in low and "new dependency" not in low and "xfail" not in low
