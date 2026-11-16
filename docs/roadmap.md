@@ -8,6 +8,10 @@ Tagteam - A collaboration framework enabling structured, multi-phase AI-to-AI co
 **Workflow:** Lead / Reviewer with Human Arbiter
 
 ## Phases
+### Phase 77: Panel turn notice
+- **Status:** Implementation review. Plan approved round 1 (2026-11-15). See `docs/phases/panel-turn-notice.md`.
+- **Description:** When the reviewer panel takes a reviewer turn, nothing tells the arbiter: the lenses run headless and log only in the watcher tab, and the interactive reviewer pane is never sent the turn, so it looks asleep. Field report from QA (3.14.11, Phase 48 impl r1 to r8, and before on 2026-09-12): the arbiter nudged the Codex pane every impl round, producing reviews outside the panel. Add a desktop notification when a panel run claims an attempt and when its merged verdict lands, a watcher start line saying the pane stays quiet on paneled turns, and one contract sentence. No change to how the panel runs or merges.
+
 ### Phase 76: Field fixes
 - **Status:** ✅ Complete — plan approved round 1, impl approved round 2 (2026-10-16); gate: 2,693 passed, 5 skipped at `33c7e94`. Merged (PR #66). See `docs/phases/field-fixes.md`.
 - **Description:** Three defects found on real projects and still present in 3.14.10. (1) A roadmap heading's trailing `(slug)` is ignored: Liminal's `… (answer-later)` gets the slug `ask-your-words-answer-me-later-answer-later`, so `roadmap queue answer-later` fails. Now a kebab-case `(slug)` with a hyphen, or any `` (`slug`) ``, is the phase slug; measured over the 43 registered projects, only Liminal and perfalyzer change. (2) The cockpit lead's state line prints `turn None` and leaves out `result`. (3) In the iTerm2 backend, shell startup (oh-my-zsh's update prompt) can eat the injected `cd`, so the lead launches in `~`. Each tab's `session.path` is now checked before launch, with one re-sent `cd`, and launch lines carry their own `cd … &&`.

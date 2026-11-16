@@ -1,0 +1,31 @@
+{
+  "state": "approved",
+  "ready_for": null,
+  "round": 1,
+  "phase": "panel-turn-notice",
+  "type": "plan",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-10-29",
+  "baseline": {
+    "sha": "1c3cc828982c75b93b8baf106033b4a3358ad542",
+    "dirty_paths": [
+      "A  docs/phases/panel-turn-notice.md",
+      "M  docs/roadmap.md"
+    ],
+    "captured_at": "2026-10-29T12:25:25.740615+00:00",
+    "source": "plan-init"
+  },
+  "impl_boundary": {
+    "sha": "1c3cc828982c75b93b8baf106033b4a3358ad542",
+    "dirty": {
+      "docs/phases/panel-turn-notice.md": "70b6e775b1632a637559ba1e8fe8465bb2c373d328d9ae90745b1b6a74f8cc89",
+      "docs/roadmap.md": "4d066b9e3ce45ef896b94055dfa13bf5648d6fbccb5b460f90a1d47793bb6d3b",
+      "docs/handoffs/panel-turn-notice_plan_rounds.jsonl": "5544c4279b3d1ea52cb829d65e2f9698d768a210844116f14458fa12d57cedf8",
+      "docs/handoffs/panel-turn-notice_plan_status.json": "773bf7bf995980c0aa953d706ca2ae954d41e7387a85c7f804177a25e56e5fd8",
+      "docs/tagteam-issue-review-criteria-ai-output-2026-11-15.md": "d3b88dc456b829c53bfc05febdee82b89635bd484b9ae45851c461ca30af5437"
+    },
+    "captured_at": "2026-11-16T07:44:31.917080+00:00",
+    "source": "plan-approve"
+  }
+}
