@@ -1316,3 +1316,192 @@ class TestComposePromptWithNewBlocks:
         assert out.index(h.CHANGE_SURFACE_HEADER) < out.index("=== HANDOFF CONTRACT")
         assert "project rules" in out
         assert "x.py" in out
+
+
+# ------------------------------------------------ Phase 80: atomic marker ----
+
+class TestMarkerIsReplacedAtomically:
+    """`inflight.json` is published with a temp file + `os.replace`, so a
+    lock-free reader never sees it empty while a turn holds the slot."""
+
+    @staticmethod
+    def _root(tmp_path):
+        root = tmp_path / "proj"
+        (root / ".tagteam").mkdir(parents=True)
+        return root
+
+    @staticmethod
+    def _claim(root, **extra):
+        from tagteam import procs
+        fields = {"stem": "s1", "pid": None, "watcher_pid": os.getpid(),
+                  "watcher_ident": procs.identity(os.getpid())}
+        fields.update(extra)
+        return h.claim_turn_slot(root, kind=h.SLOT_KIND_CONVERSATION, role="lead", fields=fields)
+
+    @staticmethod
+    def _leftovers(root):
+        return sorted(f.name for f in h.turns_dir(root).iterdir() if f.name != h.INFLIGHT_NAME)
+
+    def test_reader_sees_the_whole_previous_marker_until_the_replace(self, tmp_path, monkeypatch):
+        root = self._root(tmp_path)
+        claim = self._claim(root)
+        seen = []
+        real = os.replace
+
+        def spy(src, dst):
+            # the instant before publication: what a lock-free reader gets
+            seen.append((h.inflight_path(root).read_text(encoding="utf-8"),
+                         h.read_inflight(root), h.slot_status(root)["held"]))
+            return real(src, dst)
+
+        monkeypatch.setattr(h.os, "replace", spy)
+        assert h.update_turn_slot(claim, pid=4242) is True
+        assert len(seen) == 1
+        raw, marker, held = seen[0]
+        assert raw.strip() and json.loads(raw)["pid"] is None      # complete, and still the old one
+        assert marker["owner_token"] == claim.token and held is True
+        after = h.read_inflight(root)
+        assert after["pid"] == 4242 and after["owner_token"] == claim.token
+        assert self._leftovers(root) == []
+
+    def test_a_failed_replace_keeps_the_previous_marker_and_no_temp_file(self, tmp_path, monkeypatch):
+        root = self._root(tmp_path)
+        claim = self._claim(root)
+        before = h.inflight_path(root).read_bytes()
+        calls = []
+
+        def boom(src, dst):
+            calls.append(src)
+            raise OSError("disk says no")
+
+        monkeypatch.setattr(h.os, "replace", boom)
+        assert h.update_turn_slot(claim, pid=4242) is False
+        assert len(calls) == 1, "an unrelated OSError is not retried"
+        assert h.inflight_path(root).read_bytes() == before
+        assert h.slot_status(root)["held"] is True
+        assert self._leftovers(root) == []
+
+    def test_a_failed_temp_write_keeps_the_previous_marker_and_no_temp_file(self, tmp_path, monkeypatch):
+        root = self._root(tmp_path)
+        claim = self._claim(root)
+        before = h.inflight_path(root).read_bytes()
+        real = Path.write_text
+        replaced = []
+
+        def partial_then_fail(self, data, *a, **k):
+            if self.name.endswith(".tmp"):
+                real(self, data[: len(data) // 2], *a, **k)      # a half-written temp file
+                raise OSError("no space left on device")
+            return real(self, data, *a, **k)
+
+        monkeypatch.setattr(Path, "write_text", partial_then_fail)
+        monkeypatch.setattr(h.os, "replace", lambda *a: replaced.append(a))
+        assert h.update_turn_slot(claim, pid=4242) is False
+        assert replaced == [], "nothing is published when the temp write failed"
+        assert h.inflight_path(root).read_bytes() == before
+        assert self._leftovers(root) == []
+
+    def test_a_failed_first_claim_leaves_no_marker_and_no_temp_file(self, tmp_path, monkeypatch):
+        root = self._root(tmp_path)
+
+        def boom(src, dst):
+            raise OSError("disk says no")
+
+        monkeypatch.setattr(h.os, "replace", boom)
+        with pytest.raises(OSError):
+            self._claim(root)
+        assert h.read_inflight(root) is None and not h.inflight_path(root).exists()
+        assert self._leftovers(root) == []
+        monkeypatch.undo()
+        again = self._claim(root)                                   # the slot is still claimable
+        assert h.release_turn_slot(again) is True
+
+    def test_claim_update_release_leave_nothing_behind(self, tmp_path):
+        root = self._root(tmp_path)
+        claim = self._claim(root)
+        assert self._leftovers(root) == []
+        assert h.update_turn_slot(claim, pid=1) and h.update_turn_slot(claim, pid=2)
+        assert self._leftovers(root) == []
+        assert h.release_turn_slot(claim) is True
+        assert list(h.turns_dir(root).iterdir()) == []
+
+    def test_windows_retry_transient_permission_error_then_success(self, tmp_path, monkeypatch):
+        root = self._root(tmp_path)
+        claim = self._claim(root)
+        real = os.replace
+        calls, naps = [], []
+
+        def flaky(src, dst):
+            calls.append(src)
+            if len(calls) < 3:
+                raise PermissionError("a reader has it open")
+            return real(src, dst)
+
+        monkeypatch.setattr(h, "_REPLACE_RETRIES_APPLY", True)
+        monkeypatch.setattr(h.os, "replace", flaky)
+        monkeypatch.setattr(h.time, "sleep", naps.append)
+        assert h.update_turn_slot(claim, pid=4242) is True
+        assert len(calls) == 3 and naps == [h._REPLACE_RETRY_S] * 2
+        assert h.read_inflight(root)["pid"] == 4242 and self._leftovers(root) == []
+
+    def test_windows_retry_is_bounded_and_exhaustion_fails_the_write(self, tmp_path, monkeypatch):
+        root = self._root(tmp_path)
+        claim = self._claim(root)
+        before = h.inflight_path(root).read_bytes()
+        calls, naps = [], []
+
+        def held_open(src, dst):
+            calls.append(src)
+            raise PermissionError("a reader has it open")
+
+        monkeypatch.setattr(h, "_REPLACE_RETRIES_APPLY", True)
+        monkeypatch.setattr(h.os, "replace", held_open)
+        monkeypatch.setattr(h.time, "sleep", naps.append)
+        assert h.update_turn_slot(claim, pid=4242) is False
+        assert len(calls) == h._REPLACE_ATTEMPTS and len(naps) == h._REPLACE_ATTEMPTS - 1
+        assert h.inflight_path(root).read_bytes() == before and self._leftovers(root) == []
+
+    def test_no_retry_where_it_does_not_apply(self, tmp_path, monkeypatch):
+        root = self._root(tmp_path)
+        claim = self._claim(root)
+        calls, naps = [], []
+
+        def denied(src, dst):
+            calls.append(src)
+            raise PermissionError("read-only directory")
+
+        monkeypatch.setattr(h, "_REPLACE_RETRIES_APPLY", False)
+        monkeypatch.setattr(h.os, "replace", denied)
+        monkeypatch.setattr(h.time, "sleep", naps.append)
+        assert h.update_turn_slot(claim, pid=4242) is False
+        assert len(calls) == 1 and naps == []
+
+    def test_held_slot_never_reads_free_during_rewrites(self, tmp_path):
+        """Supporting evidence only (a race test that passes proves little;
+        the before-replace test above is what pins the behaviour). Before
+        Phase 80 this reported a held slot free within a few hundred reads."""
+        root = self._root(tmp_path)
+        claim = self._claim(root, state_line="x" * 400)
+        stop = threading.Event()
+        updates = [0]
+
+        def writer():
+            while not stop.is_set():
+                h.update_turn_slot(claim, pid=updates[0])
+                updates[0] += 1
+
+        t = threading.Thread(target=writer)
+        t.start()
+        try:
+            free = reads = 0
+            deadline = time.monotonic() + 1.5
+            while time.monotonic() < deadline:
+                reads += 1
+                if h.read_inflight(root) is None:
+                    free += 1
+        finally:
+            stop.set()
+            t.join()
+        assert updates[0] > 50 and reads > 50
+        assert free == 0, f"{free} of {reads} reads saw no marker during {updates[0]} rewrites"
+
