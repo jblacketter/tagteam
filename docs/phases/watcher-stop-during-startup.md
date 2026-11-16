@@ -4,7 +4,7 @@
 - [x] Planning (approved round 2, 2026-11-16)
 - [x] Implementation
 - [x] Implementation Review: approved round 1 (2026-11-16); gate: 2,720 passed, 7 skipped at `cc7eea5`
-- [ ] Complete
+- [x] Complete
 
 ## Summary
 `tagteam watch` turns SIGTERM into `KeyboardInterrupt` (`_install_sigterm_as_interrupt`, called
