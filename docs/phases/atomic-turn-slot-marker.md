@@ -4,7 +4,7 @@
 - [x] Planning (approved round 1, 2026-11-16)
 - [x] Implementation
 - [x] Implementation Review: approved round 1 (2026-11-16); gate: 2,737 passed, 7 skipped at `1214cb7`
-- [ ] Complete
+- [x] Complete
 
 ## Summary
 The turn slot is one file, `.tagteam/turns/inflight.json`. `claim_turn_slot()` and
