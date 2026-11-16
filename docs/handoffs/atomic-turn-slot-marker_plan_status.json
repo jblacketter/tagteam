@@ -1,0 +1,25 @@
+{
+  "state": "approved",
+  "ready_for": null,
+  "round": 1,
+  "phase": "atomic-turn-slot-marker",
+  "type": "plan",
+  "lead": "claude",
+  "reviewer": "codex",
+  "date": "2026-11-16",
+  "baseline": {
+    "sha": "9660c4f443e40e972e212a4ad6e85e1cffd3ac52",
+    "dirty_paths": [],
+    "captured_at": "2026-11-16T15:37:32.235158+00:00",
+    "source": "plan-init"
+  },
+  "impl_boundary": {
+    "sha": "9660c4f443e40e972e212a4ad6e85e1cffd3ac52",
+    "dirty": {
+      "docs/handoffs/atomic-turn-slot-marker_plan_rounds.jsonl": "16a713f315be787719796d8d16850833e8206bc71dfcf303dad67a7a42283d1b",
+      "docs/handoffs/atomic-turn-slot-marker_plan_status.json": "adf422f140495524fdb861fad32d58c5a16ed1a0bce808eb3364b1fa4147c911"
+    },
+    "captured_at": "2026-11-16T15:38:20.567778+00:00",
+    "source": "plan-approve"
+  }
+}

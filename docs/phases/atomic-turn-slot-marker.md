@@ -1,8 +1,8 @@
 # Phase 80: The turn slot marker is replaced atomically
 
 ## Status
-- [ ] Planning
-- [ ] Implementation
+- [x] Planning (approved round 1, 2026-11-16)
+- [x] Implementation
 - [ ] Implementation Review
 - [ ] Complete
 
@@ -51,13 +51,17 @@ directory and moves it over `inflight.json` with `os.replace`. `claim_turn_slot(
 `controls.py` only read or unlink it).
 
 - A reader now sees the whole old marker or the whole new one, never an empty or partial file.
-- The temporary file is named so nothing mistakes it for a turn log (`prune_turn_logs` keys on
-  `.log` / `.events.jsonl` suffixes) and is removed if the write or the replace fails.
+- The temporary file (`.inflight.json.<pid>.<hex>.tmp`) is removed if the write or the replace
+  fails. It is not invisible to `prune_turn_logs`, which counts every regular file in `turns/`
+  except `inflight.json` (reviewer, round 1): a leftover from a killed process would count as one
+  stem there and never be deleted by it. No pruning change in this phase.
 - On failure the previous marker is left untouched. `update_turn_slot()` keeps its contract and
   returns `False`; `claim_turn_slot()` raises as it does today when the write fails.
 - `os.replace` over a file another process has open can raise `PermissionError` on Windows.
-  The helper retries a few times over a short, bounded interval before giving up. On POSIX the
-  first attempt always decides.
+  The helper retries that one error, on Windows only, 5 attempts 20 ms apart, then lets it
+  propagate (`update_turn_slot()` returns `False`, `claim_turn_slot()` raises). No other `OSError`
+  is retried, and on POSIX the first attempt always decides. Simulated failures test the retry
+  logic; they do not establish Windows behaviour, and there is no Windows run for this phase.
 
 ### 2. Readers are unchanged
 `read_inflight()` keeps returning `None` for a file it cannot parse. With atomic writes our own
@@ -71,7 +75,11 @@ In `tests/test_headless.py`, beside the existing slot tests:
   After the update it is the complete new marker.
 - A replace that fails leaves the previous marker in place, `update_turn_slot()` returns `False`,
   and no temporary file is left in `turns/`.
-- A failed first claim leaves no marker and no temporary file.
+- A temporary-file write that fails half way (reviewer, round 1) publishes nothing, leaves the
+  previous marker and no temporary file.
+- A failed first claim leaves no marker and no temporary file, and the slot is claimable after.
+- Retry (reviewer, round 1): a transient `PermissionError` followed by success; exhaustion after
+  exactly the bounded number of attempts; no retry where it does not apply.
 - After claim, update and release, `turns/` holds no temporary file.
 - A short two-thread run (updates against `slot_status()`): zero reads report free. This one is
   supporting evidence only; a race test that passes proves little, the two tests above are the
@@ -118,3 +126,21 @@ inside its existing `try/except OSError: return False`. Writers are already seri
    test on `main`.
 4. The full suite passes in the gate's run, and CI is green on the PR.
 5. No change to the marker's fields, the claim or release rules, or any reader.
+
+## Closeout
+Implemented as planned, with the reviewer's three additions (retry scoped to the replace and to
+Windows with exhaustion propagated; a temp-write failure test; no claim that the temp file is
+invisible to pruning).
+
+- `tagteam/headless.py`: `_write_marker()` and `_replace_marker()`; `claim_turn_slot()` and
+  `update_turn_slot()` call the helper. Nothing else changed.
+- `tests/test_headless.py`: `TestMarkerIsReplacedAtomically`, 9 tests.
+
+Verification before submission:
+- Against the unfixed `headless.py`, 8 of the 9 new tests fail (the ninth only checks that
+  nothing is left behind, which was already true).
+- The CI reproduction (real `Path.write_text` slowed to truncate, 1 s, write on marker files; the
+  server's slot read delayed 0.4 s): failed 3 of 3 on `main`, passes 3 of 3 with the fix.
+- The five test files that use the slot (`test_headless`, `test_lead_chat`, `test_launchpad`,
+  `test_briefer`, `test_gatekeeper`): 359 passed.
+- Not verified: Windows.

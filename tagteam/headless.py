@@ -1181,6 +1181,48 @@ def slot_status(project_root: str | Path) -> dict:
     return {"held": not gone, "marker": m, "reason": why}
 
 
+# Phase 80: the marker is PUBLISHED atomically. Readers (`read_inflight`) take
+# no lock, and `Path.write_text` truncates before it writes, so a reader that
+# landed in between saw an empty file and reported a held slot as free.
+_REPLACE_ATTEMPTS = 5          # Windows only: `os.replace` over a file a reader has open
+_REPLACE_RETRY_S = 0.02
+_REPLACE_RETRIES_APPLY = os.name == "nt"
+
+
+def _replace_marker(tmp: Path, path: Path) -> None:
+    """`os.replace(tmp, path)`. On Windows a reader holding `path` open makes
+    it raise PermissionError, so that one error is retried a few times over a
+    short, bounded interval; exhaustion and every other error propagate."""
+    attempts = _REPLACE_ATTEMPTS if _REPLACE_RETRIES_APPLY else 1
+    for i in range(attempts):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if i == attempts - 1:
+                raise
+            time.sleep(_REPLACE_RETRY_S)
+
+
+def _write_marker(path: Path, marker: dict) -> None:
+    """Write the whole marker beside `path`, then move it into place: a reader
+    sees the complete previous marker or the complete new one. On any failure
+    the previous marker is untouched and the temporary file is removed.
+    Callers hold the writer lock; the unique name only keeps a leftover from a
+    killed process from being reused."""
+    import secrets
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp")
+    try:
+        tmp.write_text(json.dumps(marker, indent=2), encoding="utf-8")
+        _replace_marker(tmp, path)
+    except BaseException:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+
+
 def claim_turn_slot(project_root: str | Path, *, kind: str, role: str,
                     fields: dict) -> SlotClaim:
     """Atomically claim the slot; raise SlotBusy if held. `fields` are the
@@ -1206,7 +1248,7 @@ def claim_turn_slot(project_root: str | Path, *, kind: str, role: str,
         marker["role"] = role
         marker["owner_token"] = token
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(marker, indent=2), encoding="utf-8")
+        _write_marker(path, marker)
         return SlotClaim(token=token, marker=marker, path=path, root=root, recovered_from=recovered)
 
 
@@ -1222,7 +1264,7 @@ def update_turn_slot(claim: SlotClaim, **fields) -> bool:
             return False
         claim.marker.update(fields)
         try:
-            claim.path.write_text(json.dumps(claim.marker, indent=2), encoding="utf-8")
+            _write_marker(claim.path, claim.marker)
         except OSError:
             return False
         return True
