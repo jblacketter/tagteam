@@ -113,6 +113,12 @@ def _proc(mode, project, spec, engine=None, gate=None):
                            pre_send_delay=0, engine=engine, gatekeeper=gate, panel=spec)
 
 
+def _dispatches(mock) -> list:
+    """Phase 77: the panel's own desktop notices ("Panel reviewing …", "Panel: <verdict> …")
+    are not dispatches — a notify-mode dispatch reads "<agent>'s turn: …"."""
+    return [c for c in mock.call_args_list if not str(c.args[1]).startswith("Panel")]
+
+
 MODES = [("notify", "tagteam.watcher.notify_macos"), ("tmux", "tagteam.watcher.send_tmux_keys"),
          ("iterm2", "tagteam.watcher.send_iterm_command")]
 
@@ -679,17 +685,18 @@ class TestWatcherPanel:
         with patch(target) as send, quiet:
             send.return_value = True
             p.tick(st)
-            send.assert_not_called()                                # merged: the entry is the turn
+            sent = lambda: _dispatches(send) if mode == "notify" else send.call_args_list
+            assert sent() == []                                     # merged: the entry is the turn
             new = _state(paneled)
             assert new["turn"] == "lead" and new["seq"] == st["seq"] + 1
             p.tick(new)                                             # the lead is dispatched as usual
-            assert send.call_count == 1
+            assert len(sent()) == 1
             # lead re-submits; a lens fails → fallback → the ordinary reviewer IS dispatched
             cycle_mod.add_round("feat-x", "impl", "lead", "SUBMIT_FOR_REVIEW", 2, "again", str(paneled), updated_by="Claude")
             _verdicts(monkeypatch, {"correctness": "approve", "scope": "no-file", "verification": "approve"})
             st2 = _state(paneled)
             p.tick(st2)
-            assert send.call_count == 2 and _entries(paneled)[-1]["round"] == 1
+            assert len(sent()) == 2 and _entries(paneled)[-1]["round"] == 1
             assert _rows(paneled)[-1]["status"] == "fallback"
 
     def test_headless_merged_skips_engine_fallback_runs_it(self, paneled, monkeypatch):
@@ -728,7 +735,7 @@ class TestWatcherPanel:
             h.release_turn_slot(claim)
             p.tick(st)                                              # identical tick decides (all approve → merged)
             assert p._panel_owed_seq is None and _rows(paneled)[0]["status"] == "merged"
-            if send: send.assert_not_called()
+            if send: assert (_dispatches(send) if mode == "notify" else send.call_args_list) == []
             if eng: eng.run_owed_turn.assert_not_called()
 
     def test_gate_bounce_means_no_panel_gate_pass_then_panel(self, paneled, monkeypatch):
@@ -755,7 +762,7 @@ class TestWatcherPanel:
         st2 = _state(paneled)
         with patch("tagteam.watcher.notify_macos") as notify:
             p.tick(st2)
-            notify.assert_not_called()
+            assert _dispatches(notify) == [] and notify.call_count == 2    # Phase 77: start + verdict notices
         rounds = cycle_mod.read_rounds_file("feat-x", "impl", str(paneled))
         actions = [(e["role"], e["action"]) for e in rounds if e["round"] == 2]
         assert actions == [("lead", "SUBMIT_FOR_REVIEW"), ("gatekeeper", "GATE_PASS"), ("reviewer", "APPROVE")]
@@ -884,7 +891,8 @@ class TestRound2:
             p.tick(st)                                                        # identical tick → fresh attempt
             assert p._panel_owed_seq is None
             assert [r["status"] for r in _rows(paneled)] == ["superseded", "merged"]
-            notify.assert_not_called()
+            assert _dispatches(notify) == []
+            assert len(notify.call_args_list) == 3              # Phase 77: one per claimed attempt + the verdict
             eng.run_owed_turn.assert_not_called()
         assert _state(paneled)["status"] == "done"                            # merged APPROVE
 
@@ -940,7 +948,7 @@ class TestRound2:
         with patch("tagteam.watcher.notify_macos") as notify:
             p.tick(st)
             t.join(60)
-            notify.assert_not_called()
+            assert _dispatches(notify) == []
         assert outcome.get("rc") == 0
         rows = _rows(paneled)
         assert len(rows) == 1 and rows[0]["status"] == "error" and "cancelled by jack" in rows[0]["reason"]
@@ -967,7 +975,7 @@ class TestRound2:
             controls.resume_command([], project_root=paneled)
             p.tick(st)
             assert [r["status"] for r in _rows(paneled)] == ["error", "merged"] and _rows(paneled)[-1]["attempt"] == 2
-            notify.assert_not_called()
+            assert _dispatches(notify) == []
         assert _state(paneled)["status"] == "done" and _delivered(paneled)[n1] is not None
 
     def test_context_bounded_tail_note_scoping_gate_report_and_preview_parity(self, paneled, monkeypatch, capsys):
@@ -1029,3 +1037,141 @@ class TestRound2:
         p = _build_processor(mode="notify", lead_pane="l", reviewer_pane="r", confirm=False, timeout_minutes=30,
                              project_dir=str(paneled), max_retries=1, retry_delay=0, pre_send_delay=0)
         assert p.panel.tail_n == h.DEFAULT_TAIL_ROUNDS
+
+
+# ---------------------------------------------------------------------------
+# Phase 77: a panel turn is announced where the arbiter is looking
+# ---------------------------------------------------------------------------
+
+class _Rec:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, title, message):
+        self.calls.append((title, message))
+
+
+class TestPanelTurnNotice:
+    def test_claimed_attempt_notifies_once(self, paneled):
+        rec = _Rec()
+        res = _run(paneled, notify=rec)
+        assert res.status == "merged"
+        assert rec.calls == [("Tagteam", "Panel reviewing feat-x impl r1 (correctness, scope, verification). "
+                                         "The Codex pane is not used for this turn.")]
+
+    def test_reviewer_name_unset_says_reviewer(self, paneled):
+        spec = _spec(paneled)
+        spec.reviewer_name = None
+        rec = _Rec()
+        _run(paneled, spec=spec, notify=rec)
+        assert len(rec.calls) == 1 and "The Reviewer pane is not used" in rec.calls[0][1]
+
+    def test_already_decided_is_silent(self, paneled):
+        assert _run(paneled).status == "merged"
+        rec = _Rec()
+        # the merged entry moved the turn → no reviewer-ready submission any more
+        assert _run(paneled, notify=rec).status == "not-ready" and rec.calls == []
+
+    def test_decided_fallback_is_silent_on_later_calls(self, paneled, monkeypatch):
+        _verdicts(monkeypatch, {"correctness": "approve", "scope": "no-file", "verification": "approve"})
+        rec = _Rec()
+        assert _run(paneled, notify=rec).status == "fallback" and len(rec.calls) == 1
+        assert _run(paneled, notify=rec).status == "fallback" and len(rec.calls) == 1   # decided row: no claim
+
+    def test_deferred_slot_busy_is_silent(self, paneled):
+        claim = h.claim_turn_slot(paneled, kind=h.SLOT_KIND_CONVERSATION, role="lead",
+                                  fields={"stem": "conv", "watcher_pid": os.getpid(),
+                                          "watcher_ident": procs.identity(os.getpid())})
+        rec = _Rec()
+        try:
+            assert _run(paneled, notify=rec).status == "deferred"
+            assert _run(paneled, notify=rec).status == "deferred"     # retried every tick: must not spam
+        finally:
+            h.release_turn_slot(claim)
+        assert rec.calls == []
+
+    def test_not_ready_not_applicable_and_stale_are_silent(self, project, fake_path, monkeypatch):
+        rec = _Rec()
+        _enable(project)
+        assert _run(project, notify=rec).status == "not-ready"         # no cycle at all
+        _init_cycle(project)                                            # a plan cycle, panel on impl only
+        _verdicts(monkeypatch, default="approve")
+        assert _run(project, notify=rec).status == "not-applicable"
+        _enable(project, on="[plan]")
+        stale = dict(_state(project))
+        cycle_mod.add_round("feat-x", "plan", "reviewer", "REQUEST_CHANGES", 1, "no", str(project), updated_by="Codex")
+        cycle_mod.add_round("feat-x", "plan", "lead", "SUBMIT_FOR_REVIEW", 2, "again", str(project), updated_by="Claude")
+        assert _run(project, state=stale, notify=rec).status == "stale"
+        assert rec.calls == []
+
+    def test_raising_notifier_does_not_change_the_result(self, paneled):
+        def boom(title, message):
+            raise RuntimeError("no notification centre")
+        logs = []
+        res = _run(paneled, notify=boom, log=logs.append)
+        assert res.status == "merged" and res.decision == "APPROVE" and res.dispatch is False
+        assert _entries(paneled)[-1]["action"] == "APPROVE" and _rows(paneled)[0]["status"] == "merged"
+        assert any("notify failed: RuntimeError" in l for l in logs)
+
+    def test_manual_run_passes_no_notifier(self, paneled, capsys):
+        with patch.object(pnl, "run_panel", return_value=pnl.PanelResult("not-ready", False, "x")) as rp:
+            pnl.panel_command(["run"], project_root=paneled)
+        assert rp.call_count == 1 and rp.call_args.kwargs.get("notify") is None
+
+    @pytest.mark.parametrize("decision,tail", [("REQUEST_CHANGES", "Turn is Claude's."), ("APPROVE", "Cycle approved."),
+                                               ("NEED_HUMAN", "Waiting on the arbiter.")])
+    def test_watcher_merged_notifies_the_verdict_once(self, paneled, decision, tail):
+        p = _proc("iterm2", paneled, _spec(paneled))
+        st = _state(paneled)
+        merged = pnl.PanelResult("merged", False, "ok", "k", 1, 1, decision, f"PANEL: {decision}")
+        with patch.object(pnl, "run_panel", return_value=merged) as rp, patch("tagteam.watcher.notify_macos") as n:
+            assert p._maybe_panel(st) is False
+        assert rp.call_args.kwargs["notify"] is n                       # the watcher hands its notifier in
+        assert [c.args for c in n.call_args_list] == [("Tagteam", f"Panel: {decision} on feat-x impl r1. {tail}")]
+
+    def test_watcher_fallback_and_undecided_do_not_notify_a_verdict(self, paneled):
+        p = _proc("iterm2", paneled, _spec(paneled))
+        st = _state(paneled)
+        for res, want in [(pnl.PanelResult("fallback", True, "a lens failed"), True),
+                          (pnl.PanelResult("deferred", False, "slot busy"), False),
+                          (pnl.PanelResult("merged", False, "decided merged (recorded)"), False)]:  # no decision known
+            with patch.object(pnl, "run_panel", return_value=res), patch("tagteam.watcher.notify_macos") as n:
+                assert p._maybe_panel(st) is want
+            assert n.call_count == 0
+
+    def test_watcher_verdict_notifier_failure_keeps_the_handoff(self, paneled):
+        p = _proc("iterm2", paneled, _spec(paneled))
+        merged = pnl.PanelResult("merged", False, "ok", "k", 1, 1, "APPROVE", "PANEL: APPROVE")
+        with patch.object(pnl, "run_panel", return_value=merged), \
+                patch("tagteam.watcher.notify_macos", side_effect=RuntimeError("x")):
+            assert p._maybe_panel(_state(paneled)) is False
+
+    def test_live_tick_raises_both_notices_and_sends_nothing_to_the_pane(self, paneled, monkeypatch):
+        _verdicts(monkeypatch, {"correctness": "request-changes", "scope": "approve", "verification": "approve"})
+        p = _proc("iterm2", paneled, _spec(paneled))
+        with patch("tagteam.watcher.send_iterm_command") as send, patch("tagteam.watcher.notify_macos") as n:
+            p.tick(_state(paneled))
+        send.assert_not_called()
+        msgs = [c.args[1] for c in n.call_args_list]
+        assert len(msgs) == 2 and msgs[0].startswith("Panel reviewing feat-x impl r1 (")
+        assert msgs[1] == "Panel: REQUEST_CHANGES on feat-x impl r1. Turn is Claude's."
+
+    @pytest.mark.parametrize("mode,shown", [("iterm2", True), ("terminal", True), ("tmux", True),
+                                            ("notify", False), ("headless", False)])
+    def test_start_banner_says_the_pane_will_be_quiet(self, paneled, mode, shown):
+        from tagteam import watcher
+        _enable(paneled, on="[plan, impl]")
+        p = _proc(mode, paneled, _spec(paneled))
+        logs = []
+        with patch.object(watcher, "_log", lambda m, **_kw: logs.append(m)), \
+                patch.object(watcher, "pane_exists", return_value=True):
+            watcher._log_startup_banner(p, 10)
+        line = "Panel: on plan/impl turns the reviewer pane is not sent the turn; the lenses run here."
+        assert (line in logs) is shown
+        assert any(l.startswith("Panel: on (plan, impl cycles;") for l in logs)
+
+    def test_contract_says_do_not_prompt_the_reviewer(self):
+        for f in (REPO / "plugin" / "skills" / "handoff" / "SKILL.md", SKILL_SRC):
+            text = Path(f).read_text(encoding="utf-8")
+            assert "a review made outside the panel is not part of the verdict" in text
+            assert "The exception is that fallback, where the reviewer is dispatched as usual." in text

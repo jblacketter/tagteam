@@ -1304,7 +1304,8 @@ class _StateProcessor:
         seq = state.get("seq")
         try:
             from tagteam import panel as _panel
-            res = _panel.run_panel(self.project_dir, kind="auto", spec=spec, state=state, log=_log)
+            res = _panel.run_panel(self.project_dir, kind="auto", spec=spec, state=state, log=_log,
+                                   notify=notify_macos)
         except Exception as e:  # the loop must never die because of the panel
             _log(f"   panel error: {type(e).__name__}: {e} — will retry", kind="panel", **_state_ctx(state))
             self._panel_owed_seq = seq
@@ -1324,8 +1325,25 @@ class _StateProcessor:
             return False
         if res.status == "merged":
             _log("   panel: merged — the panel's entry is the reviewer's response (reviewer not dispatched)", kind="panel", **_state_ctx(state))
+            self._notify_panel_verdict(res, state)
             return False
         return bool(res.dispatch)
+
+    def _notify_panel_verdict(self, res, state: dict) -> None:
+        """Phase 77: the moment the arbiter would otherwise nudge the silent
+        reviewer pane. Only for a verdict this run produced or recovered (a
+        decision is known); best-effort — it never changes the hand-off."""
+        decision = getattr(res, "decision", None)
+        if not decision:
+            return
+        try:
+            where = f"{state.get('phase')} {state.get('type')} r{state.get('round')}"
+            after = ("Cycle approved." if decision == "APPROVE"
+                     else "Waiting on the arbiter." if decision in ("ESCALATE", "NEED_HUMAN")
+                     else f"Turn is {self.lead_name}'s.")
+            notify_macos("Tagteam", f"Panel: {decision} on {where}. {after}")
+        except Exception as e:
+            _log(f"   panel: notify failed: {type(e).__name__}: {e}", kind="panel", **_state_ctx(state))
 
     def _maybe_gate(self, state: dict) -> bool:
         """Phase 38: run the gatekeeper for a reviewer-ready submission.
@@ -1530,6 +1548,8 @@ def _log_startup_banner(processor: _StateProcessor, interval: int) -> None:
     if pn is not None and getattr(pn, "enabled", False):
         _log(f"Panel: on ({', '.join(pn.on)} cycles; lenses: {', '.join(pn.lens_names)}; "
              f"reviewer via {pn.provider})")
+        if processor.mode in TAB_BACKENDS or processor.mode == "tmux":
+            _log(f"Panel: on {'/'.join(pn.on)} turns the reviewer pane is not sent the turn; the lenses run here.")
     if processor.mode == "tmux":
         _log(f"Panes: lead={processor.lead_pane},"
              f" reviewer={processor.reviewer_pane}")

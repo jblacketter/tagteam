@@ -35,6 +35,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 from tagteam import cycle as _cycle
 from tagteam.contract import CONTRACT_HOWTO
@@ -619,7 +620,8 @@ def run_lens(spec: PanelSpec, lens: Lens, index: int, sub: Submission, *, root: 
 
 
 def run_panel(root: str, *, kind: str = "auto", spec: PanelSpec | None = None, phase: str | None = None,
-              cycle_type: str | None = None, state: dict | None = None, log=None) -> PanelResult:
+              cycle_type: str | None = None, state: dict | None = None, log=None,
+              notify: Callable[[str, str], None] | None = None) -> PanelResult:
     from tagteam import dualwrite
     from tagteam.state import read_state
     root = str(Path(root).resolve())
@@ -706,6 +708,16 @@ def run_panel(root: str, *, kind: str = "auto", spec: PanelSpec | None = None, p
         stem_dir.mkdir(parents=True, exist_ok=True)
         log(f"   panel: {sub.event_key} attempt {attempt} ({kind}) — lenses: {', '.join(spec.lens_names)}"
             + (f"; notes: {note_ids}" if note_ids else ""))
+        if notify is not None:
+            # Phase 77: the reviewer pane is (correctly) never sent a paneled
+            # turn, so say where the review is happening. Once per claimed
+            # attempt; best-effort — a notifier failure never changes the run.
+            try:
+                who = (spec.reviewer_name or "reviewer").capitalize()
+                notify("Tagteam", f"Panel reviewing {sub.phase} {sub.type} r{sub.round} "
+                                  f"({', '.join(spec.lens_names)}). The {who} pane is not used for this turn.")
+            except Exception as e:
+                log(f"   panel: notify failed: {type(e).__name__}: {e}")
 
         # 3. context (once, the shared builder) + lenses (sequential)
         pre_entries = _round_log_len(root, sub.phase, sub.type)
